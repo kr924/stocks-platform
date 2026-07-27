@@ -4,6 +4,8 @@ from datetime import datetime
 from app.services.base_feed import BaseMarketFeed
 from app.config import UPSTOX_CLIENT_ID, UPSTOX_CLIENT_SECRET, UPSTOX_REDIRECT_URI
 
+from urllib.parse import quote
+
 class UpstoxAuthError(Exception):
     """Exception raised when Upstox authentication fails or is missing."""
     pass
@@ -14,11 +16,12 @@ class UpstoxMarketFeed(BaseMarketFeed):
         self.base_url = "https://api.upstox.com/v2"
 
     def get_auth_url(self) -> str:
+        encoded_redirect = quote(UPSTOX_REDIRECT_URI, safe="")
         return (
             f"https://api.upstox.com/v2/login/authorization/dialog"
             f"?response_type=code"
             f"&client_id={UPSTOX_CLIENT_ID}"
-            f"&redirect_uri={UPSTOX_REDIRECT_URI}"
+            f"&redirect_uri={encoded_redirect}"
         )
 
     def authenticate(self, code: str) -> str:
