@@ -4,6 +4,7 @@ from datetime import datetime
 from app.services.base_feed import BaseMarketFeed
 from app.config import UPSTOX_CLIENT_ID, UPSTOX_CLIENT_SECRET, UPSTOX_REDIRECT_URI
 
+import os
 from urllib.parse import quote
 
 class UpstoxAuthError(Exception):
@@ -16,11 +17,13 @@ class UpstoxMarketFeed(BaseMarketFeed):
         self.base_url = "https://api.upstox.com/v2"
 
     def get_auth_url(self) -> str:
-        encoded_redirect = quote(UPSTOX_REDIRECT_URI, safe="")
+        client_id = os.getenv("UPSTOX_CLIENT_ID", UPSTOX_CLIENT_ID)
+        redirect_uri = os.getenv("UPSTOX_REDIRECT_URI", UPSTOX_REDIRECT_URI)
+        encoded_redirect = quote(redirect_uri, safe="")
         return (
             f"https://api.upstox.com/v2/login/authorization/dialog"
             f"?response_type=code"
-            f"&client_id={UPSTOX_CLIENT_ID}"
+            f"&client_id={client_id}"
             f"&redirect_uri={encoded_redirect}"
         )
 
@@ -30,11 +33,14 @@ class UpstoxMarketFeed(BaseMarketFeed):
             "accept": "application/json",
             "Content-Type": "application/x-www-form-urlencoded"
         }
+        client_id = os.getenv("UPSTOX_CLIENT_ID", UPSTOX_CLIENT_ID)
+        client_secret = os.getenv("UPSTOX_CLIENT_SECRET", UPSTOX_CLIENT_SECRET)
+        redirect_uri = os.getenv("UPSTOX_REDIRECT_URI", UPSTOX_REDIRECT_URI)
         data = {
             "code": code,
-            "client_id": UPSTOX_CLIENT_ID,
-            "client_secret": UPSTOX_CLIENT_SECRET,
-            "redirect_uri": UPSTOX_REDIRECT_URI,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "redirect_uri": redirect_uri,
             "grant_type": "authorization_code"
         }
         response = requests.post(url, headers=headers, data=data)
