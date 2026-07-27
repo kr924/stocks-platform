@@ -1,5 +1,14 @@
 # Multi-stage Dockerfile for Indian Stock Market Intelligence Platform
 
+# Stage 1: Build React Frontend
+FROM node:20-slim AS frontend-builder
+WORKDIR /app/frontend
+COPY frontend/package*.json ./
+RUN npm install
+COPY frontend/ ./
+RUN npm run build
+
+# Stage 2: Python Backend & Static Server
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -13,9 +22,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY backend/requirements.txt ./backend/
 RUN pip install --no-cache-dir -r backend/requirements.txt
 
-# Copy full application code
+# Copy backend code and built frontend dist from Stage 1
 COPY backend/ ./backend/
-COPY frontend/dist ./frontend/dist
+COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
 WORKDIR /app/backend
 
