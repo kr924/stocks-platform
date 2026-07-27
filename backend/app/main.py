@@ -297,7 +297,8 @@ def auth_callback(code: str, db: Session = Depends(get_db), feed: BaseMarketFeed
         db.commit()
         
         # Redirect back to the frontend dashboard
-        return RedirectResponse(url="http://localhost:5173?auth=success")
+        frontend_url = os.getenv("FRONTEND_URL", "/").rstrip("/")
+        return RedirectResponse(url=f"{frontend_url}/?auth=success")
     except Exception as e:
         db.rollback()
         # In case of error, redirect to frontend with error flag
