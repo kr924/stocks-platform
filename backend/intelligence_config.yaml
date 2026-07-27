@@ -1,0 +1,265 @@
+# =============================================================================
+# Stock Market Intelligence Platform — Configuration
+# =============================================================================
+# All API keys, polling intervals, rate limits, and source toggles are 
+# configurable here. Environment variables override these values.
+# =============================================================================
+
+# --- General Settings ---
+general:
+  # Monitor scope: "all" (all ~2000 NSE equities), "nifty50", "watchlist"
+  monitor_scope: "all"
+  # Database URL (SQLite for local, PostgreSQL for cloud)
+  database_url: "sqlite:///./market_tracker.db"
+  # Log level: DEBUG, INFO, WARNING, ERROR
+  log_level: "INFO"
+
+# --- Polling Intervals (in seconds) ---
+polling:
+  nse_bse_announcements: 10         # 10 seconds (near real-time)
+  nse_bse_other: 45                 # 45 seconds
+  nse_bse_bulk_deals: 45            # 45 seconds
+  nse_bse_board_meetings: 60        # 1 minute
+  nse_bse_insider_trading: 60       # 1 minute
+  news_aggregator: 45               # 45 seconds
+  social_media: 45                  # 45 seconds
+  company_filings: 300              # 5 minutes
+  ai_analysis_queue: 60             # 1 minute
+  # Off-market hours multiplier (polling_interval * this value)
+  off_market_multiplier: 2          # e.g., 10s * 2 = 20s off-hours
+
+# --- Market Hours (IST) ---
+market_hours:
+  open: "09:00"
+  close: "16:30"
+  timezone: "Asia/Kolkata"
+  # Also run during pre-market (8:45 AM - 9:00 AM)?
+  include_pre_market: true
+  pre_market_open: "08:45"
+
+# --- Rate Limits (requests per minute per source) ---
+rate_limits:
+  nse_api: 12                # Max 12 requests/min to NSE
+  bse_api: 12                # Max 12 requests/min to BSE
+  google_news_rss: 20        # Max 20 requests/min to Google News RSS
+  newsdata_io: 5             # Free tier: ~200/day = ~0.14/min, being generous
+  twitter_api: 10            # If using paid API
+  general_rss: 30            # For individual source RSS feeds
+
+# --- NSE/BSE Data Sources ---
+nse_bse:
+  enabled: true
+  sources:
+    corporate_announcements:
+      enabled: true
+      nse_url: "https://www.nseindia.com/api/corporate-announcements?index=equities"
+      bse_url: "https://api.bseindia.com/BseIndiaAPI/api/AnnGetData/w"
+    bulk_block_deals:
+      enabled: true
+      nse_url: "https://www.nseindia.com/api/snapshot-capital-market-largedeal"
+    board_meetings:
+      enabled: true
+      nse_url: "https://www.nseindia.com/api/corporate-board-meetings?index=equities"
+    insider_trading:
+      enabled: true
+      nse_url: "https://www.nseindia.com/api/corporates-pit"
+    financial_results:
+      enabled: true
+      nse_url: "https://www.nseindia.com/api/corporates-financial-results?index=equities"
+  # Browser-like headers for NSE (required to avoid 403)
+  headers:
+    User-Agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    Accept: "application/json, text/plain, */*"
+    Accept-Language: "en-US,en;q=0.9"
+    Referer: "https://www.nseindia.com/"
+  # Cookie refresh interval (NSE requires a session cookie from the homepage)
+  cookie_refresh_interval: 300      # 5 minutes
+
+# --- News Sources ---
+news:
+  enabled: true
+  # Maximum articles to fetch per source per poll
+  max_articles_per_source: 20
+  # Maximum total articles to keep in DB (older ones get purged)
+  max_total_articles: 5000
+  # Article retention period (days)
+  retention_days: 30
+  
+  sources:
+    # --- MoneyControl (Direct RSS — high-value Indian market source) ---
+    moneycontrol:
+      enabled: true
+      type: "rss"
+      tier: 1
+      urls:
+        - "https://www.moneycontrol.com/rss/latestnews.xml"
+        - "https://www.moneycontrol.com/rss/buzzingstocks.xml"
+        - "https://www.moneycontrol.com/rss/marketreports.xml"
+        - "https://www.moneycontrol.com/rss/results.xml"
+        - "https://www.moneycontrol.com/rss/business.xml"
+
+    # --- MoneyControl Recommendations via Google News (buy/sell/target) ---
+    moneycontrol_recos:
+      enabled: true
+      type: "google_news_rss"
+      tier: 1
+      query: "site:moneycontrol.com buy sell target recommendation"
+      
+    # --- Analyst Ratings & Broker Recommendations (multi-source) ---
+    analyst_ratings:
+      enabled: true
+      type: "google_news_rss"
+      tier: 1
+      query: "analyst buy sell target price Indian stock NSE"
+
+    broker_ratings:
+      enabled: true
+      type: "google_news_rss"
+      tier: 1
+      query: "broker rating upgrade downgrade India stock target"
+
+    # --- Economic Times ---
+    economic_times:
+      enabled: true
+      type: "rss"
+      tier: 2
+      urls:
+        - "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms"
+        - "https://economictimes.indiatimes.com/markets/stocks/rssfeeds/2146842.cms"
+        - "https://economictimes.indiatimes.com/markets/stocks/earnings/rssfeeds/2154074.cms"
+      
+    # --- Business Standard (direct RSS blocked 403, use Google proxy) ---
+    business_standard:
+      enabled: true
+      type: "google_news_rss"
+      tier: 2
+      query: "site:business-standard.com Indian stock market"
+      
+    # --- Livemint ---
+    livemint:
+      enabled: true
+      type: "rss"
+      tier: 2
+      urls:
+        - "https://www.livemint.com/rss/markets"
+        - "https://www.livemint.com/rss/companies"
+      
+    # --- International Wires ---
+    reuters:
+      enabled: true
+      type: "google_news_rss"
+      tier: 1
+      query: "site:reuters.com India stock market"
+      
+    bloomberg:
+      enabled: true
+      type: "google_news_rss"
+      tier: 1
+      query: "site:bloomberg.com India stock market"
+      
+    # --- NDTV Profit ---
+    ndtv_profit:
+      enabled: true
+      type: "rss"
+      tier: 2
+      urls:
+        - "https://feeds.feedburner.com/ndtvprofit-latest"
+      
+    # --- General Market Catch-all ---
+    google_news_market:
+      enabled: true
+      type: "google_news_rss"
+      tier: 3
+      query: "Indian stock market NSE BSE"
+
+    # --- NewsData.io API (optional, needs API key) ---
+    newsdata_io:
+      enabled: false
+      type: "api"
+      tier: 2
+      api_key: ""                 # Override with env: NEWSDATA_IO_API_KEY
+      base_url: "https://newsdata.io/api/1/news"
+      daily_limit: 200
+      query: "stock market India NSE BSE"
+      language: "en"
+      country: "in"
+
+# --- Social Media ---
+social_media:
+  enabled: true
+  
+  twitter:
+    enabled: true
+    # Method: "rss" (free, via Google News), or "api" (paid, requires bearer token)
+    method: "rss"
+    bearer_token: ""
+    
+    tracked_accounts:
+      - "ETMarkets"
+      - "NDTVProfit"
+      - "monaborGuru"
+      - "ABORTING_IN"
+      - "livaborintbiz"
+    
+    keywords:
+      - "NSE"
+      - "BSE"
+      - "Nifty"
+      - "Sensex"
+      - "stock market India"
+      - "SEBI"
+
+# --- Company Filings ---
+filings:
+  enabled: true
+  sources:
+    quarterly_results:
+      enabled: true
+    investor_presentations:
+      enabled: true
+    conference_calls:
+      enabled: true
+      query: "conference call transcript India stock"
+    annual_reports:
+      enabled: true
+  pdf:
+    enabled: true
+    max_pages: 20
+    max_file_size_mb: 50
+
+# --- AI Analysis ---
+ai:
+  enabled: true
+  primary_provider: "groq"
+  fallback_providers:
+    - "gemini"
+    - "openai"
+    - "anthropic"
+    - "ollama"
+  batch_size: 10
+  thresholds:
+    alert_threshold: 0.6
+    critical_threshold: 0.85
+  max_prompt_tokens: 4000
+  cache_hours: 4
+
+# --- Notifications ---
+notifications:
+  browser:
+    enabled: true
+    min_severity: "high"
+  telegram:
+    enabled: false
+    bot_token: ""
+    chat_id: ""
+    min_severity: "critical"
+
+# --- Deduplication ---
+deduplication:
+  headline_similarity_threshold: 0.75
+  time_window_hours: 48
+  normalize_urls: true
+  story_clustering:
+    enabled: true
+    min_articles: 2
+    max_gap_hours: 24

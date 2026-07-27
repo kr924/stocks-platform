@@ -1,0 +1,29 @@
+# Secrets & Config
+backend/.env
+.env
+
+# Virtual Environment
+backend/.venv/
+.venv/
+env/
+venv/
+
+# Node Modules & Builds
+frontend/node_modules/
+frontend/dist/
+node_modules/
+
+# Databases & Cache
+*.db
+*.sqlite
+market_tracker.db
+backend/market_tracker.db
+__pycache__/
+*.pyc
+
+# Logs
+*.log
+
+# Media files
+*.png
+*.mp4
