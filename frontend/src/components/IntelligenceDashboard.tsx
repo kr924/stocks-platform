@@ -126,7 +126,7 @@ export function IntelligenceDashboard() {
   const [loadingFeed, setLoadingFeed] = useState(true);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
-  
+
   // Filter state
   const [filterCategory, setFilterCategory] = useState<string>("all");
   const [filterSentiment, setFilterSentiment] = useState<string>("all");
@@ -139,7 +139,7 @@ export function IntelligenceDashboard() {
   const [suggestions, setSuggestions] = useState<SuggestionItem[]>([]);
   const [stats, setStats] = useState<Stats24h | null>(null);
   const [unreadAlertsCount, setUnreadAlertsCount] = useState(0);
-  
+
   // Market sentiment state
   interface MarketSentimentData {
     sentiment: string;
@@ -356,6 +356,10 @@ export function IntelligenceDashboard() {
       setSseStatus("connecting");
       es = new EventSource(`${API_BASE}/api/intelligence/stream`);
       eventSourceRef.current = es;
+
+      es.onopen = () => {
+        setSseStatus("connected");
+      };
 
       es.addEventListener("connected", (e: MessageEvent) => {
         setSseStatus("connected");
@@ -742,7 +746,7 @@ export function IntelligenceDashboard() {
     }}>
       {/* LEFT COLUMN: Filters, Feed Stream, Modal */}
       <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-        
+
         {/* Header Stats Strip */}
         {stats && (
           <div style={{
@@ -915,28 +919,27 @@ export function IntelligenceDashboard() {
                   sseStatus === "connected"
                     ? "rgba(16, 185, 129, 0.1)"
                     : sseStatus === "connecting"
-                    ? "rgba(234, 179, 8, 0.1)"
-                    : "rgba(239, 68, 68, 0.1)",
-                border: `1px solid ${
-                  sseStatus === "connected"
+                      ? "rgba(234, 179, 8, 0.1)"
+                      : "rgba(239, 68, 68, 0.1)",
+                border: `1px solid ${sseStatus === "connected"
                     ? "rgba(16, 185, 129, 0.25)"
                     : sseStatus === "connecting"
-                    ? "rgba(234, 179, 8, 0.25)"
-                    : "rgba(239, 68, 68, 0.25)"
-                }`,
+                      ? "rgba(234, 179, 8, 0.25)"
+                      : "rgba(239, 68, 68, 0.25)"
+                  }`,
                 color:
                   sseStatus === "connected"
                     ? "#10b981"
                     : sseStatus === "connecting"
-                    ? "#eab308"
-                    : "#ef4444",
+                      ? "#eab308"
+                      : "#ef4444",
               }}
               title={
                 sseStatus === "connected"
                   ? `Live stream connected • ${sseClients} client(s) • ${streamEventCount} events received`
                   : sseStatus === "connecting"
-                  ? "Connecting to live stream..."
-                  : "Disconnected — reconnecting..."
+                    ? "Connecting to live stream..."
+                    : "Disconnected — reconnecting..."
               }
             >
               <span
@@ -948,15 +951,15 @@ export function IntelligenceDashboard() {
                     sseStatus === "connected"
                       ? "#10b981"
                       : sseStatus === "connecting"
-                      ? "#eab308"
-                      : "#ef4444",
+                        ? "#eab308"
+                        : "#ef4444",
                   display: "inline-block",
                   animation:
                     sseStatus === "connected"
                       ? "sse-pulse 2s ease-in-out infinite"
                       : sseStatus === "connecting"
-                      ? "sse-pulse 1s ease-in-out infinite"
-                      : "none",
+                        ? "sse-pulse 1s ease-in-out infinite"
+                        : "none",
                   boxShadow:
                     sseStatus === "connected"
                       ? "0 0 6px rgba(16, 185, 129, 0.6)"
@@ -966,8 +969,8 @@ export function IntelligenceDashboard() {
               {sseStatus === "connected"
                 ? "LIVE"
                 : sseStatus === "connecting"
-                ? "CONNECTING"
-                : "OFFLINE"}
+                  ? "CONNECTING"
+                  : "OFFLINE"}
             </div>
 
             <button
@@ -1474,7 +1477,7 @@ export function IntelligenceDashboard() {
                         <span>Nifty 50 Activity</span>
                         <span>Advances: <strong style={{ color: "#10b981" }}>{(marketSentiment as any).advances || 0}</strong> | Declines: <strong style={{ color: "#ef4444" }}>{(marketSentiment as any).declines || 0}</strong></span>
                       </div>
-                      
+
                       <div style={{
                         display: "flex",
                         height: "6px",
@@ -1496,7 +1499,7 @@ export function IntelligenceDashboard() {
                           transition: "width 0.5s ease-in-out"
                         }} />
                       </div>
-                      
+
                       <div style={{ display: "flex", justifyContent: "space-between", fontSize: "9px", color: "#475569" }}>
                         <span style={{ color: "#10b981", fontWeight: "600" }}>Buyers: {(marketSentiment as any).buyers_pct || 50}%</span>
                         <span style={{ color: "#ef4444", fontWeight: "600" }}>Sellers: {(marketSentiment as any).sellers_pct || 50}%</span>
@@ -1660,7 +1663,7 @@ export function IntelligenceDashboard() {
                 </button>
               )}
             </div>
-            
+
             <div style={{
               display: "flex",
               flexWrap: "wrap",
@@ -1679,8 +1682,8 @@ export function IntelligenceDashboard() {
                   const isUnread = !readStocks[stk.symbol] || readStocks[stk.symbol] !== stk.time;
                   const sentimentColor =
                     stk.sentiment === "positive" ? "#10b981" :
-                    stk.sentiment === "negative" ? "#ef4444" : "#64748b";
-                  
+                      stk.sentiment === "negative" ? "#ef4444" : "#64748b";
+
                   return (
                     <div
                       key={stk.symbol}
@@ -1779,7 +1782,7 @@ export function IntelligenceDashboard() {
                 Global/Stock News (Past 48h)
               </h2>
             </div>
-            
+
             <div style={{
               display: "flex",
               flexDirection: "column",
@@ -1906,7 +1909,7 @@ export function IntelligenceDashboard() {
                 Upcoming Earnings (7 Days)
               </h2>
             </div>
-            
+
             <div style={{
               display: "flex",
               flexDirection: "column",
@@ -1957,7 +1960,7 @@ export function IntelligenceDashboard() {
                         {new Date(earn.date).toLocaleDateString("en-IN", { month: "short", day: "numeric" })}
                       </span>
                     </div>
-                    
+
                     <div style={{
                       fontSize: "11px",
                       color: "#94a3b8",
@@ -2187,59 +2190,59 @@ export function IntelligenceDashboard() {
               {selectedItem.articles && selectedItem.articles.length > 0 && (
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                   <span style={{ fontSize: "11px", fontWeight: "600", color: "#64748b" }}>Similar Outlets:</span>
-                    {selectedItem.articles.map((art, idx) => (
-                      <a
-                        key={idx}
-                        href={art.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          backgroundColor: "rgba(255,255,255,0.02)",
-                          padding: "10px 14px",
-                          borderRadius: "8px",
-                          textDecoration: "none",
-                          color: "#93c5fd",
-                          fontSize: "12px",
-                          border: "1px solid rgba(255, 255, 255, 0.03)",
-                          transition: "all 0.2s"
-                        }}
-                        onMouseOver={(e) => {
-                          e.currentTarget.style.backgroundColor = "rgba(255, 255, 255, 0.05)";
-                          e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.08)";
-                        }}
-                        onMouseOut={(e) => {
-                          e.currentTarget.style.backgroundColor = "rgba(255, 255, 255, 0.02)";
-                          e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.03)";
-                        }}
-                      >
-                        <div style={{ display: "flex", flexDirection: "column", gap: "4px", width: "90%" }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                            <span style={{
-                              backgroundColor: "rgba(96, 165, 250, 0.1)",
-                              color: "#60a5fa",
-                              padding: "2px 6px",
-                              borderRadius: "4px",
-                              fontSize: "9px",
-                              fontWeight: "700"
-                            }}>
-                              {formatSourceName(art.source)}
-                            </span>
-                            {art.published_at && (
-                              <span style={{ fontSize: "9px", color: "#64748b" }}>
-                                {formatFullTimestamp(art.published_at)}
-                              </span>
-                            )}
-                          </div>
-                          <span style={{ color: "#cbd5e1", fontWeight: "500", lineHeight: "1.4" }}>
-                            {art.headline}
+                  {selectedItem.articles.map((art, idx) => (
+                    <a
+                      key={idx}
+                      href={art.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        backgroundColor: "rgba(255,255,255,0.02)",
+                        padding: "10px 14px",
+                        borderRadius: "8px",
+                        textDecoration: "none",
+                        color: "#93c5fd",
+                        fontSize: "12px",
+                        border: "1px solid rgba(255, 255, 255, 0.03)",
+                        transition: "all 0.2s"
+                      }}
+                      onMouseOver={(e) => {
+                        e.currentTarget.style.backgroundColor = "rgba(255, 255, 255, 0.05)";
+                        e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.08)";
+                      }}
+                      onMouseOut={(e) => {
+                        e.currentTarget.style.backgroundColor = "rgba(255, 255, 255, 0.02)";
+                        e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.03)";
+                      }}
+                    >
+                      <div style={{ display: "flex", flexDirection: "column", gap: "4px", width: "90%" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <span style={{
+                            backgroundColor: "rgba(96, 165, 250, 0.1)",
+                            color: "#60a5fa",
+                            padding: "2px 6px",
+                            borderRadius: "4px",
+                            fontSize: "9px",
+                            fontWeight: "700"
+                          }}>
+                            {formatSourceName(art.source)}
                           </span>
+                          {art.published_at && (
+                            <span style={{ fontSize: "9px", color: "#64748b" }}>
+                              {formatFullTimestamp(art.published_at)}
+                            </span>
+                          )}
                         </div>
-                        <ExternalLink size={14} style={{ color: "#64748b", flexShrink: 0 }} />
-                      </a>
-                    ))}
+                        <span style={{ color: "#cbd5e1", fontWeight: "500", lineHeight: "1.4" }}>
+                          {art.headline}
+                        </span>
+                      </div>
+                      <ExternalLink size={14} style={{ color: "#64748b", flexShrink: 0 }} />
+                    </a>
+                  ))}
                 </div>
               )}
             </div>
