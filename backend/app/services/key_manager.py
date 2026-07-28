@@ -35,7 +35,8 @@ class ProviderPool:
         if not raw_input or not isinstance(raw_input, str):
             key_strings = []
         else:
-            key_strings = [k.strip() for k in raw_input.replace("\n", ",").split(",") if k.strip()]
+            # Strip trailing '>', quotes, and whitespace from terminal copy-paste
+            key_strings = [k.strip().rstrip(">").strip('"').strip("'").strip() for k in raw_input.replace("\n", ",").split(",") if k.strip()]
         
         # Filter out placeholder or invalid keys
         valid_keys = []

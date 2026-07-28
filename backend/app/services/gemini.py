@@ -92,7 +92,7 @@ def call_openai(prompt: str, api_key: str) -> dict:
 
 def call_openrouter(prompt: str, api_key: str) -> dict:
     """Call OpenRouter API with auto-fallback across top free models."""
-    key = api_key.strip()
+    key = api_key.strip().rstrip(">").strip('"').strip("'").strip()
     if not key or key.startswith("YOUR_"):
         raise ValueError("Invalid or placeholder OpenRouter API key")
 
