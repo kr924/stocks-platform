@@ -163,6 +163,9 @@ function IntelligenceDashboardContent() {
   const [loadingSentiment, setLoadingSentiment] = useState(true);
   const [refreshingSentiment, setRefreshingSentiment] = useState(false);
 
+  const [aiLogs, setAiLogs] = useState<any[]>([]);
+  const [showLogsDrawer, setShowLogsDrawer] = useState(false);
+
   // Sidebar states
   const [sidebarTab, setSidebarTab] = useState<string>("ai");
   const [activeStocks, setActiveStocks] = useState<any[]>([]);
@@ -474,6 +477,13 @@ function IntelligenceDashboardContent() {
         } catch { /* ignore */ }
       });
 
+      es.addEventListener("ai_log", (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data);
+          setAiLogs(prev => [data, ...prev].slice(0, 100));
+        } catch { /* ignore */ }
+      });
+
       es.onerror = () => {
         setSseStatus("disconnected");
         es?.close();
@@ -484,6 +494,14 @@ function IntelligenceDashboardContent() {
     };
 
     connect();
+
+    // Fetch initial AI call reason logs
+    fetch(`${API_BASE}/api/intelligence/logs`)
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) setAiLogs(data);
+      })
+      .catch(() => {});
 
     return () => {
       if (reconnectTimer) clearTimeout(reconnectTimer);
@@ -1021,8 +1039,178 @@ function IntelligenceDashboardContent() {
               <RefreshCw size={14} className={pollingNow ? "animate-spin" : ""} />
               {pollingNow ? "Polling Web & Exchanges..." : "Poll Now"}
             </button>
+
+            {/* AI Logs Toggle Button */}
+            <button
+              onClick={() => setShowLogsDrawer(prev => !prev)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "8px 14px",
+                borderRadius: "8px",
+                fontSize: "12px",
+                fontWeight: "600",
+                background: showLogsDrawer ? "rgba(168, 85, 247, 0.25)" : "rgba(168, 85, 247, 0.1)",
+                border: "1px solid rgba(168, 85, 247, 0.3)",
+                color: "#c084fc",
+                cursor: "pointer",
+                transition: "all 0.2s"
+              }}
+              title="Toggle Live AI Activity & Call Reason Terminal"
+            >
+              <span>🤖</span>
+              <span>AI Logs</span>
+              {aiLogs.length > 0 && (
+                <span style={{
+                  background: "#a855f7",
+                  color: "#ffffff",
+                  fontSize: "10px",
+                  borderRadius: "10px",
+                  padding: "1px 6px",
+                  fontWeight: "700"
+                }}>
+                  {aiLogs.length}
+                </span>
+              )}
+            </button>
           </div>
         </div>
+
+        {/* Live AI Activity Terminal Drawer */}
+        {showLogsDrawer && (
+          <div style={{
+            background: "#090d16",
+            border: "1px solid rgba(168, 85, 247, 0.3)",
+            borderRadius: "12px",
+            padding: "16px",
+            marginBottom: "20px",
+            fontFamily: "monospace",
+            boxShadow: "0 10px 30px rgba(0,0,0,0.5)"
+          }}>
+            <div style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: "12px",
+              borderBottom: "1px solid rgba(255,255,255,0.08)",
+              paddingBottom: "10px"
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <span style={{ fontSize: "16px" }}>🤖</span>
+                <span style={{ color: "#c084fc", fontWeight: 700, fontSize: "14px" }}>Live AI Execution & Call Reason Terminal</span>
+                <span style={{ fontSize: "11px", color: "#10b981", background: "rgba(16,185,129,0.15)", padding: "2px 8px", borderRadius: "10px", fontWeight: 600 }}>
+                  ● LIVE STREAMING
+                </span>
+              </div>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button
+                  onClick={() => setAiLogs([])}
+                  style={{
+                    background: "rgba(239, 68, 68, 0.15)",
+                    border: "1px solid rgba(239, 68, 68, 0.3)",
+                    color: "#f87171",
+                    borderRadius: "6px",
+                    padding: "4px 10px",
+                    fontSize: "11px",
+                    cursor: "pointer"
+                  }}
+                >
+                  Clear Logs
+                </button>
+                <button
+                  onClick={() => setShowLogsDrawer(false)}
+                  style={{
+                    background: "rgba(148, 163, 184, 0.15)",
+                    border: "1px solid rgba(148, 163, 184, 0.3)",
+                    color: "#94a3b8",
+                    borderRadius: "6px",
+                    padding: "4px 10px",
+                    fontSize: "11px",
+                    cursor: "pointer"
+                  }}
+                >
+                  ✕ Close
+                </button>
+              </div>
+            </div>
+
+            {/* Logs List */}
+            <div style={{
+              maxHeight: "260px",
+              overflowY: "auto",
+              display: "flex",
+              flexDirection: "column",
+              gap: "6px",
+              paddingRight: "6px"
+            }}>
+              {aiLogs.length === 0 ? (
+                <div style={{ color: "#64748b", fontSize: "12px", padding: "16px 0", textAlign: "center" }}>
+                  Awaiting AI execution events... (scrapers run automatically every 30s)
+                </div>
+              ) : (
+                aiLogs.map((log, idx) => {
+                  let badgeBg = "rgba(59, 130, 246, 0.15)";
+                  let badgeColor = "#60a5fa";
+                  let tagText = (log.tier || "AI").toUpperCase();
+
+                  if (log.tier === "skip") {
+                    badgeBg = "rgba(100, 116, 139, 0.2)";
+                    badgeColor = "#94a3b8";
+                    tagText = "AUTOSKIP";
+                  } else if (log.tier === "financial_results") {
+                    badgeBg = "rgba(168, 85, 247, 0.2)";
+                    badgeColor = "#c084fc";
+                    tagText = "FINANCIALS";
+                  } else if (log.tier === "execution") {
+                    badgeBg = "rgba(16, 185, 129, 0.2)";
+                    badgeColor = "#34d399";
+                    tagText = "EXECUTION";
+                  } else if (log.tier === "manual_only") {
+                    badgeBg = "rgba(245, 158, 11, 0.2)";
+                    badgeColor = "#fbbf24";
+                    tagText = "MANUAL_ONLY";
+                  }
+
+                  return (
+                    <div key={log.id || idx} style={{
+                      display: "flex",
+                      alignItems: "flex-start",
+                      gap: "10px",
+                      fontSize: "12px",
+                      lineHeight: "1.5",
+                      padding: "6px 10px",
+                      borderRadius: "6px",
+                      background: "rgba(15, 23, 42, 0.6)",
+                      borderLeft: `3px solid ${badgeColor}`
+                    }}>
+                      <span style={{ color: "#64748b", fontSize: "11px", minWidth: "55px" }}>{log.timestamp}</span>
+                      <span style={{
+                        background: badgeBg,
+                        color: badgeColor,
+                        padding: "1px 6px",
+                        borderRadius: "4px",
+                        fontSize: "10px",
+                        fontWeight: 700,
+                        whiteSpace: "nowrap"
+                      }}>
+                        {tagText}
+                      </span>
+                      {log.provider && (
+                        <span style={{ color: "#e2e8f0", fontSize: "11px", fontWeight: 600 }}>
+                          [{log.provider.toUpperCase()}{log.key_index ? ` #${log.key_index}` : ""}]
+                        </span>
+                      )}
+                      <span style={{ color: "#cbd5e1", flex: 1 }}>
+                        {log.reason}
+                      </span>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Live Stream Feed */}
         <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>

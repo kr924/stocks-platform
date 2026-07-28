@@ -842,6 +842,15 @@ def reanalyze_item_endpoint(item_type: str, item_id: str, db: Session = Depends(
     if not result:
         raise HTTPException(status_code=404, detail=f"Item '{item_type}' with ID {item_id} not found or analysis failed.")
     return result
+
+
+@router.get("/logs")
+def get_ai_activity_logs(limit: int = 50):
+    """Get recent real-time AI activity logs for live UI display."""
+    from app.services.ai_log_tracker import get_recent_ai_logs
+    return get_recent_ai_logs(limit)
+
+
 @router.post("/poll")
 async def trigger_manual_poll():
     """

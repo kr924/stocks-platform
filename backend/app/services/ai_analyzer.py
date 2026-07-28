@@ -62,6 +62,11 @@ def _call_llm_for_analysis(prompt: str):
             
             try:
                 logger.info(f"🚀 [AI EXECUTION]: Calling LLM provider '{provider}' using Key #{ks.index + 1}...")
+                try:
+                    from app.services.ai_log_tracker import record_ai_log
+                    record_ai_log(f"Calling LLM provider '{provider.upper()}' using Key #{ks.index + 1}", provider=provider, key_index=ks.index + 1, tier="execution")
+                except Exception:
+                    pass
                 if provider == "groq":
                     res = call_groq(prompt, ks.key, "llama-3.3-70b-versatile")
                 elif provider == "gemini":
@@ -248,6 +253,11 @@ def _classify_ai_tier(event) -> str:
 def _auto_mark_skip(db, event, reason: str):
     """Mark an event as analyzed with neutral defaults (no AI call)."""
     logger.info(f"⏭️ [AI TIER: SKIP] Event #{event.id} [{event.symbol or 'GENERAL'}]: '{event.title}' — {reason}")
+    try:
+        from app.services.ai_log_tracker import record_ai_log
+        record_ai_log(f"Auto-skipped (0 AI calls): [{event.symbol or 'GENERAL'}] '{event.title}'", provider="auto_skip", tier="skip", level="info", details=reason)
+    except Exception:
+        pass
     event.ai_sentiment = "neutral"
     event.ai_impact_score = 0.0
     event.ai_summary = f"Auto-skipped: {reason}"
@@ -260,6 +270,11 @@ def _auto_mark_skip(db, event, reason: str):
 def _auto_mark_manual_only(db, event):
     """Mark a non-exchange event as pending manual analysis."""
     logger.info(f"🔒 [AI TIER: MANUAL_ONLY] Event #{event.id} [{event.symbol or 'GENERAL'}]: '{event.title}' — Non-exchange source, AI on demand only")
+    try:
+        from app.services.ai_log_tracker import record_ai_log
+        record_ai_log(f"Non-exchange event (on demand only): [{event.symbol or 'GENERAL'}] '{event.title}'", provider="manual_pending", tier="manual_only", level="info")
+    except Exception:
+        pass
     event.ai_sentiment = "neutral"
     event.ai_impact_score = 0.0
     event.ai_summary = event.title or "Awaiting manual AI analysis"
@@ -594,7 +609,13 @@ def analyze_pending_events(db: Session) -> int:
             
             # ── TIER: FINANCIAL_RESULTS — deep analysis with PDF + Screener.in ──
             if tier == "financial_results":
-                logger.info(f"📊 [AI TIER: FINANCIAL_RESULTS] Event #{event.id} [{event.symbol or 'GENERAL'}]: '{event.title}' — Deep financial analysis with PDF + Screener.in")
+                msg = f"Deep Financial Results analysis for [{event.symbol or 'GENERAL'}]: '{event.title}' with PDF + Screener.in"
+                logger.info(f"📊 [AI TIER: FINANCIAL_RESULTS] {msg}")
+                try:
+                    from app.services.ai_log_tracker import record_ai_log
+                    record_ai_log(msg, provider="groq", tier="financial_results", level="info")
+                except Exception:
+                    pass
                 financial_results_count += 1
                 
                 # Extract PDF text from attached filing
@@ -675,6 +696,11 @@ def analyze_pending_events(db: Session) -> int:
             
             # ── TIER: STANDARD — normal Groq AI analysis ──
             logger.info(f"🤖 [AI TIER: STANDARD] Event #{event.id} [{event.symbol or 'GENERAL'}]: '{event.title}'")
+            try:
+                from app.services.ai_log_tracker import record_ai_log
+                record_ai_log(f"Analyzing MarketEvent [{event.symbol or 'GENERAL'}]: '{event.title}'", provider="groq", tier="standard", level="info")
+            except Exception:
+                pass
             
             desc_content = event.description or ""
             if event.url and ".pdf" in event.url.lower():
