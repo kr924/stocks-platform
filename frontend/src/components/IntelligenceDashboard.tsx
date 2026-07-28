@@ -10,7 +10,8 @@ import {
   ExternalLink,
   RefreshCw,
   Info,
-  Clock
+  Clock,
+  Bot
 } from "lucide-react";
 
 function parseUtcDate(isoString: string | null | undefined): Date | null {
