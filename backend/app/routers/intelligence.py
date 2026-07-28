@@ -824,15 +824,24 @@ def get_active_stocks(db: Session = Depends(get_db)):
 # ─── Real-Time SSE Stream ────────────────────────────────────────────────
 
 @router.post("/reanalyze/{item_type}/{item_id}")
-def reanalyze_item_endpoint(item_type: str, item_id: int, db: Session = Depends(get_db)):
+def reanalyze_item_endpoint(item_type: str, item_id: str, db: Session = Depends(get_db)):
     """
     Manually trigger AI re-analysis on a news story, market event, or filing.
-    Tries Groq API first, then falls back to Gemini/OpenAI/Ollama.
+    Accepts raw integer ID or prefixed string ID (e.g. 'event_2262', 'story_105', '2262').
     """
     from app.services.ai_analyzer import reanalyze_single_item
-    result = reanalyze_single_item(db, item_type, item_id)
+    
+    # Strip any text prefix (e.g., 'event_2262' -> 2262)
+    clean_id_str = str(item_id).split("_")[-1]
+    try:
+        numeric_id = int(clean_id_str)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid numeric item ID: '{item_id}'")
+        
+    result = reanalyze_single_item(db, item_type, numeric_id)
     if not result:
         raise HTTPException(status_code=404, detail=f"Item '{item_type}' with ID {item_id} not found or analysis failed.")
+    return result
 @router.post("/poll")
 async def trigger_manual_poll():
     """

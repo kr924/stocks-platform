@@ -543,8 +543,10 @@ function IntelligenceDashboardContent() {
 
     setReanalyzingIds(prev => ({ ...prev, [key]: true }));
 
+    const rawId = String(item.id).replace(/^(event_|story_|news_|filing_)/, "");
+
     try {
-      const res = await fetch(`${API_BASE}/api/intelligence/reanalyze/${item.type}/${item.id}`, {
+      const res = await fetch(`${API_BASE}/api/intelligence/reanalyze/${item.type}/${rawId}`, {
         method: "POST"
       });
       if (res.ok) {
