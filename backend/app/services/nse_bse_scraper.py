@@ -177,78 +177,139 @@ def _classify_event_category(event_type: str, title: str) -> str:
 # ─── Corporate Announcements ───────────────────────────────────────────────
 
 def fetch_corporate_announcements(db: Session) -> int:
-    """Fetch latest corporate announcements from NSE. Returns count of new events."""
+    """Fetch latest corporate announcements from NSE and BSE. Returns count of new events."""
     config = get_intel_config()
     if not config.is_source_enabled("nse_bse", "corporate_announcements"):
         return 0
     
+    count = 0
+    # 1. Fetch NSE Corporate Announcements
     nse = _get_nse_session()
     source_config = config.nse_bse.get("sources", {}).get("corporate_announcements", {})
     url = source_config.get("nse_url", "https://www.nseindia.com/api/corporate-announcements?index=equities")
     
     data = nse.get(url)
-    if not data:
-        return 0
+    announcements = []
+    if isinstance(data, list):
+        announcements = data
+    elif isinstance(data, dict):
+        announcements = data.get("data", data.get("announcements", []))
     
-    announcements = data if isinstance(data, list) else data.get("data", data.get("announcements", []))
-    if not isinstance(announcements, list):
-        logger.warning(f"Unexpected announcements format: {type(announcements)}")
-        return 0
-    
-    count = 0
-    for ann in announcements:
-        try:
-            symbol = ann.get("symbol", ann.get("sm_name", "")).strip().upper()
-            subject = ann.get("desc", ann.get("subject", ann.get("an_desc", ""))).strip()
-            if not subject:
-                continue
-            
-            ann_date = ann.get("an_dt", ann.get("date", ann.get("dt", "")))
-            evt_time = _safe_datetime(ann_date)
-            
-            # Generate dedup hash
-            h = event_hash("nse", "announcement", subject, evt_time.isoformat())
-            if is_duplicate_event(db, h):
-                continue
-            
-            event = MarketEvent(
-                event_type="announcement",
-                source="nse",
-                symbol=symbol or None,
-                title=subject[:500],
-                description=ann.get("attchmntText", ann.get("description", subject)),
-                url=ann.get("attchmntFile", ann.get("url", "")),
-                raw_data=json.dumps(ann, default=str),
-                event_hash=h,
-                event_time=evt_time,
-                category=_classify_event_category("announcement", subject),
-            )
+    if isinstance(announcements, list):
+        for ann in announcements:
             try:
-                db.add(event)
-                db.commit()
-                count += 1
-                # Broadcast to SSE clients
-                sse_manager.broadcast("new_event", {
-                    "id": f"event_{event.id}",
-                    "type": "event",
-                    "event_type": event.event_type,
-                    "source": event.source,
-                    "symbol": event.symbol,
-                    "title": event.title,
-                    "description": event.description,
-                    "url": event.url,
-                    "time": to_iso_utc(event.event_time),
-                    "category": event.category,
-                })
-            except Exception as inner_err:
-                db.rollback()
-                logger.warning(f"Failed to save announcement {symbol}: {inner_err}")
-        except Exception as e:
-            logger.error(f"Error processing announcement: {e}")
-            continue
-    
+                symbol = ann.get("symbol", ann.get("sm_name", "")).strip().upper()
+                subject = ann.get("desc", ann.get("subject", ann.get("an_desc", ""))).strip()
+                if not subject:
+                    continue
+                
+                ann_date = ann.get("an_dt", ann.get("date", ann.get("dt", "")))
+                evt_time = _safe_datetime(ann_date)
+                
+                h = event_hash("nse", "announcement", subject, evt_time.isoformat())
+                if is_duplicate_event(db, h):
+                    continue
+                
+                event = MarketEvent(
+                    event_type="announcement",
+                    source="nse",
+                    symbol=symbol or None,
+                    title=subject[:500],
+                    description=ann.get("attchmntText", ann.get("description", subject)),
+                    url=ann.get("attchmntFile", ann.get("url", "")),
+                    raw_data=json.dumps(ann, default=str),
+                    event_hash=h,
+                    event_time=evt_time,
+                    category=_classify_event_category("announcement", subject),
+                )
+                try:
+                    db.add(event)
+                    db.commit()
+                    count += 1
+                    sse_manager.broadcast("new_event", {
+                        "id": f"event_{event.id}",
+                        "type": "event",
+                        "event_type": event.event_type,
+                        "source": event.source,
+                        "symbol": event.symbol,
+                        "title": event.title,
+                        "description": event.description,
+                        "url": event.url,
+                        "time": to_iso_utc(event.event_time),
+                        "category": event.category,
+                    })
+                except Exception as inner_err:
+                    db.rollback()
+                    logger.warning(f"Failed to save NSE announcement {symbol}: {inner_err}")
+            except Exception as e:
+                logger.error(f"Error processing NSE announcement: {e}")
+                continue
+
+    # 2. Fetch BSE Corporate Announcements (Open Public API)
+    try:
+        bse = BSESession()
+        bse_url = "https://api.bseindia.com/BseIndiaAPI/api/AnnGetData/w?strCat=-1&strPrevDate=&strScrip=&strSearch=P&strToDate=&strType=C"
+        bse_data = bse.get(bse_url)
+        bse_items = []
+        if isinstance(bse_data, dict):
+            bse_items = bse_data.get("Table", bse_data.get("data", []))
+        elif isinstance(bse_data, list):
+            bse_items = bse_data
+
+        if isinstance(bse_items, list):
+            for ann in bse_items:
+                try:
+                    symbol = ann.get("SLONGNAME", ann.get("SCRIP_CD", ann.get("scrip_cd", ""))).strip().upper()
+                    subject = ann.get("NEWSSUB", ann.get("HEADLINE", ann.get("news_sub", ""))).strip()
+                    if not subject:
+                        continue
+                    
+                    ann_date = ann.get("NEWS_DT", ann.get("dissemdt", ""))
+                    evt_time = _safe_datetime(ann_date)
+                    
+                    h = event_hash("bse", "announcement", subject, evt_time.isoformat())
+                    if is_duplicate_event(db, h):
+                        continue
+                    
+                    event = MarketEvent(
+                        event_type="announcement",
+                        source="bse",
+                        symbol=symbol or None,
+                        title=subject[:500],
+                        description=ann.get("MORE", ann.get("NEWS_BODY", subject)),
+                        url=ann.get("ATTACHMENTNAME", ""),
+                        raw_data=json.dumps(ann, default=str),
+                        event_hash=h,
+                        event_time=evt_time,
+                        category=_classify_event_category("announcement", subject),
+                    )
+                    try:
+                        db.add(event)
+                        db.commit()
+                        count += 1
+                        sse_manager.broadcast("new_event", {
+                            "id": f"event_{event.id}",
+                            "type": "event",
+                            "event_type": event.event_type,
+                            "source": event.source,
+                            "symbol": event.symbol,
+                            "title": event.title,
+                            "description": event.description,
+                            "url": event.url,
+                            "time": to_iso_utc(event.event_time),
+                            "category": event.category,
+                        })
+                    except Exception as inner_err:
+                        db.rollback()
+                        logger.warning(f"Failed to save BSE announcement {symbol}: {inner_err}")
+                except Exception as e:
+                    logger.error(f"Error processing BSE announcement: {e}")
+                    continue
+    except Exception as bse_err:
+        logger.error(f"Error fetching BSE announcements: {bse_err}")
+
     if count > 0:
-        logger.info(f"Saved {count} new corporate announcements from NSE")
+        logger.info(f"Saved {count} new corporate announcements from NSE/BSE")
     return count
 
 
