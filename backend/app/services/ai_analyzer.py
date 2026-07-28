@@ -25,11 +25,11 @@ logger = logging.getLogger("app.ai_analyzer")
 
 # ─── LLM Call Helpers (reuse existing providers) ─────────────────────────
 
-def _call_llm_for_analysis(prompt: str) -> Optional[dict]:
+def _call_llm_for_analysis(prompt: str):
     """
     Call the configured LLM with a structured analysis prompt.
     Tries primary provider, then fallbacks.
-    Returns parsed JSON dict or None on failure.
+    Returns tuple (parsed JSON dict or None, provider_name).
     """
     from app.services.gemini import (
         reload_env_vars, call_gemini, call_groq, call_openai, call_anthropic, call_ollama, clean_json_response
@@ -46,21 +46,28 @@ def _call_llm_for_analysis(prompt: str) -> Optional[dict]:
     for provider in providers:
         try:
             if provider == "groq" and env.get("groq_key"):
-                return call_groq(prompt, env["groq_key"], env.get("groq_model", "llama-3.3-70b-versatile"))
+                res = call_groq(prompt, env["groq_key"], env.get("groq_model", "llama-3.3-70b-versatile"))
+                return res, "groq"
             elif provider == "gemini" and env.get("gemini_key"):
-                return call_gemini(prompt, env["gemini_key"])
+                key = env["gemini_key"].strip()
+                if key and not key.startswith("AQ."):
+                    res = call_gemini(prompt, key)
+                    return res, "gemini"
             elif provider == "openai" and env.get("openai_key"):
-                return call_openai(prompt, env["openai_key"])
+                res = call_openai(prompt, env["openai_key"])
+                return res, "openai"
             elif provider == "anthropic" and env.get("anthropic_key"):
-                return call_anthropic(prompt, env["anthropic_key"])
+                res = call_anthropic(prompt, env["anthropic_key"])
+                return res, "anthropic"
             elif provider == "ollama" and env.get("ollama_url"):
-                return call_ollama(prompt, env["ollama_url"], env.get("ollama_model", "stocks-analyst"))
+                res = call_ollama(prompt, env["ollama_url"], env.get("ollama_model", "stocks-analyst"))
+                return res, "ollama"
         except Exception as e:
             logger.warning(f"LLM provider {provider} failed: {e}")
             continue
     
     logger.error("All LLM providers failed for analysis")
-    return None
+    return None, "stub"
 
 
 # ─── Sentiment Analysis Prompts ─────────────────────────────────────────
@@ -208,7 +215,8 @@ def analyze_pending_events(db: Session) -> int:
             }]
             
             prompt = _build_event_analysis_prompt(event_data)
-            result = _call_llm_for_analysis(prompt)
+            result, provider = _call_llm_for_analysis(prompt)
+            event.ai_provider = provider
             
             if not result or "analyses" not in result or not result["analyses"]:
                 # Mark as analyzed with neutral defaults so it doesn't retry forever
@@ -285,7 +293,8 @@ def analyze_pending_news(db: Session) -> int:
             }]
             
             prompt = _build_news_analysis_prompt(story_data)
-            result = _call_llm_for_analysis(prompt)
+            result, provider = _call_llm_for_analysis(prompt)
+            story.ai_provider = provider
             
             if not result or "analyses" not in result or not result["analyses"]:
                 # Mark as analyzed with neutral defaults so it doesn't retry forever
@@ -299,6 +308,7 @@ def analyze_pending_news(db: Session) -> int:
                 db.query(NewsItem).filter(NewsItem.story_id == story.id).update({
                     "ai_sentiment": "neutral",
                     "ai_impact_score": 0.0,
+                    "ai_provider": provider,
                     "ai_analyzed_at": datetime.utcnow(),
                 })
                 db.commit()
@@ -317,6 +327,7 @@ def analyze_pending_news(db: Session) -> int:
             db.query(NewsItem).filter(NewsItem.story_id == story.id).update({
                 "ai_sentiment": analysis.get("sentiment", "neutral"),
                 "ai_impact_score": analysis.get("impact_score", 0.0),
+                "ai_provider": provider,
                 "ai_analyzed_at": datetime.utcnow(),
             })
             

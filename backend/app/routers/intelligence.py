@@ -98,6 +98,7 @@ def get_intelligence_feed(
             "ai_sentiment": e.ai_sentiment,
             "ai_impact_score": e.ai_impact_score,
             "ai_summary": e.ai_summary,
+            "ai_provider": getattr(e, "ai_provider", None),
             "ai_affected_stocks": json.loads(e.ai_affected_stocks) if e.ai_affected_stocks else [],
             "category": e.category,
         })
@@ -143,6 +144,7 @@ def get_intelligence_feed(
                 "ai_sentiment": s.ai_sentiment,
                 "ai_impact_score": s.ai_impact_score,
                 "ai_summary": s.ai_summary,
+                "ai_provider": getattr(s, "ai_provider", None),
                 "ai_affected_stocks": json.loads(s.ai_affected_stocks) if s.ai_affected_stocks else [],
                 "article_count": s.article_count,
                 "best_source_tier": s.best_source_tier,

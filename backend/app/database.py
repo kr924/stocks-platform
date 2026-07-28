@@ -86,6 +86,7 @@ class MarketEvent(Base):
     ai_sentiment = Column(String(20), nullable=True)   # positive, negative, neutral
     ai_impact_score = Column(Float, nullable=True)       # -1.0 to 1.0
     ai_summary = Column(Text, nullable=True)
+    ai_provider = Column(String(50), nullable=True)     # groq, gemini, ollama, openai, anthropic, stub
     # JSON list of affected stock symbols (e.g., ["RELIANCE", "ONGC"])
     ai_affected_stocks = Column(Text, nullable=True)
     ai_analyzed_at = Column(DateTime, nullable=True)
@@ -121,6 +122,7 @@ class NewsStory(Base):
     ai_sentiment = Column(String(20), nullable=True)
     ai_impact_score = Column(Float, nullable=True)
     ai_summary = Column(Text, nullable=True)
+    ai_provider = Column(String(50), nullable=True)     # groq, gemini, ollama, openai, anthropic, stub
     ai_affected_stocks = Column(Text, nullable=True)
     ai_analyzed_at = Column(DateTime, nullable=True)
     # Category for filtering: market_update, earnings, ipo, policy, global_market, sector_news, stock_specific, general
@@ -151,6 +153,7 @@ class NewsItem(Base):
     # AI fields
     ai_sentiment = Column(String(20), nullable=True)
     ai_impact_score = Column(Float, nullable=True)
+    ai_provider = Column(String(50), nullable=True)
     ai_analyzed_at = Column(DateTime, nullable=True)
 
     __table_args__ = (
@@ -228,6 +231,9 @@ def init_db():
         _safe_alter(conn, "ALTER TABLE ai_cache ADD COLUMN support_levels TEXT")
         _safe_alter(conn, "ALTER TABLE ai_cache ADD COLUMN analyst_recommendations TEXT")
         _safe_alter(conn, "ALTER TABLE watchlist ADD COLUMN is_holding BOOLEAN DEFAULT 0")
+        _safe_alter(conn, "ALTER TABLE market_events ADD COLUMN ai_provider VARCHAR(50)")
+        _safe_alter(conn, "ALTER TABLE news_stories ADD COLUMN ai_provider VARCHAR(50)")
+        _safe_alter(conn, "ALTER TABLE news_items ADD COLUMN ai_provider VARCHAR(50)")
 
 
 def _safe_alter(conn, sql: str):

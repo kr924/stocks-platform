@@ -67,6 +67,7 @@ interface FeedItem {
   ai_sentiment: "positive" | "negative" | "neutral" | null;
   ai_impact_score: number | null;
   ai_summary: string | null;
+  ai_provider?: string;
   ai_affected_stocks?: string[];
   category?: string;
   article_count?: number;
@@ -1114,6 +1115,39 @@ export function IntelligenceDashboard() {
                           fontWeight: "700"
                         }}>
                           {item.symbol}
+                        </span>
+                      )}
+                      {item.ai_provider && (
+                        <span style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "4px",
+                          backgroundColor: item.ai_provider === "groq" ? "rgba(168, 85, 247, 0.15)"
+                            : item.ai_provider === "ollama" ? "rgba(245, 158, 11, 0.15)"
+                            : item.ai_provider === "gemini" ? "rgba(16, 185, 129, 0.15)"
+                            : "rgba(100, 116, 139, 0.15)",
+                          color: item.ai_provider === "groq" ? "#c084fc"
+                            : item.ai_provider === "ollama" ? "#fbbf24"
+                            : item.ai_provider === "gemini" ? "#34d399"
+                            : "#94a3b8",
+                          padding: "3px 8px",
+                          borderRadius: "6px",
+                          fontSize: "10px",
+                          fontWeight: "700",
+                          border: `1px solid ${
+                            item.ai_provider === "groq" ? "rgba(168, 85, 247, 0.3)"
+                            : item.ai_provider === "ollama" ? "rgba(245, 158, 11, 0.3)"
+                            : item.ai_provider === "gemini" ? "rgba(16, 185, 129, 0.3)"
+                            : "rgba(100, 116, 139, 0.3)"
+                          }`
+                        }}>
+                          <Bot size={11} />
+                          {
+                            item.ai_provider === "groq" ? "Groq AI"
+                            : item.ai_provider === "ollama" ? "Local Ollama"
+                            : item.ai_provider === "gemini" ? "Gemini AI"
+                            : item.ai_provider
+                          }
                         </span>
                       )}
                       <span style={{

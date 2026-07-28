@@ -33,12 +33,12 @@ def call_ollama(prompt: str, base_url: str = "http://localhost:11434", model_nam
         "stream": False,
         "format": "json",
         "options": {
-            "temperature": 0.2,
-            "num_predict": 512
+            "temperature": 0.1,
+            "num_predict": 256
         }
     }
     url = base_url.rstrip("/") + "/api/chat"
-    res = requests.post(url, json=payload, timeout=30)
+    res = requests.post(url, json=payload, timeout=90)
     res.raise_for_status()
     raw_text = res.json()["message"]["content"]
     cleaned = clean_json_response(raw_text)
