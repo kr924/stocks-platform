@@ -104,10 +104,12 @@ def call_openrouter(prompt: str, api_key: str) -> dict:
     }
     
     free_models = [
+        "google/gemini-2.0-flash-lite-001:free",
         "meta-llama/llama-3.3-70b-instruct:free",
         "qwen/qwen-2.5-72b-instruct:free",
         "google/gemma-2-9b-it:free",
-        "deepseek/deepseek-r1:free",
+        "deepseek/deepseek-r1-distill-llama-70b:free",
+        "mistralai/mistral-7b-instruct:free",
     ]
     
     last_err = None
@@ -125,9 +127,11 @@ def call_openrouter(prompt: str, api_key: str) -> dict:
             if res.ok:
                 raw_text = res.json()["choices"][0]["message"]["content"]
                 cleaned = clean_json_response(raw_text)
+                logger.info(f"✨ [OPENROUTER] Analysis successfully generated using model: {model_name}")
                 return json.loads(cleaned)
             else:
                 last_err = f"Model {model_name} HTTP {res.status_code}: {res.text[:100]}"
+                logger.warning(f"[OPENROUTER] Model {model_name} failed: {res.status_code} {res.text[:100]}")
         except Exception as e:
             last_err = str(e)
             continue
