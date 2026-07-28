@@ -128,38 +128,38 @@ async def _intelligence_scheduler():
             
             multiplier = 1 if is_market_hours else polling.get("off_market_multiplier", 4)
             
-            # Corporate Announcements Scraping (Every 10s for real-time speed)
-            ann_interval = polling.get("nse_bse_announcements", 10) * multiplier
+            # Corporate Announcements Scraping (Every 1s for ultra real-time speed)
+            ann_interval = polling.get("nse_bse_announcements", 1) * multiplier
             if now - last_run["corporate_announcements"] >= ann_interval:
                 last_run["corporate_announcements"] = now
                 await asyncio.to_thread(_run_corporate_announcements_scraper)
             
-            # Other NSE/BSE Scraping (Every 30s)
-            other_nse_interval = polling.get("nse_bse_other", 30) * multiplier
+            # Other NSE/BSE Scraping (Every 1s)
+            other_nse_interval = polling.get("nse_bse_other", 1) * multiplier
             if now - last_run["other_nse_bse"] >= other_nse_interval:
                 last_run["other_nse_bse"] = now
                 await asyncio.to_thread(_run_other_nse_bse_scraper)
             
-            # News Aggregation (Every 30s)
-            news_interval = polling.get("news_aggregator", 30) * multiplier
+            # News Aggregation (Every 1s)
+            news_interval = polling.get("news_aggregator", 1) * multiplier
             if now - last_run["news"] >= news_interval:
                 last_run["news"] = now
                 await asyncio.to_thread(_run_news_aggregator)
             
-            # Social Media (Every 30s)
-            social_interval = polling.get("social_media", 30) * multiplier
+            # Social Media (Every 1s)
+            social_interval = polling.get("social_media", 1) * multiplier
             if now - last_run["social"] >= social_interval:
                 last_run["social"] = now
                 await asyncio.to_thread(_run_social_monitor)
             
-            # Company Filings (Every 180s)
-            filings_interval = polling.get("company_filings", 180) * multiplier
+            # Company Filings (Every 5s)
+            filings_interval = polling.get("company_filings", 5) * multiplier
             if now - last_run["filings"] >= filings_interval:
                 last_run["filings"] = now
                 await asyncio.to_thread(_run_filings_scraper)
             
-            # AI Analysis (Every 30s)
-            ai_interval = polling.get("ai_analysis_queue", 30)
+            # AI Analysis (Every 1s)
+            ai_interval = polling.get("ai_analysis_queue", 1)
             if now - last_run["ai_analysis"] >= ai_interval:
                 last_run["ai_analysis"] = now
                 await asyncio.to_thread(_run_ai_analysis)
@@ -167,8 +167,8 @@ async def _intelligence_scheduler():
         except Exception as e:
             logger.error(f"Intelligence scheduler error: {e}")
         
-        # Sleep for 5 seconds between loop iterations for fast responsiveness
-        await asyncio.sleep(5)
+        # Sleep for 1 second between loop iterations for 1-second polling responsiveness
+        await asyncio.sleep(1)
 
 
 def _run_corporate_announcements_scraper():
