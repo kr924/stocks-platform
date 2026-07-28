@@ -214,15 +214,16 @@ def fetch_corporate_announcements(db: Session) -> int:
     if isinstance(announcements, list):
         for ann in announcements:
             try:
-                symbol = ann.get("symbol", ann.get("sm_name", "")).strip().upper()
+                symbol = ann.get("symbol", ann.get("sm_name", ann.get("col_0", ann.get("company_name", "")))).strip().upper()
                 subject = ann.get("desc", ann.get("subject", ann.get("an_desc", ""))).strip()
                 if not subject:
                     continue
                 
-                ann_date = ann.get("an_dt", ann.get("date", ann.get("dt", "")))
+                ann_date = ann.get("an_dt", ann.get("bcastDate", ann.get("broadcastDate", ann.get("date", ann.get("dt", "")))))
                 evt_time = _safe_datetime(ann_date)
                 
-                h = event_hash("nse", "announcement", subject, evt_time.isoformat())
+                # Include symbol in hash so generic titles (e.g. "Copy of Newspaper Publication") don't clash across different companies
+                h = event_hash("nse", "announcement", f"{symbol}:{subject}", evt_time.isoformat())
                 if is_duplicate_event(db, h):
                     continue
                 
@@ -283,7 +284,7 @@ def fetch_corporate_announcements(db: Session) -> int:
                     ann_date = ann.get("NEWS_DT", ann.get("dissemdt", ""))
                     evt_time = _safe_datetime(ann_date)
                     
-                    h = event_hash("bse", "announcement", subject, evt_time.isoformat())
+                    h = event_hash("bse", "announcement", f"{symbol}:{subject}", evt_time.isoformat())
                     if is_duplicate_event(db, h):
                         continue
                     
