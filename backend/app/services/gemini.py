@@ -82,12 +82,16 @@ def call_groq(prompt: str, api_key: str, model_name: str = "llama-3.3-70b-versat
         "Authorization": f"Bearer {api_key}"
     }
     
-    # Model rotation pool to bypass per-model 429 rate limits
-    models_to_try = [model_name]
-    if model_name != "llama-3.1-8b-instant":
-        models_to_try.append("llama-3.1-8b-instant")
-    if "mixtral-8x7b-32768" not in models_to_try:
-        models_to_try.append("mixtral-8x7b-32768")
+    # Valid Groq models supporting JSON response_format
+    valid_groq_json_models = [
+        "llama-3.3-70b-versatile",
+        "llama-3.1-8b-instant",
+        "llama3-70b-8192",
+        "llama3-8b-8192",
+        "gemma2-9b-it"
+    ]
+    
+    models_to_try = [model_name] + [m for m in valid_groq_json_models if m != model_name]
         
     last_exc = None
     for m in models_to_try:
@@ -99,14 +103,15 @@ def call_groq(prompt: str, api_key: str, model_name: str = "llama-3.3-70b-versat
             }
             res = requests.post("https://api.groq.com/openai/v1/chat/completions", json=payload, headers=headers, timeout=12)
             if res.status_code == 429:
-                logger.warning(f"Groq model {m} 429 rate limit hit, rotating to alternate model...")
-                time.sleep(0.5)
+                logger.warning(f"Groq model '{m}' 429 rate limit hit, backing off 1.5s and rotating model...")
+                time.sleep(1.5)
                 continue
             res.raise_for_status()
             raw_text = res.json()["choices"][0]["message"]["content"]
             cleaned = clean_json_response(raw_text)
             return json.loads(cleaned)
         except Exception as e:
+            logger.warning(f"Groq model '{m}' failed: {e}")
             last_exc = e
             continue
             

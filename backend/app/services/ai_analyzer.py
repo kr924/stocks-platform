@@ -321,6 +321,9 @@ def analyze_pending_events(db: Session) -> int:
             impact = abs(analysis.get("impact_score", 0.0))
             if impact >= alert_threshold:
                 _create_alert_from_event(db, event, analysis, alert_threshold, critical_threshold)
+            
+            # Pace requests smoothly (1.2s delay) to respect API rate limits
+            time.sleep(1.2)
         except Exception as e:
             logger.error(f"Error analyzing event {event.id}: {e}")
             db.rollback()
@@ -422,6 +425,9 @@ def analyze_pending_news(db: Session) -> int:
             impact = abs(analysis.get("impact_score", 0.0))
             if impact >= alert_threshold:
                 _create_alert_from_story(db, story, analysis, alert_threshold, critical_threshold)
+            
+            # Pace requests smoothly (1.2s delay) to respect API rate limits
+            time.sleep(1.2)
         except Exception as e:
             logger.error(f"Error analyzing news story {story.id}: {e}")
             db.rollback()
