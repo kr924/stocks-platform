@@ -1479,6 +1479,41 @@ function IntelligenceDashboardContent() {
                     </p>
                   )}
 
+                  {item.ai_provider && item.ai_provider !== "auto_skip" && item.ai_provider !== "manual_pending" && (
+                    <div style={{
+                      fontSize: "11px",
+                      color: "#cbd5e1",
+                      backgroundColor: "rgba(15, 23, 42, 0.7)",
+                      borderLeft: `3px solid ${
+                        item.ai_provider === "groq" ? "#c084fc"
+                        : item.ai_provider === "gemini" ? "#34d399"
+                        : item.ai_provider === "ollama" ? "#fbbf24"
+                        : "#60a5fa"
+                      }`,
+                      padding: "5px 10px",
+                      borderRadius: "0 6px 6px 0",
+                      marginTop: "4px",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px"
+                    }}>
+                      <span style={{
+                        color: item.ai_provider === "groq" ? "#c084fc" : item.ai_provider === "gemini" ? "#34d399" : "#60a5fa",
+                        fontWeight: 700,
+                        fontSize: "10.5px"
+                      }}>
+                        🤖 AI Invoked:
+                      </span>
+                      <span>
+                        {item.category === "financial_results" || (item.title && item.title.toLowerCase().includes("financial"))
+                          ? `Deep Financial Results (PDF + Screener.in) analyzed via ${item.ai_provider.toUpperCase()}`
+                          : item.ai_provider === "rule_engine"
+                            ? "0-CPU Rule Engine keyword analysis (Cloud LLMs offline/rate-limited)"
+                            : `Exchange Market Intelligence analyzed via ${item.ai_provider.toUpperCase()}`}
+                      </span>
+                    </div>
+                  )}
+
                   {(() => {
                     const affectedStocks = Array.isArray(item.ai_affected_stocks)
                       ? item.ai_affected_stocks
@@ -2422,6 +2457,49 @@ function IntelligenceDashboardContent() {
                       }}>
                         {selectedItem.ai_impact_score > 0 ? "+" : ""}{Number(selectedItem.ai_impact_score).toFixed(2)}
                       </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* AI Invocation & Call Reason Box */}
+              {selectedItem.ai_provider && selectedItem.ai_provider !== "auto_skip" && (
+                <div style={{
+                  backgroundColor: "rgba(15, 23, 42, 0.7)",
+                  border: "1px solid rgba(59, 130, 246, 0.25)",
+                  borderRadius: "10px",
+                  padding: "14px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "8px"
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <span style={{ fontSize: "12px", fontWeight: "700", color: "#60a5fa", display: "flex", alignItems: "center", gap: "6px" }}>
+                      <Bot size={15} /> AI Invocation & Execution Details
+                    </span>
+                    <span style={{
+                      fontSize: "10px",
+                      fontWeight: "700",
+                      padding: "2px 8px",
+                      borderRadius: "4px",
+                      backgroundColor: selectedItem.ai_provider === "groq" ? "rgba(168, 85, 247, 0.2)" : "rgba(59, 130, 246, 0.2)",
+                      color: selectedItem.ai_provider === "groq" ? "#c084fc" : "#60a5fa"
+                    }}>
+                      {selectedItem.ai_provider.toUpperCase()}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#cbd5e1", lineHeight: "1.5" }}>
+                    <strong>Trigger Reason:</strong> {
+                      selectedItem.category === "financial_results" || (selectedItem.title && selectedItem.title.toLowerCase().includes("financial"))
+                        ? "📊 Board Meeting Outcome — Deep PDF + Screener.in Financial Comparison"
+                        : selectedItem.type === "event"
+                          ? "⚡ Exchange Corporate Announcement Ingestion"
+                          : "📰 News Clustering & Sentiment Analysis"
+                    }
+                  </div>
+                  {selectedItem.ai_summary && (
+                    <div style={{ fontSize: "12px", color: "#94a3b8", borderTop: "1px solid rgba(255, 255, 255, 0.05)", paddingTop: "8px", marginTop: "2px" }}>
+                      <strong>AI Summary:</strong> {selectedItem.ai_summary}
                     </div>
                   )}
                 </div>
