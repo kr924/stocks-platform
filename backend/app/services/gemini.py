@@ -13,8 +13,18 @@ logger = logging.getLogger("app.gemini")
 # Helper function to reload dotenv dynamically
 def reload_env_vars():
     load_dotenv(override=True)
-    groq_raw = os.getenv("GROQ_API_KEYS") or os.getenv("GROQ_API_KEY", "")
-    openrouter_raw = os.getenv("OPENROUTER_API_KEYS") or os.getenv("OPENROUTER_API_KEY", "")
+    groq_raw = (
+        os.getenv("GROQ_API_KEYS") or
+        os.getenv("GROQ_API_KEY") or
+        os.getenv("GROQ_KEY") or ""
+    )
+    openrouter_raw = (
+        os.getenv("OPENROUTER_API_KEYS") or
+        os.getenv("OPENROUTER_API_KEY") or
+        os.getenv("OPENROUTER_KEY") or
+        os.getenv("OPEN_ROUTER_KEY") or
+        os.getenv("OPENROUTER_TOKEN") or ""
+    )
     return {
         "openrouter_key": openrouter_raw,
         "gemini_key": os.getenv("GEMINI_API_KEY", ""),

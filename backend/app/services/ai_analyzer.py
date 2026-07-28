@@ -234,6 +234,8 @@ _SKIP_SUBJECTS = {
     "shareholders meeting...",
     "voting results",
     "scrutinizer report",
+    "general updates",
+    "updates",
 }
 
 # Subjects that trigger skip via 'contains' check (case-insensitive)
@@ -245,6 +247,7 @@ _SKIP_SUBJECT_CONTAINS = [
     "scrutinizer report",
     "loss of share certificate",
     "duplicate share certificate",
+    "general updates",
 ]
 
 # Details keywords that trigger skip when subject is "General Updates" / "Updates"
