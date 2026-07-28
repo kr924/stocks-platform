@@ -1255,39 +1255,47 @@ export function IntelligenceDashboard() {
                     </p>
                   )}
 
-                  {item.ai_affected_stocks && item.ai_affected_stocks.length > 0 && (
-                    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "6px", marginTop: "2px" }}>
-                      <span style={{ fontSize: "10px", color: "#64748b", fontWeight: "600" }}>Impacted:</span>
-                      {item.ai_affected_stocks.map((stk, idx) => (
-                        <span
-                          key={idx}
-                          onClick={(e) => {
-                            e.stopPropagation(); // prevent modal opening
-                            setSearchQuery(stk); // filter by this stock!
-                            setPage(1);
-                          }}
-                          style={{
-                            backgroundColor: "rgba(16, 185, 129, 0.12)",
-                            color: "#34d399",
-                            padding: "2px 6px",
-                            borderRadius: "4px",
-                            fontSize: "10px",
-                            fontWeight: "700",
-                            cursor: "pointer",
-                            transition: "all 0.15s"
-                          }}
-                          onMouseOver={(e) => {
-                            e.currentTarget.style.backgroundColor = "rgba(16, 185, 129, 0.25)";
-                          }}
-                          onMouseOut={(e) => {
-                            e.currentTarget.style.backgroundColor = "rgba(16, 185, 129, 0.12)";
-                          }}
-                        >
-                          {stk}
-                        </span>
-                      ))}
-                    </div>
-                  )}
+                  {(() => {
+                    const affectedStocks = Array.isArray(item.ai_affected_stocks)
+                      ? item.ai_affected_stocks
+                      : typeof item.ai_affected_stocks === "string"
+                        ? (() => { try { const p = JSON.parse(item.ai_affected_stocks); return Array.isArray(p) ? p : []; } catch { return []; } })()
+                        : [];
+                    if (!affectedStocks.length) return null;
+                    return (
+                      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "6px", marginTop: "2px" }}>
+                        <span style={{ fontSize: "10px", color: "#64748b", fontWeight: "600" }}>Impacted:</span>
+                        {affectedStocks.map((stk, idx) => (
+                          <span
+                            key={idx}
+                            onClick={(e) => {
+                              e.stopPropagation(); // prevent modal opening
+                              setSearchQuery(stk); // filter by this stock!
+                              setPage(1);
+                            }}
+                            style={{
+                              backgroundColor: "rgba(16, 185, 129, 0.12)",
+                              color: "#34d399",
+                              padding: "2px 6px",
+                              borderRadius: "4px",
+                              fontSize: "10px",
+                              fontWeight: "700",
+                              cursor: "pointer",
+                              transition: "all 0.15s"
+                            }}
+                            onMouseOver={(e) => {
+                              e.currentTarget.style.backgroundColor = "rgba(16, 185, 129, 0.25)";
+                            }}
+                            onMouseOut={(e) => {
+                              e.currentTarget.style.backgroundColor = "rgba(16, 185, 129, 0.12)";
+                            }}
+                          >
+                            {stk}
+                          </span>
+                        ))}
+                      </div>
+                    );
+                  })()}
 
                   {/* News Story specific indicator */}
                   {item.type === "news_story" && item.article_count && item.article_count > 1 && (
