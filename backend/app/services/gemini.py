@@ -38,7 +38,7 @@ def call_ollama(prompt: str, base_url: str = "http://localhost:11434", model_nam
         }
     }
     url = base_url.rstrip("/") + "/api/chat"
-    res = requests.post(url, json=payload, timeout=90)
+    res = requests.post(url, json=payload, timeout=12)
     res.raise_for_status()
     raw_text = res.json()["message"]["content"]
     cleaned = clean_json_response(raw_text)
@@ -63,7 +63,10 @@ def call_openai(prompt: str, api_key: str) -> dict:
     }
     payload = {
         "model": "gpt-4o-mini",
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": [
+            {"role": "system", "content": "Respond only with a raw, valid JSON object matching the requested schema. Do not output markdown code blocks."},
+            {"role": "user", "content": prompt}
+        ],
         "response_format": {"type": "json_object"}
     }
     res = requests.post("https://api.openai.com/v1/chat/completions", json=payload, headers=headers, timeout=15)
@@ -73,8 +76,7 @@ def call_openai(prompt: str, api_key: str) -> dict:
     return json.loads(cleaned)
 
 
-def call_groq(prompt: str, api_key: str, model_name: str) -> dict:
-    import time
+def call_groq(prompt: str, api_key: str, model_name: str = "llama-3.3-70b-versatile") -> dict:
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {api_key}"
@@ -87,11 +89,6 @@ def call_groq(prompt: str, api_key: str, model_name: str) -> dict:
         payload["response_format"] = {"type": "json_object"}
         
     res = requests.post("https://api.groq.com/openai/v1/chat/completions", json=payload, headers=headers, timeout=15)
-    if res.status_code == 429:
-        logger.warning("Groq API 429 rate limit hit, backing off 2s before retry...")
-        time.sleep(2)
-        res = requests.post("https://api.groq.com/openai/v1/chat/completions", json=payload, headers=headers, timeout=15)
-        
     res.raise_for_status()
     raw_text = res.json()["choices"][0]["message"]["content"]
     cleaned = clean_json_response(raw_text)

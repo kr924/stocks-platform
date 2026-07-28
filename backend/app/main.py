@@ -172,14 +172,12 @@ async def _intelligence_scheduler():
 
 
 def _run_corporate_announcements_scraper():
-    """Thread-safe wrapper for corporate announcements scraping and immediate AI analysis."""
+    """Thread-safe wrapper for 1-second corporate announcements scraping."""
     try:
         from app.services.nse_bse_scraper import fetch_corporate_announcements
-        from app.services.ai_analyzer import analyze_pending_events
         db = next(get_db())
         try:
             fetch_corporate_announcements(db)
-            analyze_pending_events(db)
         finally:
             db.close()
     except Exception as e:
@@ -187,7 +185,7 @@ def _run_corporate_announcements_scraper():
 
 
 def _run_other_nse_bse_scraper():
-    """Thread-safe wrapper for other NSE/BSE scraping and immediate AI analysis."""
+    """Thread-safe wrapper for other NSE/BSE scraping."""
     try:
         from app.services.nse_bse_scraper import (
             fetch_bulk_block_deals,
@@ -196,7 +194,6 @@ def _run_other_nse_bse_scraper():
             fetch_bse_announcements,
             fetch_financial_results,
         )
-        from app.services.ai_analyzer import analyze_pending_events
         db = next(get_db())
         try:
             fetch_bulk_block_deals(db)
@@ -204,7 +201,6 @@ def _run_other_nse_bse_scraper():
             fetch_insider_trading(db)
             fetch_bse_announcements(db)
             fetch_financial_results(db)
-            analyze_pending_events(db)
         finally:
             db.close()
     except Exception as e:
@@ -212,14 +208,12 @@ def _run_other_nse_bse_scraper():
 
 
 def _run_news_aggregator():
-    """Thread-safe wrapper for news aggregation and immediate AI analysis."""
+    """Thread-safe wrapper for news aggregation."""
     try:
         from app.services.news_aggregator import fetch_all_news
-        from app.services.ai_analyzer import analyze_pending_news
         db = next(get_db())
         try:
             fetch_all_news(db)
-            analyze_pending_news(db)
         finally:
             db.close()
     except Exception as e:
