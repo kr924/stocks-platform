@@ -247,7 +247,14 @@ def fetch_corporate_announcements(db: Session) -> int:
                 evt_time = _safe_datetime(ann_date)
                 
                 # Include symbol in hash so generic titles don't clash across companies
-                from app.services.ai_analyzer import apply_instant_tier_classification
+                h = event_hash("nse", "announcement", f"{symbol}:{subject}", evt_time.isoformat())
+                if is_duplicate_event(db, h):
+                    continue
+                
+                try:
+                    from app.services.ai_analyzer import apply_instant_tier_classification
+                except ImportError:
+                    apply_instant_tier_classification = None
                 
                 event = MarketEvent(
                     event_type="announcement",
@@ -261,7 +268,8 @@ def fetch_corporate_announcements(db: Session) -> int:
                     event_time=evt_time,
                     category=_classify_event_category("announcement", subject),
                 )
-                apply_instant_tier_classification(event)
+                if apply_instant_tier_classification:
+                    apply_instant_tier_classification(event)
                 try:
                     db.add(event)
                     db.commit()
@@ -315,6 +323,11 @@ def fetch_corporate_announcements(db: Session) -> int:
                     if is_duplicate_event(db, h):
                         continue
                     
+                    try:
+                        from app.services.ai_analyzer import apply_instant_tier_classification
+                    except ImportError:
+                        apply_instant_tier_classification = None
+
                     event = MarketEvent(
                         event_type="announcement",
                         source="bse",
@@ -327,7 +340,8 @@ def fetch_corporate_announcements(db: Session) -> int:
                         event_time=evt_time,
                         category=_classify_event_category("announcement", subject),
                     )
-                    apply_instant_tier_classification(event)
+                    if apply_instant_tier_classification:
+                        apply_instant_tier_classification(event)
                     try:
                         db.add(event)
                         db.commit()
@@ -500,6 +514,11 @@ def fetch_board_meetings(db: Session) -> int:
             if is_duplicate_event(db, h):
                 continue
             
+            try:
+                from app.services.ai_analyzer import apply_instant_tier_classification
+            except ImportError:
+                apply_instant_tier_classification = None
+
             event = MarketEvent(
                 event_type="board_meeting",
                 source="nse",
@@ -511,7 +530,8 @@ def fetch_board_meetings(db: Session) -> int:
                 event_time=evt_time,
                 category=_classify_event_category("board_meeting", title),
             )
-            apply_instant_tier_classification(event)
+            if apply_instant_tier_classification:
+                apply_instant_tier_classification(event)
             try:
                 db.add(event)
                 db.commit()
