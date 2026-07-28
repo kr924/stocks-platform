@@ -13,12 +13,13 @@ logger = logging.getLogger("app.gemini")
 # Helper function to reload dotenv dynamically
 def reload_env_vars():
     load_dotenv(override=True)
+    groq_raw = os.getenv("GROQ_API_KEYS") or os.getenv("GROQ_API_KEY", "")
     return {
         "gemini_key": os.getenv("GEMINI_API_KEY", ""),
         "openai_key": os.getenv("OPENAI_API_KEY", ""),
         "anthropic_key": os.getenv("ANTHROPIC_API_KEY", ""),
-        "groq_key": os.getenv("GROQ_API_KEY", ""),
-        "groq_model": os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+        "groq_key": groq_raw,
+        "groq_model": "llama-3.3-70b-versatile",
         "ollama_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
         "ollama_model": os.getenv("OLLAMA_MODEL", "stocks-analyst")
     }
@@ -77,48 +78,50 @@ def call_openai(prompt: str, api_key: str) -> dict:
     return json.loads(cleaned)
 
 
-def call_groq(prompt: str, api_key: str, model_name: str = "llama-3.3-70b-versatile") -> dict:
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {api_key}"
-    }
-    
-    # Valid Groq models supporting JSON response_format
-    valid_groq_json_models = [
-        "llama-3.3-70b-versatile",
-        "llama-3.1-8b-instant",
-        "llama3-70b-8192",
-        "llama3-8b-8192",
-        "gemma2-9b-it"
-    ]
-    
-    models_to_try = [model_name] + [m for m in valid_groq_json_models if m != model_name]
+def call_groq(prompt: str, api_key_input: str, model_name: str = "llama-3.3-70b-versatile") -> dict:
+    """
+    Call Groq API using strictly 'llama-3.3-70b-versatile'.
+    Supports multiple comma-separated API keys (e.g. 'gsk_key1,gsk_key2,gsk_key3').
+    If Key #1 hits HTTP 429 rate limit, automatically rotates to Key #2!
+    """
+    if not api_key_input:
+        raise ValueError("No Groq API keys provided")
         
+    keys = [k.strip() for k in api_key_input.replace("\n", ",").split(",") if k.strip()]
+    if not keys:
+        raise ValueError("No valid Groq API keys found")
+        
+    target_model = "llama-3.3-70b-versatile"
     last_exc = None
-    for m in models_to_try:
+    
+    for idx, key in enumerate(keys):
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {key}"
+        }
+        payload = {
+            "model": target_model,
+            "messages": [{"role": "user", "content": prompt}],
+            "response_format": {"type": "json_object"}
+        }
         try:
-            payload = {
-                "model": m,
-                "messages": [{"role": "user", "content": prompt}],
-                "response_format": {"type": "json_object"}
-            }
             res = requests.post("https://api.groq.com/openai/v1/chat/completions", json=payload, headers=headers, timeout=12)
             if res.status_code == 429:
-                logger.warning(f"Groq model '{m}' 429 rate limit hit, backing off 1.5s and rotating model...")
-                time.sleep(1.5)
+                logger.warning(f"🔑 Groq API Key #{idx+1} hit 429 rate limit. Rotating to key #{idx+2}...")
+                time.sleep(1.0)
                 continue
             res.raise_for_status()
             raw_text = res.json()["choices"][0]["message"]["content"]
             cleaned = clean_json_response(raw_text)
             return json.loads(cleaned)
         except Exception as e:
-            logger.warning(f"Groq model '{m}' failed: {e}")
+            logger.warning(f"Groq API Key #{idx+1} call failed: {e}")
             last_exc = e
             continue
-            
+
     if last_exc:
         raise last_exc
-    raise RuntimeError("All Groq models failed")
+    raise RuntimeError("All Groq API keys failed or rate-limited")
 
 
 def call_anthropic(prompt: str, api_key: str) -> dict:
