@@ -78,50 +78,26 @@ def call_openai(prompt: str, api_key: str) -> dict:
     return json.loads(cleaned)
 
 
-def call_groq(prompt: str, api_key_input: str, model_name: str = "llama-3.3-70b-versatile") -> dict:
-    """
-    Call Groq API using strictly 'llama-3.3-70b-versatile'.
-    Supports multiple comma-separated API keys (e.g. 'gsk_key1,gsk_key2,gsk_key3').
-    If Key #1 hits HTTP 429 rate limit, automatically rotates to Key #2!
-    """
-    if not api_key_input:
-        raise ValueError("No Groq API keys provided")
+def call_groq(prompt: str, api_key: str, model_name: str = "llama-3.3-70b-versatile") -> dict:
+    """Call Groq API using strictly llama-3.3-70b-versatile for a single API key."""
+    key = api_key.strip()
+    if not key:
+        raise ValueError("Groq API key is empty")
         
-    keys = [k.strip() for k in api_key_input.replace("\n", ",").split(",") if k.strip()]
-    if not keys:
-        raise ValueError("No valid Groq API keys found")
-        
-    target_model = "llama-3.3-70b-versatile"
-    last_exc = None
-    
-    for idx, key in enumerate(keys):
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {key}"
-        }
-        payload = {
-            "model": target_model,
-            "messages": [{"role": "user", "content": prompt}],
-            "response_format": {"type": "json_object"}
-        }
-        try:
-            res = requests.post("https://api.groq.com/openai/v1/chat/completions", json=payload, headers=headers, timeout=12)
-            if res.status_code == 429:
-                logger.warning(f"🔑 Groq API Key #{idx+1} hit 429 rate limit. Rotating to key #{idx+2}...")
-                time.sleep(1.0)
-                continue
-            res.raise_for_status()
-            raw_text = res.json()["choices"][0]["message"]["content"]
-            cleaned = clean_json_response(raw_text)
-            return json.loads(cleaned)
-        except Exception as e:
-            logger.warning(f"Groq API Key #{idx+1} call failed: {e}")
-            last_exc = e
-            continue
-
-    if last_exc:
-        raise last_exc
-    raise RuntimeError("All Groq API keys failed or rate-limited")
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {key}"
+    }
+    payload = {
+        "model": "llama-3.3-70b-versatile",
+        "messages": [{"role": "user", "content": prompt}],
+        "response_format": {"type": "json_object"}
+    }
+    res = requests.post("https://api.groq.com/openai/v1/chat/completions", json=payload, headers=headers, timeout=12)
+    res.raise_for_status()
+    raw_text = res.json()["choices"][0]["message"]["content"]
+    cleaned = clean_json_response(raw_text)
+    return json.loads(cleaned)
 
 
 def call_anthropic(prompt: str, api_key: str) -> dict:
@@ -144,11 +120,11 @@ def call_anthropic(prompt: str, api_key: str) -> dict:
 
 
 def call_gemini(prompt: str, api_key: str) -> dict:
-    if not api_key:
-        raise ValueError("Gemini API key is empty")
+    key = api_key.strip()
+    if not key or key.startswith("AQ.") or key.startswith("YOUR_"):
+        raise ValueError("Invalid or placeholder Gemini API key")
     
-    # Try gemini-1.5-flash via REST API
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={key}"
     headers = {"Content-Type": "application/json"}
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
@@ -157,8 +133,7 @@ def call_gemini(prompt: str, api_key: str) -> dict:
     
     res = requests.post(url, json=payload, headers=headers, timeout=15)
     if not res.ok:
-        # Fallback to gemini-1.5-pro
-        fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key={api_key}"
+        fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key={key}"
         res = requests.post(fallback_url, json=payload, headers=headers, timeout=15)
     
     res.raise_for_status()

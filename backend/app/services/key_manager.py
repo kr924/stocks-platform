@@ -37,10 +37,19 @@ class ProviderPool:
         else:
             key_strings = [k.strip() for k in raw_input.replace("\n", ",").split(",") if k.strip()]
         
+        # Filter out placeholder or invalid keys
+        valid_keys = []
+        for k in key_strings:
+            if self.provider == "gemini" and (k.startswith("AQ.") or k.startswith("YOUR_")):
+                continue
+            if k.startswith("YOUR_") or len(k) < 5:
+                continue
+            valid_keys.append(k)
+
         with self.lock:
             existing_map = {k.key: k for k in self.keys}
             new_keys = []
-            for idx, k_str in enumerate(key_strings):
+            for idx, k_str in enumerate(valid_keys):
                 if k_str in existing_map:
                     # Preserve existing busy / rate-limit state
                     ks = existing_map[k_str]
