@@ -495,16 +495,21 @@ function IntelligenceDashboardContent() {
 
     connect();
 
-    // Fetch initial AI call reason logs
-    fetch(`${API_BASE}/api/intelligence/logs`)
-      .then(res => res.json())
-      .then(data => {
-        if (Array.isArray(data)) setAiLogs(data);
-      })
-      .catch(() => {});
+    // Fetch initial AI call reason logs and poll every 10s
+    const pollLogs = () => {
+      fetch(`${API_BASE}/api/intelligence/logs`)
+        .then(res => res.json())
+        .then(data => {
+          if (Array.isArray(data)) setAiLogs(data);
+        })
+        .catch(() => {});
+    };
+    pollLogs();
+    const logInterval = setInterval(pollLogs, 10000);
 
     return () => {
       if (reconnectTimer) clearTimeout(reconnectTimer);
+      clearInterval(logInterval);
       es?.close();
       eventSourceRef.current = null;
       setSseStatus("disconnected");
@@ -884,7 +889,9 @@ function IntelligenceDashboardContent() {
                 cursor: "pointer"
               }}
             >
-              <option value="all">All Categories</option>
+              <option value="all">All Active Intelligence (Hides Auto-Skipped)</option>
+              <option value="auto_skip">⏭️ Auto-Skipped Disclosures Only</option>
+              <option value="all_with_skipped">All Items (Including Auto-Skipped)</option>
               <option value="board_meeting">Board Meetings</option>
               <option value="sebi_filing">SEBI / Exchange Filings</option>
               <option value="earnings">Earnings & Results</option>
@@ -1214,35 +1221,62 @@ function IntelligenceDashboardContent() {
 
         {/* Live Stream Feed */}
         <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-          {loadingFeed ? (
-            <div style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center",
-              padding: "80px 20px",
-              background: "rgba(17, 24, 39, 0.2)",
-              borderRadius: "16px",
-              border: "1px solid rgba(255, 255, 255, 0.03)"
-            }}>
-              <RefreshCw className="animate-spin text-blue-500" size={32} />
-              <div style={{ marginTop: "16px", fontSize: "14px", color: "#64748b" }}>Analyzing real-time intelligence feed...</div>
-            </div>
-          ) : feedItems.length === 0 ? (
-            <div style={{
-              textAlign: "center",
-              padding: "60px 20px",
-              background: "rgba(17, 24, 39, 0.2)",
-              borderRadius: "16px",
-              border: "1px solid rgba(255, 255, 255, 0.03)",
-              color: "#64748b"
-            }}>
-              <Info size={32} style={{ margin: "0 auto 12px auto", color: "#475569" }} />
-              <div style={{ fontSize: "15px", fontWeight: "600" }}>No intelligence items found</div>
-              <div style={{ fontSize: "12px", marginTop: "4px" }}>Try broadening your search window or active filters.</div>
-            </div>
-          ) : (
-            feedItems.map((item) => {
+          {(() => {
+            const visibleFeedItems = feedItems.filter((item) => {
+              const isAutoSkip =
+                item.ai_provider === "auto_skip" ||
+                item.category === "auto_skip" ||
+                (item.ai_summary && item.ai_summary.startsWith("Auto-skipped:"));
+
+              if (filterCategory === "auto_skip") {
+                return isAutoSkip;
+              }
+              if (isAutoSkip && filterCategory !== "all_with_skipped") {
+                return false;
+              }
+              return true;
+            });
+
+            if (loadingFeed) {
+              return (
+                <div style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: "80px 20px",
+                  background: "rgba(17, 24, 39, 0.2)",
+                  borderRadius: "16px",
+                  border: "1px solid rgba(255, 255, 255, 0.03)"
+                }}>
+                  <RefreshCw className="animate-spin text-blue-500" size={32} />
+                  <div style={{ marginTop: "16px", fontSize: "14px", color: "#64748b" }}>Analyzing real-time intelligence feed...</div>
+                </div>
+              );
+            }
+
+            if (visibleFeedItems.length === 0) {
+              return (
+                <div style={{
+                  textAlign: "center",
+                  padding: "60px 20px",
+                  background: "rgba(17, 24, 39, 0.2)",
+                  borderRadius: "16px",
+                  border: "1px solid rgba(255, 255, 255, 0.03)",
+                  color: "#64748b"
+                }}>
+                  <Info size={32} style={{ margin: "0 auto 12px auto", color: "#475569" }} />
+                  <div style={{ fontSize: "15px", fontWeight: "600" }}>No intelligence items found</div>
+                  <div style={{ fontSize: "12px", marginTop: "4px" }}>
+                    {filterCategory === "all"
+                      ? "Routine auto-skipped announcements are hidden by default. Select 'Auto-Skipped Disclosures Only' in category dropdown to view them."
+                      : "Try broadening your search window or active filters."}
+                  </div>
+                </div>
+              );
+            }
+
+            return visibleFeedItems.map((item) => {
               const sentiment = getSentimentStyles(item.ai_sentiment);
               return (
                 <div
@@ -1506,8 +1540,8 @@ function IntelligenceDashboardContent() {
                   )}
                 </div>
               );
-            })
-          )}
+            });
+          })()}
         </div>
 
         {/* Pagination */}

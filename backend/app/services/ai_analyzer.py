@@ -80,24 +80,55 @@ def _call_llm_for_analysis(prompt: str):
                 
                 key_manager.release_key(ks, is_rate_limited=False)
                 if res:
+                    try:
+                        from app.services.ai_log_tracker import record_ai_log
+                        record_ai_log(f"✅ AI Analysis completed via {provider.upper()} (Key #{ks.index + 1})", provider=provider, key_index=ks.index + 1, tier="success", level="success")
+                    except Exception:
+                        pass
                     return res, provider
             except Exception as e:
                 is_429 = "429" in str(e) or "Too Many Requests" in str(e) or "Rate limit" in str(e)
                 key_manager.release_key(ks, is_rate_limited=is_429, backoff_seconds=60.0)
-                logger.warning(f"[{provider.upper()}] Key #{ks.index + 1} call failed: {e}")
+                err_msg = str(e)
+                logger.warning(f"[{provider.upper()}] Key #{ks.index + 1} call failed: {err_msg}")
+                try:
+                    from app.services.ai_log_tracker import record_ai_log
+                    record_ai_log(f"❌ {provider.upper()} Key #{ks.index + 1} Error: {err_msg[:120]}", provider=provider, key_index=ks.index + 1, tier="error", level="error", details=err_msg)
+                except Exception:
+                    pass
                 # Try next free key for this provider or move on
 
     # ── Phase 2: If ALL Cloud Keys are Busy/Rate-Limited, Fallback to Local Ollama (30s timeout) ──
     if env.get("ollama_url"):
         try:
             logger.info("🦙 [LLM FALLBACK]: All cloud keys busy/rate-limited. Routing to local Ollama (30s timeout)...")
+            try:
+                from app.services.ai_log_tracker import record_ai_log
+                record_ai_log("🦙 All cloud keys rate-limited. Routing to local Ollama (30s timeout)...", provider="ollama", tier="execution", level="info")
+            except Exception:
+                pass
             res = call_ollama(prompt, env["ollama_url"], env.get("ollama_model", "stocks-analyst"), timeout=30)
+            try:
+                from app.services.ai_log_tracker import record_ai_log
+                record_ai_log("✅ Local Ollama analysis completed successfully", provider="ollama", tier="success", level="success")
+            except Exception:
+                pass
             return res, "ollama"
         except Exception as ollama_err:
             logger.warning(f"Local Ollama fallback failed: {ollama_err}")
+            try:
+                from app.services.ai_log_tracker import record_ai_log
+                record_ai_log(f"❌ Local Ollama fallback error: {str(ollama_err)[:120]}", provider="ollama", tier="error", level="error")
+            except Exception:
+                pass
 
     # ── Phase 3: Fast 0-CPU Rule Engine fallback ──
     logger.info("⚡ [LLM FALLBACK]: All LLMs unavailable. Using 0-CPU Rule Engine fallback...")
+    try:
+        from app.services.ai_log_tracker import record_ai_log
+        record_ai_log("⚡ All cloud & local LLMs unavailable. Using 0-CPU Rule Engine fallback", provider="rule_engine", tier="rule_engine", level="warning")
+    except Exception:
+        pass
     res = _smart_rule_analysis(prompt)
     return res, "rule_engine"
 
@@ -194,12 +225,21 @@ _SKIP_SUBJECTS = {
     "analysts/institutional investor meet/con. call updates",
     "investor presentation",
     "certificate under sebi (depositories and participants) regulations",
+    "shareholders meeting",
+    "shareholders meeting...",
+    "voting results",
+    "scrutinizer report",
 }
 
 # Subjects that trigger skip via 'contains' check (case-insensitive)
 _SKIP_SUBJECT_CONTAINS = [
     "board meeting —",
     "board meeting -",
+    "shareholders meeting",
+    "voting results",
+    "scrutinizer report",
+    "loss of share certificate",
+    "duplicate share certificate",
 ]
 
 # Details keywords that trigger skip when subject is "General Updates" / "Updates"
