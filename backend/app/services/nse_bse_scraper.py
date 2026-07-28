@@ -67,16 +67,21 @@ class NSESession:
         except Exception as e:
             logger.debug(f"Failed to refresh NSE cookies: {e}")
     
-    def get(self, url: str, params: dict = None, timeout: int = 15) -> Optional[dict]:
+    def get(self, url: str, params: dict = None, headers: dict = None, timeout: int = 15) -> Optional[dict]:
         """Make a GET request to NSE API with proper cookie management."""
         self._refresh_cookies()
+        req_headers = {}
+        if headers:
+            req_headers.update(headers)
+        if "corporate-announcements" in url:
+            req_headers["Referer"] = "https://www.nseindia.com/companies-listing/corporate-filings/announcements"
         try:
-            resp = self.session.get(url, params=params, timeout=timeout)
-            if resp.status_code == 403:
+            resp = self.session.get(url, params=params, headers=req_headers if req_headers else None, timeout=timeout)
+            if resp.status_code in (401, 403):
                 # Force cookie refresh and retry
                 self._last_cookie_refresh = 0
                 self._refresh_cookies()
-                resp = self.session.get(url, params=params, timeout=timeout)
+                resp = self.session.get(url, params=params, headers=req_headers if req_headers else None, timeout=timeout)
             resp.raise_for_status()
             try:
                 return resp.json()
@@ -231,15 +236,17 @@ def fetch_corporate_announcements(db: Session) -> int:
     if isinstance(announcements, list):
         for ann in announcements:
             try:
-                symbol = ann.get("symbol", ann.get("sm_name", ann.get("col_0", ann.get("company_name", "")))).strip().upper()
-                subject = ann.get("desc", ann.get("subject", ann.get("an_desc", ""))).strip()
+                if not isinstance(ann, dict):
+                    continue
+                symbol = str(ann.get("symbol") or ann.get("sm_name") or ann.get("col_0") or ann.get("company_name") or "").strip().upper()
+                subject = str(ann.get("desc") or ann.get("subject") or ann.get("an_desc") or ann.get("attchmntText") or "").strip()
                 if not subject:
                     continue
                 
-                ann_date = ann.get("an_dt", ann.get("bcastDate", ann.get("broadcastDate", ann.get("date", ann.get("dt", "")))))
+                ann_date = str(ann.get("an_dt") or ann.get("bcastDate") or ann.get("broadcastDate") or ann.get("date") or ann.get("dt") or "").strip()
                 evt_time = _safe_datetime(ann_date)
                 
-                # Include symbol in hash so generic titles (e.g. "Copy of Newspaper Publication") don't clash across different companies
+                # Include symbol in hash so generic titles don't clash across companies
                 h = event_hash("nse", "announcement", f"{symbol}:{subject}", evt_time.isoformat())
                 if is_duplicate_event(db, h):
                     continue
