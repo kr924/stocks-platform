@@ -891,6 +891,9 @@ async def stream_intelligence(request: Request):
             finally:
                 db.close()
 
+            # Send initial 1KB comment buffer to flush Cloudflare/Nginx proxies immediately
+            yield f": {' ' * 1024}\n\n"
+
             connected_data = json.dumps({
                 "status": "connected",
                 "clients": sse_manager.client_count,
@@ -900,20 +903,20 @@ async def stream_intelligence(request: Request):
             })
             yield f"event: connected\ndata: {connected_data}\n\n"
 
-            # Main event loop: wait for broadcasts or send heartbeats
+            # Main event loop: wait for broadcasts or send heartbeats (every 5 seconds)
             while True:
                 # Check if client disconnected
                 if await request.is_disconnected():
                     break
 
                 try:
-                    # Wait up to 30s for a new event; if none, send heartbeat
-                    message = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    # Wait up to 5s for a new event; if none, send heartbeat
+                    message = await asyncio.wait_for(queue.get(), timeout=5.0)
                     event_type = message.get("type", "message")
                     event_data = json.dumps(message.get("data", {}), default=str)
                     yield f"event: {event_type}\ndata: {event_data}\n\n"
                 except asyncio.TimeoutError:
-                    # No events in 30s — send heartbeat to keep connection alive
+                    # Send heartbeat every 5s to keep connection alive
                     heartbeat_data = json.dumps({
                         "clients": sse_manager.client_count,
                         "timestamp": datetime.utcnow().isoformat(),
@@ -928,8 +931,9 @@ async def stream_intelligence(request: Request):
         event_generator(),
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache",
+            "Cache-Control": "no-cache, no-transform",
             "Connection": "keep-alive",
+            "Content-Type": "text/event-stream",
             "X-Accel-Buffering": "no",
         },
     )

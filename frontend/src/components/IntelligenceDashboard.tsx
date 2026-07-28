@@ -359,6 +359,10 @@ export function IntelligenceDashboard() {
       es = new EventSource(`${API_BASE}/api/intelligence/stream`);
       eventSourceRef.current = es;
 
+      es.onopen = () => {
+        setSseStatus("connected");
+      };
+
       es.addEventListener("connected", (e: MessageEvent) => {
         setSseStatus("connected");
         try {
