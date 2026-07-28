@@ -1196,7 +1196,7 @@ function IntelligenceDashboardContent() {
                       }}>
                         {tagText}
                       </span>
-                      {log.provider && (
+                      {log.provider && log.provider !== "auto_skip" && log.provider !== "manual_pending" && (
                         <span style={{ color: "#e2e8f0", fontSize: "11px", fontWeight: 600 }}>
                           [{log.provider.toUpperCase()}{log.key_index ? ` #${log.key_index}` : ""}]
                         </span>

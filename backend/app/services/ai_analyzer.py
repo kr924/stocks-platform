@@ -211,7 +211,7 @@ def _classify_ai_tier(event) -> str:
     Classify a MarketEvent into an AI analysis tier.
     
     Returns one of:
-      'skip'              – auto-mark neutral, zero AI calls
+      'skip'              – auto-mark neutral, ZERO AI calls
       'financial_results' – deep analysis with PDF + Screener.in
       'standard'          – normal Groq AI analysis
       'manual_only'       – no auto AI; user must click Re-analyze
@@ -229,33 +229,38 @@ def _classify_ai_tier(event) -> str:
     
     # --- Exchange (NSE/BSE) events below ---
     
-    # Rule 1: Skip newspaper publications, press releases, analyst meets, investor presentations, SEBI certificates
+    # PRIORITY RULE 1: Financial Results (must take precedence before intimation skips)
+    is_financial = any(kw in title_lower or kw in desc_lower for kw in ["financial", "finan", "quarterly result", "financial results"])
+    is_board_meeting_or_outcome = any(kw in title_lower for kw in ["board meeting", "outcome", "results", "declaration"])
+    if is_financial and is_board_meeting_or_outcome and "intimation" not in title_lower:
+        return "financial_results"
+
+    # RULE 2: Skip routine disclosures (newspaper, press releases, analyst meets, investor presentations, SEBI certificates)
     if title_lower in _SKIP_SUBJECTS:
         return "skip"
     
-    # Rule 1b: Skip subjects containing "Board Meeting —" (intimation notices, not outcome)
-    if any(kw in title_lower for kw in _SKIP_SUBJECT_CONTAINS):
+    # RULE 2b: Skip Intimation notices (e.g. "Board Meeting Intimation", "Prior Intimation")
+    if "intimation" in title_lower or "notice of board meeting" in title_lower:
+        return "skip"
+
+    if any(kw in title_lower for kw in _SKIP_SUBJECT_CONTAINS) and not is_financial:
         return "skip"
     
-    # Rule 2: Skip "General Updates" / "Updates" with newspaper/press/media in details
+    # RULE 2c: Skip "General Updates" / "Updates" with newspaper/press/media in details
     if title_lower in ("general updates", "updates"):
         if any(kw in desc_lower for kw in _SKIP_DETAIL_KEYWORDS):
             return "skip"
     
-    # Rule 3: Financial Results — "Outcome of Board Meeting" + "finan" in details
-    if "outcome of board meeting" in title_lower and "finan" in desc_lower:
-        return "financial_results"
-    
-    # Rule 4: Standard exchange analysis
+    # RULE 3: Standard exchange analysis
     return "standard"
 
 
 def _auto_mark_skip(db, event, reason: str):
-    """Mark an event as analyzed with neutral defaults (no AI call)."""
+    """Mark an event as analyzed with neutral defaults (0 AI calls)."""
     logger.info(f"⏭️ [AI TIER: SKIP] Event #{event.id} [{event.symbol or 'GENERAL'}]: '{event.title}' — {reason}")
     try:
         from app.services.ai_log_tracker import record_ai_log
-        record_ai_log(f"Auto-skipped (0 AI calls): [{event.symbol or 'GENERAL'}] '{event.title}'", provider="auto_skip", tier="skip", level="info", details=reason)
+        record_ai_log(f"Auto-skipped (0 AI calls): [{event.symbol or 'GENERAL'}] '{event.title}'", provider="", tier="skip", level="info", details=reason)
     except Exception:
         pass
     event.ai_sentiment = "neutral"
@@ -272,7 +277,7 @@ def _auto_mark_manual_only(db, event):
     logger.info(f"🔒 [AI TIER: MANUAL_ONLY] Event #{event.id} [{event.symbol or 'GENERAL'}]: '{event.title}' — Non-exchange source, AI on demand only")
     try:
         from app.services.ai_log_tracker import record_ai_log
-        record_ai_log(f"Non-exchange event (on demand only): [{event.symbol or 'GENERAL'}] '{event.title}'", provider="manual_pending", tier="manual_only", level="info")
+        record_ai_log(f"Non-exchange event (on demand only): [{event.symbol or 'GENERAL'}] '{event.title}'", provider="", tier="manual_only", level="info")
     except Exception:
         pass
     event.ai_sentiment = "neutral"
