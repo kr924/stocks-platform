@@ -68,7 +68,28 @@ def get_intelligence_feed(
         events_q = events_q.filter(MarketEvent.ai_sentiment == sentiment)
     if symbol:
         events_q = events_q.filter(MarketEvent.symbol == symbol.upper())
-    if category and category not in ("news", "filing"):
+
+    # Category handling
+    if category == "auto_skip":
+        events_q = events_q.filter(
+            or_(
+                MarketEvent.ai_provider == "auto_skip",
+                MarketEvent.category == "auto_skip",
+                MarketEvent.ai_summary.ilike("Auto-skipped%")
+            )
+        )
+    elif category == "all_with_skipped":
+        # Include all items (active + auto-skipped)
+        pass
+    elif category == "all" or not category:
+        # Default: Exclude auto-skipped routine disclosures
+        events_q = events_q.filter(
+            or_(
+                MarketEvent.ai_provider.is_(None),
+                MarketEvent.ai_provider != "auto_skip"
+            )
+        )
+    elif category not in ("news", "filing"):
         events_q = events_q.filter(MarketEvent.category == category)
     if search:
         search_pattern = f"%{search}%"

@@ -316,10 +316,7 @@ function IntelligenceDashboardContent() {
         setLoadingFeed(true);
       }
       try {
-        let url = `${API_BASE}/api/intelligence/feed?page=${page}&page_size=30&hours=${timeWindow}`;
-        if (filterCategory !== "all") {
-          url += `&category=${filterCategory}`;
-        }
+        let url = `${API_BASE}/api/intelligence/feed?page=${page}&page_size=30&hours=${timeWindow}&category=${filterCategory}`;
         if (filterSentiment !== "all") {
           url += `&sentiment=${filterSentiment}`;
         }
