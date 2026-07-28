@@ -36,6 +36,9 @@ class NSESession:
     def _setup_headers(self):
         headers = self.config.nse_bse.get("headers", {})
         self.session.headers.update(headers)
+        self.session.headers.update({
+            "Accept-Encoding": "gzip, deflate",
+        })
     
     def _refresh_cookies(self):
         """Visit NSE homepage to obtain session cookies with browser-like HTML headers."""
@@ -48,6 +51,7 @@ class NSESession:
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
             "Accept-Language": "en-US,en;q=0.9",
             "Referer": "https://www.google.com/",
+            "Accept-Encoding": "gzip, deflate",
         }
         try:
             # Visit the homepage to get cookies
@@ -77,13 +81,19 @@ class NSESession:
             try:
                 return resp.json()
             except Exception:
+                content = resp.content
                 try:
                     import gzip
-                    decompressed = gzip.decompress(resp.content)
-                    return json.loads(decompressed.decode("utf-8"))
-                except Exception as parse_err:
-                    logger.error(f"Non-JSON response from {url}: {resp.text[:200]}")
-                    return None
+                    return json.loads(gzip.decompress(content).decode("utf-8"))
+                except Exception:
+                    pass
+                try:
+                    import brotli
+                    return json.loads(brotli.decompress(content).decode("utf-8"))
+                except Exception:
+                    pass
+                logger.error(f"Non-JSON response from {url}: {resp.text[:200]}")
+                return None
         except Exception as e:
             logger.error(f"NSE API error for {url}: {e}")
             return None
