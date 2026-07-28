@@ -295,6 +295,35 @@ def _classify_ai_tier(event) -> str:
     return "standard"
 
 
+def apply_instant_tier_classification(event):
+    """
+    Check AI tier immediately upon ingestion/creation of a MarketEvent.
+    If the event belongs to the 'skip' or 'manual_only' tier, set its ai_provider
+    and ai_analyzed_at fields instantly BEFORE saving to DB and broadcasting SSE.
+    This prevents auto-skipped items from ever showing up in the UI main feed!
+    """
+    tier = _classify_ai_tier(event)
+    if tier == "skip":
+        event.ai_sentiment = "neutral"
+        event.ai_impact_score = 0.0
+        event.ai_summary = f"Auto-skipped: Subject '{event.title}' is excluded from AI analysis"
+        event.ai_affected_stocks = json.dumps([event.symbol] if event.symbol else [])
+        event.ai_provider = "auto_skip"
+        event.ai_analyzed_at = datetime.utcnow()
+        try:
+            from app.services.ai_log_tracker import record_ai_log
+            record_ai_log(f"Auto-skipped during ingestion (0 AI calls): [{event.symbol or 'GENERAL'}] '{event.title}'", provider="", tier="skip", level="info", details=event.title)
+        except Exception:
+            pass
+    elif tier == "manual_only":
+        event.ai_sentiment = "neutral"
+        event.ai_impact_score = 0.0
+        event.ai_summary = event.title or "Awaiting manual AI analysis"
+        event.ai_affected_stocks = json.dumps([event.symbol] if event.symbol else [])
+        event.ai_provider = "manual_pending"
+        event.ai_analyzed_at = datetime.utcnow()
+
+
 def _auto_mark_skip(db, event, reason: str):
     """Mark an event as analyzed with neutral defaults (0 AI calls)."""
     logger.info(f"⏭️ [AI TIER: SKIP] Event #{event.id} [{event.symbol or 'GENERAL'}]: '{event.title}' — {reason}")

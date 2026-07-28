@@ -247,9 +247,7 @@ def fetch_corporate_announcements(db: Session) -> int:
                 evt_time = _safe_datetime(ann_date)
                 
                 # Include symbol in hash so generic titles don't clash across companies
-                h = event_hash("nse", "announcement", f"{symbol}:{subject}", evt_time.isoformat())
-                if is_duplicate_event(db, h):
-                    continue
+                from app.services.ai_analyzer import apply_instant_tier_classification
                 
                 event = MarketEvent(
                     event_type="announcement",
@@ -263,6 +261,7 @@ def fetch_corporate_announcements(db: Session) -> int:
                     event_time=evt_time,
                     category=_classify_event_category("announcement", subject),
                 )
+                apply_instant_tier_classification(event)
                 try:
                     db.add(event)
                     db.commit()
@@ -278,6 +277,10 @@ def fetch_corporate_announcements(db: Session) -> int:
                         "url": event.url,
                         "time": to_iso_utc(event.event_time),
                         "category": event.category,
+                        "ai_sentiment": event.ai_sentiment,
+                        "ai_impact_score": event.ai_impact_score,
+                        "ai_summary": event.ai_summary,
+                        "ai_provider": event.ai_provider,
                     })
                 except Exception as inner_err:
                     db.rollback()
@@ -324,6 +327,7 @@ def fetch_corporate_announcements(db: Session) -> int:
                         event_time=evt_time,
                         category=_classify_event_category("announcement", subject),
                     )
+                    apply_instant_tier_classification(event)
                     try:
                         db.add(event)
                         db.commit()
@@ -339,6 +343,10 @@ def fetch_corporate_announcements(db: Session) -> int:
                             "url": event.url,
                             "time": to_iso_utc(event.event_time),
                             "category": event.category,
+                            "ai_sentiment": event.ai_sentiment,
+                            "ai_impact_score": event.ai_impact_score,
+                            "ai_summary": event.ai_summary,
+                            "ai_provider": event.ai_provider,
                         })
                     except Exception as inner_err:
                         db.rollback()
@@ -503,6 +511,7 @@ def fetch_board_meetings(db: Session) -> int:
                 event_time=evt_time,
                 category=_classify_event_category("board_meeting", title),
             )
+            apply_instant_tier_classification(event)
             try:
                 db.add(event)
                 db.commit()
@@ -518,6 +527,10 @@ def fetch_board_meetings(db: Session) -> int:
                     "description": event.description,
                     "time": to_iso_utc(event.event_time),
                     "category": event.category,
+                    "ai_sentiment": event.ai_sentiment,
+                    "ai_impact_score": event.ai_impact_score,
+                    "ai_summary": event.ai_summary,
+                    "ai_provider": event.ai_provider,
                 })
             except Exception as inner_err:
                 db.rollback()
