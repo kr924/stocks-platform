@@ -51,6 +51,10 @@ def _call_llm_for_analysis(prompt: str, event_info: str = ""):
     # Sync environment keys into key_manager pools
     key_manager.sync_all(env)
     
+    # Priority Override: If openrouter_key exists in env, force openrouter as #1 primary provider
+    if env.get("openrouter_key"):
+        cloud_providers = ["openrouter"] + [p for p in cloud_providers if p != "openrouter"]
+    
     info_suffix = f" for {event_info}" if event_info else ""
 
     # ── Phase 1: Try Cloud Providers with Idle Key Pool Concurrency ──

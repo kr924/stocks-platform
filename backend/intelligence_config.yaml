@@ -230,8 +230,9 @@ filings:
 # --- AI Analysis ---
 ai:
   enabled: true
-  primary_provider: "groq"
+  primary_provider: "openrouter"
   fallback_providers:
+    - "groq"
     - "gemini"
     - "openai"
     - "anthropic"

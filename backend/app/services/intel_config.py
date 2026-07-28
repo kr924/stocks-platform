@@ -179,8 +179,8 @@ def _get_defaults() -> dict:
         },
         "ai": {
             "enabled": True,
-            "primary_provider": "groq",
-            "fallback_providers": ["gemini", "openai", "anthropic"],
+            "primary_provider": "openrouter",
+            "fallback_providers": ["groq", "gemini", "openai", "anthropic"],
             "batch_size": 10,
             "thresholds": {"alert_threshold": 0.6, "critical_threshold": 0.85},
             "max_prompt_tokens": 4000,
