@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import React, { Component, useState, useEffect, useRef, useCallback } from "react";
 import {
   Newspaper,
   Bell,
@@ -122,7 +122,7 @@ interface Stats24h {
   event_types: Record<string, number>;
 }
 
-export function IntelligenceDashboard() {
+function IntelligenceDashboardContent() {
   // Feed state
   const [feedItems, setFeedItems] = useState<FeedItem[]>([]);
   const [loadingFeed, setLoadingFeed] = useState(true);
@@ -2343,5 +2343,70 @@ export function IntelligenceDashboard() {
         </div>
       )}
     </div>
+  );
+}
+
+export class ErrorBoundary extends Component<{ children: React.ReactNode }, { hasError: boolean; error: any }> {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: any) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: any, errorInfo: any) {
+    console.error("Dashboard Render Error:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{
+          padding: "60px 20px",
+          textAlign: "center",
+          color: "#f87171",
+          backgroundColor: "#0d131f",
+          minHeight: "80vh",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: "16px"
+        }}>
+          <h2 style={{ fontSize: "20px", fontWeight: "700", color: "#f87171" }}>Something went wrong loading AI Intelligence</h2>
+          <p style={{ fontSize: "13px", color: "#94a3b8", maxWidth: "500px" }}>
+            {this.state.error?.toString() || "A client-side render error occurred."}
+          </p>
+          <button
+            onClick={() => {
+              this.setState({ hasError: false, error: null });
+              window.location.reload();
+            }}
+            style={{
+              padding: "10px 20px",
+              backgroundColor: "#2563eb",
+              color: "white",
+              fontWeight: "700",
+              borderRadius: "8px",
+              border: "none",
+              cursor: "pointer"
+            }}
+          >
+            🔄 Reload Dashboard
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+export function IntelligenceDashboard(props: any) {
+  return (
+    <ErrorBoundary>
+      <IntelligenceDashboardContent {...props} />
+    </ErrorBoundary>
   );
 }
