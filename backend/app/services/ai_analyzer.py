@@ -126,6 +126,34 @@ def _smart_rule_analysis(prompt: str) -> dict:
 
 # ─── Sentiment Analysis Prompts ─────────────────────────────────────────
 
+def extract_pdf_text_from_url(pdf_url: str, max_pages: int = 2) -> str:
+    """Download PDF from URL and extract text from first N pages."""
+    if not pdf_url or not isinstance(pdf_url, str) or not pdf_url.startswith("http"):
+        return ""
+    try:
+        import requests
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": "https://www.nseindia.com/"
+        }
+        res = requests.get(pdf_url, headers=headers, timeout=5)
+        if res.status_code != 200 or len(res.content) < 500:
+            return ""
+        
+        import io
+        import PyPDF2
+        reader = PyPDF2.PdfReader(io.BytesIO(res.content))
+        extracted = []
+        for i in range(min(max_pages, len(reader.pages))):
+            t = reader.pages[i].extract_text()
+            if t:
+                extracted.append(t)
+        return "\n".join(extracted)[:2500].strip()
+    except Exception as e:
+        logger.debug(f"Failed to extract PDF text from {pdf_url}: {e}")
+        return ""
+
+
 def _build_event_analysis_prompt(events: List[dict]) -> str:
     """Build a batch analysis prompt for market events."""
     events_text = ""
@@ -142,11 +170,15 @@ Time: {evt.get('event_time', '')}
 
     return f"""You are a senior Indian stock market analyst. Conduct a deep, in-depth financial analysis of the following market events to assess their impact on the Indian stock market (NSE/BSE).
 
-For EACH event, analyze the details thoroughly and determine:
+CRITICAL FINANCIAL EXTRACTION RULES:
+- If financial numbers (Revenue, Net Profit, EBITDA, Profit Margins, YoY/QoQ growth %, EPS) are present in the event description or PDF document text, EXPLICITLY highlight the exact numbers (e.g. "Net Profit up +34% YoY to ₹45.2 Cr, Revenue ₹210 Cr (+18%)").
+- Avoid generic phrases like "this is a routine disclosure requirement". Always detail specific figures, growth vectors, operational highlights, or state "Filing submitted — review attached PDF for complete table."
+
+For EACH event, determine:
 1. sentiment: "positive", "negative", or "neutral"
 2. impact_score: float from -1.0 (extremely negative) to 1.0 (extremely positive)
-3. affected_stocks: List of NSE stock symbols directly impacted OR prominent sector leaders if a sector is broadly impacted. E.g., if a banking regulation is introduced, list the top banks: ["HDFCBANK", "ICICIBANK", "SBIN", "AXISBANK"]. If it affects IT, list: ["TCS", "INFY", "WIPRO", "HCLTECH"].
-4. summary: In-depth financial analysis (3-4 sentences). Explain the core logic of why this is positive/negative, the operational/business mechanism of the impact, and end with a structured line: "Sector Impact: [Sector Name] -> Prominent stocks: [TICKER1, TICKER2]".
+3. affected_stocks: List of NSE stock symbols directly impacted OR prominent sector leaders if a sector is broadly impacted. E.g., ["HDFCBANK", "ICICIBANK"].
+4. summary: In-depth financial analysis (3-4 sentences). Detail exact financial figures if present, logic of market impact, and end with: "Sector Impact: [Sector Name] -> Prominent stocks: [TICKER1, TICKER2]".
 5. urgency: "immediate", "short_term", or "long_term"
 
 Events to analyze:
@@ -160,7 +192,7 @@ Respond with a JSON object:
       "sentiment": "positive",
       "impact_score": 0.7,
       "affected_stocks": ["RELIANCE", "ONGC", "BPCL"],
-      "summary": "Reliance Industries announces a major gas discovery in KG basin, indicating a boost to gas production and downstream energy operations. Sector Impact: Oil & Gas / Energy -> Prominent stocks: RELIANCE, ONGC, BPCL.",
+      "summary": "Reliance Industries Q1 Net Profit surged +24% YoY to ₹18,900 Cr, driven by strong gross refining margins and retail segment growth. Revenue stood at ₹2.3 Lakh Cr (+12%). Sector Impact: Oil & Gas / Energy -> Prominent stocks: RELIANCE, ONGC, BPCL.",
       "urgency": "immediate"
     }}
   ]
@@ -261,12 +293,18 @@ def analyze_pending_events(db: Session) -> int:
         try:
             logger.info(f"🤖 [AI CALL REASON]: Analyzing unanalyzed MarketEvent #{event.id} [{event.symbol or 'GENERAL'}]: '{event.title}'")
             
+            desc_content = event.description or ""
+            if event.url and ".pdf" in event.url.lower():
+                pdf_text = extract_pdf_text_from_url(event.url)
+                if pdf_text:
+                    desc_content += f"\n\n--- Extracted Filing PDF Document Content ---\n{pdf_text}"
+
             event_data = [{
                 "event_type": event.event_type,
                 "source": event.source,
                 "symbol": event.symbol,
                 "title": event.title,
-                "description": event.description,
+                "description": desc_content,
                 "event_time": event.event_time.isoformat() if event.event_time else "",
             }]
             
