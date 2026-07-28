@@ -258,6 +258,8 @@ def analyze_pending_events(db: Session) -> int:
     
     for event in pending:
         try:
+            logger.info(f"🤖 [AI CALL REASON]: Analyzing unanalyzed MarketEvent #{event.id} [{event.symbol or 'GENERAL'}]: '{event.title}'")
+            
             event_data = [{
                 "event_type": event.event_type,
                 "source": event.source,
@@ -359,6 +361,8 @@ def analyze_pending_news(db: Session) -> int:
     
     for story in pending_stories:
         try:
+            logger.info(f"🤖 [AI CALL REASON]: Analyzing unanalyzed NewsStory #{story.id} [{story.symbols or 'GENERAL'}]: '{story.headline}'")
+            
             # Fetch the actual articles belonging to this clustered story
             news_items = db.query(NewsItem).filter(NewsItem.story_id == story.id).all()
             combined_text = "\n".join([
