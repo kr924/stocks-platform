@@ -126,7 +126,7 @@ def _smart_rule_analysis(prompt: str) -> dict:
 
 # ─── Sentiment Analysis Prompts ─────────────────────────────────────────
 
-def extract_pdf_text_from_url(pdf_url: str, max_pages: int = 2) -> str:
+def extract_pdf_text_from_url(pdf_url: str, max_pages: int = 3) -> str:
     """Download PDF from URL and extract text from first N pages."""
     if not pdf_url or not isinstance(pdf_url, str) or not pdf_url.startswith("http"):
         return ""
@@ -136,7 +136,7 @@ def extract_pdf_text_from_url(pdf_url: str, max_pages: int = 2) -> str:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Referer": "https://www.nseindia.com/"
         }
-        res = requests.get(pdf_url, headers=headers, timeout=5)
+        res = requests.get(pdf_url, headers=headers, timeout=8)
         if res.status_code != 200 or len(res.content) < 500:
             return ""
         
@@ -148,11 +148,200 @@ def extract_pdf_text_from_url(pdf_url: str, max_pages: int = 2) -> str:
             t = reader.pages[i].extract_text()
             if t:
                 extracted.append(t)
-        return "\n".join(extracted)[:2500].strip()
+        return "\n".join(extracted)[:4000].strip()
     except Exception as e:
         logger.debug(f"Failed to extract PDF text from {pdf_url}: {e}")
         return ""
 
+
+# ─── Smart AI Tier Classification ───────────────────────────────────────
+
+# Subjects that are always skipped (case-insensitive exact match)
+_SKIP_SUBJECTS = {
+    "copy of newspaper publication",
+    "press release",
+    "press release (revised)",
+}
+
+# Details keywords that trigger skip when subject is "General Updates" / "Updates"
+_SKIP_DETAIL_KEYWORDS = ["newspaper publication", "press", "media"]
+
+
+def _classify_ai_tier(event) -> str:
+    """
+    Classify a MarketEvent into an AI analysis tier.
+    
+    Returns one of:
+      'skip'              – auto-mark neutral, zero AI calls
+      'financial_results' – deep analysis with PDF + Screener.in
+      'standard'          – normal Groq AI analysis
+      'manual_only'       – no auto AI; user must click Re-analyze
+    """
+    source = (event.source or "").lower().strip()
+    title = (event.title or "").strip()
+    title_lower = title.lower()
+    desc_lower = (event.description or "").lower()
+    
+    is_exchange = source in ("nse", "bse")
+    
+    if not is_exchange:
+        # Non-exchange events: no auto AI
+        return "manual_only"
+    
+    # --- Exchange (NSE/BSE) events below ---
+    
+    # Rule 1: Skip newspaper publications and press releases
+    if title_lower in _SKIP_SUBJECTS:
+        return "skip"
+    
+    # Rule 2: Skip "General Updates" / "Updates" with newspaper/press/media in details
+    if title_lower in ("general updates", "updates"):
+        if any(kw in desc_lower for kw in _SKIP_DETAIL_KEYWORDS):
+            return "skip"
+    
+    # Rule 3: Financial Results — "Outcome of Board Meeting" + "finan" in details
+    if "outcome of board meeting" in title_lower and "finan" in desc_lower:
+        return "financial_results"
+    
+    # Rule 4: Standard exchange analysis
+    return "standard"
+
+
+def _auto_mark_skip(db, event, reason: str):
+    """Mark an event as analyzed with neutral defaults (no AI call)."""
+    logger.info(f"⏭️ [AI TIER: SKIP] Event #{event.id} [{event.symbol or 'GENERAL'}]: '{event.title}' — {reason}")
+    event.ai_sentiment = "neutral"
+    event.ai_impact_score = 0.0
+    event.ai_summary = f"Auto-skipped: {reason}"
+    event.ai_affected_stocks = json.dumps([event.symbol] if event.symbol else [])
+    event.ai_provider = "auto_skip"
+    event.ai_analyzed_at = datetime.utcnow()
+    db.commit()
+
+
+def _auto_mark_manual_only(db, event):
+    """Mark a non-exchange event as pending manual analysis."""
+    logger.info(f"🔒 [AI TIER: MANUAL_ONLY] Event #{event.id} [{event.symbol or 'GENERAL'}]: '{event.title}' — Non-exchange source, AI on demand only")
+    event.ai_sentiment = "neutral"
+    event.ai_impact_score = 0.0
+    event.ai_summary = event.title or "Awaiting manual AI analysis"
+    event.ai_affected_stocks = json.dumps([event.symbol] if event.symbol else [])
+    event.ai_provider = "manual_pending"
+    event.ai_analyzed_at = datetime.utcnow()
+    db.commit()
+
+
+# ─── Screener.in Financial Data Scraper ─────────────────────────────────
+
+def fetch_screener_financials(symbol: str) -> str:
+    """
+    Fetch key ratios and last few quarters' financial data from Screener.in.
+    Returns a compact text block for injection into the AI prompt.
+    """
+    if not symbol or not isinstance(symbol, str):
+        return ""
+    
+    import requests
+    import re
+    
+    symbol_clean = symbol.strip().upper()
+    url = f"https://www.screener.in/company/{symbol_clean}/consolidated/"
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    }
+    
+    try:
+        res = requests.get(url, headers=headers, timeout=8)
+        if res.status_code == 404:
+            # Try standalone if consolidated not found
+            url = f"https://www.screener.in/company/{symbol_clean}/"
+            res = requests.get(url, headers=headers, timeout=8)
+        if res.status_code != 200:
+            logger.debug(f"Screener.in returned {res.status_code} for {symbol_clean}")
+            return ""
+        
+        html = res.text
+        output_parts = []
+        
+        # 1. Extract meta description (contains summary ratios)
+        meta_match = re.search(r'<meta\s+name="description"\s+content="([^"]+)"', html)
+        if meta_match:
+            output_parts.append(f"Company Summary: {meta_match.group(1)}")
+        
+        # 2. Extract key ratios from top-ratios list
+        ratio_pattern = re.compile(
+            r'<span class="name">\s*(.*?)\s*</span>.*?<span class="number">([\d,.]+)</span>',
+            re.DOTALL
+        )
+        ratios = ratio_pattern.findall(html[:15000])  # Ratios are in top section
+        if ratios:
+            ratio_lines = []
+            for name, value in ratios[:12]:
+                clean_name = re.sub(r'<[^>]+>', '', name).strip()
+                if clean_name:
+                    ratio_lines.append(f"  {clean_name}: {value}")
+            if ratio_lines:
+                output_parts.append("Key Ratios:\n" + "\n".join(ratio_lines))
+        
+        # 3. Extract Quarterly Results table
+        quarters_match = re.search(r'id="quarters".*?<table[^>]*>(.*?)</table>', html, re.DOTALL)
+        if quarters_match:
+            table_html = quarters_match.group(1)
+            
+            # Extract column headers (quarter dates)
+            header_pattern = re.compile(r'data-date-key="[^"]*">\s*(\w+ \d{4})', re.DOTALL)
+            headers_list = header_pattern.findall(table_html)
+            # Take last 5 quarters
+            headers_list = headers_list[-5:] if len(headers_list) > 5 else headers_list
+            
+            # Extract row data
+            row_pattern = re.compile(r'<tr[^>]*>\s*<td class="text">(.*?)</td>(.*?)</tr>', re.DOTALL)
+            rows = row_pattern.findall(table_html)
+            
+            qtr_lines = []
+            if headers_list:
+                qtr_lines.append("Quarter:        " + "  |  ".join(headers_list))
+            
+            for row_label_html, row_cells_html in rows[:8]:  # Sales, Expenses, OP, OPM%, Net Profit, EPS etc.
+                label = re.sub(r'<[^>]+>', '', row_label_html).strip().replace('&nbsp;', '').replace('+', '').strip()
+                if not label:
+                    continue
+                cell_values = re.findall(r'<td[^>]*>\s*([\d,.\-%]+)\s*</td>', row_cells_html)
+                # Take last 5 values
+                cell_values = cell_values[-5:] if len(cell_values) > 5 else cell_values
+                if cell_values:
+                    qtr_lines.append(f"{label:20s}" + "  |  ".join(v.strip() for v in cell_values))
+            
+            if qtr_lines:
+                output_parts.append("Quarterly Results (Rs. Crores):\n" + "\n".join(qtr_lines))
+        
+        # 4. Extract Pros and Cons
+        pros_match = re.search(r'class="pros".*?<ul>(.*?)</ul>', html, re.DOTALL)
+        cons_match = re.search(r'class="cons".*?<ul>(.*?)</ul>', html, re.DOTALL)
+        
+        if pros_match:
+            pros = re.findall(r'<li>(.*?)</li>', pros_match.group(1))
+            pros_clean = [re.sub(r'<[^>]+>', '', p).strip() for p in pros]
+            if pros_clean:
+                output_parts.append("Screener Pros: " + "; ".join(pros_clean[:4]))
+        
+        if cons_match:
+            cons = re.findall(r'<li>(.*?)</li>', cons_match.group(1))
+            cons_clean = [re.sub(r'<[^>]+>', '', c).strip() for c in cons]
+            if cons_clean:
+                output_parts.append("Screener Cons: " + "; ".join(cons_clean[:4]))
+        
+        result = "\n\n".join(output_parts)
+        logger.info(f"📊 [SCREENER DATA] Fetched {len(result)} chars of financial data for {symbol_clean}")
+        return result[:3000]
+        
+    except Exception as e:
+        logger.debug(f"Failed to fetch Screener.in data for {symbol_clean}: {e}")
+        return ""
+
+
+# ─── Prompt Builders ────────────────────────────────────────────────────
 
 def _build_event_analysis_prompt(events: List[dict]) -> str:
     """Build a batch analysis prompt for market events."""
@@ -197,6 +386,60 @@ Respond with a JSON object:
     }}
   ]
 }}"""
+
+
+def _build_financial_results_prompt(event_data: dict, pdf_text: str, screener_text: str) -> str:
+    """Build a specialized deep financial analysis prompt for board meeting financial results."""
+    symbol = event_data.get("symbol", "UNKNOWN")
+    title = event_data.get("title", "")
+    description = event_data.get("description", "")
+    event_time = event_data.get("event_time", "")
+    
+    context_sections = []
+    
+    if pdf_text:
+        context_sections.append(f"""--- EXTRACTED PDF FILING CONTENT ---
+{pdf_text}""")
+    
+    if screener_text:
+        context_sections.append(f"""--- SCREENER.IN HISTORICAL FINANCIAL DATA ---
+{screener_text}""")
+    
+    extra_context = "\n\n".join(context_sections)
+    
+    return f"""You are a senior Indian stock market analyst specializing in quarterly earnings analysis. Perform a DEEP financial analysis of this company's board meeting outcome and financial results.
+
+COMPANY: {symbol}
+EVENT: {title}
+DESCRIPTION: {description}
+TIME: {event_time}
+
+{extra_context}
+
+CRITICAL INSTRUCTIONS:
+1. Extract and state EXACT financial figures from the PDF filing: Revenue, Net Profit, EBITDA, Operating Profit, OPM%, EPS.
+2. Using the Screener.in historical data above, calculate and state YoY (Year-over-Year) and QoQ (Quarter-over-Quarter) growth rates for Revenue and Net Profit.
+3. Compare the current quarter's OPM% with the previous quarter and same quarter last year.
+4. Highlight any exceptional items, one-time gains/losses, or significant deviations from historical trends.
+5. If the PDF data is sparse, state what's available and note "Full financials available in the exchange filing."
+6. Give a clear POSITIVE / NEGATIVE / NEUTRAL verdict with justification based on the numbers.
+
+Respond with a JSON object:
+{{
+  "analyses": [
+    {{
+      "event_index": 0,
+      "sentiment": "positive",
+      "impact_score": 0.7,
+      "affected_stocks": ["{symbol}"],
+      "summary": "Example: {symbol} Q1FY27 Revenue ₹XXX Cr (+XX% YoY, +XX% QoQ). Net Profit ₹XX Cr (+XX% YoY). OPM at XX% vs XX% last quarter. Strong operational performance driven by [key factors]. Sector Impact: [Sector] -> Prominent stocks: {symbol}.",
+      "urgency": "immediate",
+      "category": "financial_results"
+    }}
+  ]
+}}"""
+
+
 
 
 def _build_news_analysis_prompt(articles: List[dict]) -> str:
@@ -270,7 +513,7 @@ Provide your analysis as JSON:
 # ─── Analysis Processing ───────────────────────────────────────────────────
 
 def analyze_pending_events(db: Session) -> int:
-    """Analyze market events one by one for deep, focused analysis."""
+    """Analyze market events with smart tier-based routing to minimize API calls."""
     config = get_intel_config()
     if not config.ai.get("enabled", True):
         return 0
@@ -286,12 +529,114 @@ def analyze_pending_events(db: Session) -> int:
         return 0
     
     count = 0
+    skipped = 0
+    manual_only_count = 0
+    financial_results_count = 0
     alert_threshold = config.ai.get("thresholds", {}).get("alert_threshold", 0.6)
     critical_threshold = config.ai.get("thresholds", {}).get("critical_threshold", 0.85)
     
     for event in pending:
         try:
-            logger.info(f"🤖 [AI CALL REASON]: Analyzing unanalyzed MarketEvent #{event.id} [{event.symbol or 'GENERAL'}]: '{event.title}'")
+            # ── Step 1: Classify event into AI tier ──
+            tier = _classify_ai_tier(event)
+            
+            # ── TIER: SKIP — no AI call, auto-mark neutral ──
+            if tier == "skip":
+                _auto_mark_skip(db, event, f"Subject '{event.title}' is excluded from AI analysis")
+                count += 1
+                skipped += 1
+                continue
+            
+            # ── TIER: MANUAL_ONLY — no auto AI, user clicks Re-analyze ──
+            if tier == "manual_only":
+                _auto_mark_manual_only(db, event)
+                count += 1
+                manual_only_count += 1
+                continue
+            
+            # ── TIER: FINANCIAL_RESULTS — deep analysis with PDF + Screener.in ──
+            if tier == "financial_results":
+                logger.info(f"📊 [AI TIER: FINANCIAL_RESULTS] Event #{event.id} [{event.symbol or 'GENERAL'}]: '{event.title}' — Deep financial analysis with PDF + Screener.in")
+                financial_results_count += 1
+                
+                # Extract PDF text from attached filing
+                pdf_text = ""
+                if event.url:
+                    pdf_text = extract_pdf_text_from_url(event.url)
+                
+                # Fetch historical financials from Screener.in
+                screener_text = ""
+                if event.symbol:
+                    screener_text = fetch_screener_financials(event.symbol)
+                
+                event_data = {
+                    "event_type": event.event_type,
+                    "source": event.source,
+                    "symbol": event.symbol,
+                    "title": event.title,
+                    "description": event.description or "",
+                    "event_time": event.event_time.isoformat() if event.event_time else "",
+                }
+                
+                prompt = _build_financial_results_prompt(event_data, pdf_text, screener_text)
+                result, provider = _call_llm_for_analysis(prompt)
+                event.ai_provider = provider
+                event.category = "financial_results"  # Tag as financial results
+                
+                if not result or "analyses" not in result or not result["analyses"]:
+                    event.ai_sentiment = "neutral"
+                    event.ai_impact_score = 0.0
+                    event.ai_summary = f"{event.symbol or ''} financial results filed. Review attached PDF for detailed figures."
+                    event.ai_affected_stocks = json.dumps([event.symbol] if event.symbol else [])
+                    event.ai_analyzed_at = datetime.utcnow()
+                    db.commit()
+                    count += 1
+                    time.sleep(1.2)
+                    continue
+                
+                analysis = result["analyses"][0]
+                event.ai_sentiment = analysis.get("sentiment", "neutral")
+                event.ai_impact_score = analysis.get("impact_score", 0.0)
+                event.ai_summary = analysis.get("summary", "")
+                event.ai_affected_stocks = json.dumps(analysis.get("affected_stocks", []))
+                event.ai_analyzed_at = datetime.utcnow()
+                
+                db.commit()
+                count += 1
+                
+                # Broadcast with financial_results category
+                try:
+                    from app.services.sse_manager import sse_manager
+                    from app.services.deduplication import to_iso_utc
+                    sse_manager.broadcast("new_event", {
+                        "id": f"event_{event.id}",
+                        "type": "event",
+                        "event_type": event.event_type,
+                        "source": event.source,
+                        "symbol": event.symbol,
+                        "title": event.title,
+                        "description": event.ai_summary or event.description,
+                        "url": event.url,
+                        "time": to_iso_utc(event.event_time),
+                        "ai_sentiment": event.ai_sentiment,
+                        "ai_impact_score": event.ai_impact_score,
+                        "ai_summary": event.ai_summary,
+                        "ai_provider": event.ai_provider,
+                        "category": "financial_results",
+                    })
+                except Exception as sse_err:
+                    logger.warning(f"Failed to broadcast analyzed event {event.id}: {sse_err}")
+                
+                # Generate alert if high impact
+                impact = abs(analysis.get("impact_score", 0.0))
+                if impact >= alert_threshold:
+                    _create_alert_from_event(db, event, analysis, alert_threshold, critical_threshold)
+                
+                time.sleep(1.2)
+                continue
+            
+            # ── TIER: STANDARD — normal Groq AI analysis ──
+            logger.info(f"🤖 [AI TIER: STANDARD] Event #{event.id} [{event.symbol or 'GENERAL'}]: '{event.title}'")
             
             desc_content = event.description or ""
             if event.url and ".pdf" in event.url.lower():
@@ -313,7 +658,6 @@ def analyze_pending_events(db: Session) -> int:
             event.ai_provider = provider
             
             if not result or "analyses" not in result or not result["analyses"]:
-                # Mark as analyzed with neutral defaults so it doesn't retry forever
                 event.ai_sentiment = "neutral"
                 event.ai_impact_score = 0.0
                 event.ai_summary = event.title
@@ -377,7 +721,7 @@ def analyze_pending_events(db: Session) -> int:
                 db.rollback()
             continue
     
-    logger.info(f"Analyzed {count} market events")
+    logger.info(f"Analyzed {count} market events (skipped={skipped}, manual_only={manual_only_count}, financial_results={financial_results_count})")
     return count
 
 
@@ -913,23 +1257,57 @@ def reanalyze_single_item(db: Session, item_type: str, item_id: int) -> Optional
         event = db.query(MarketEvent).filter(MarketEvent.id == item_id).first()
         if not event:
             return None
-        event_data = [{
-            "event_type": event.event_type,
-            "source": event.source,
-            "symbol": event.symbol,
-            "title": event.title,
-            "description": event.description,
-            "event_time": event.event_time.isoformat() if event.event_time else "",
-        }]
-        prompt = _build_event_analysis_prompt(event_data)
-        result = _call_llm_for_analysis(prompt)
+        
+        # Use tier classification to determine prompt type
+        tier = _classify_ai_tier(event)
+        logger.info(f"🤖 [AI CALL REASON]: Manual re-analysis of MarketEvent #{event.id} (tier={tier})")
+        
+        if tier == "financial_results" or (
+            "outcome of board meeting" in (event.title or "").lower() and 
+            "finan" in (event.description or "").lower()
+        ):
+            # Deep financial analysis with PDF + Screener
+            pdf_text = extract_pdf_text_from_url(event.url) if event.url else ""
+            screener_text = fetch_screener_financials(event.symbol) if event.symbol else ""
+            
+            event_data = {
+                "event_type": event.event_type,
+                "source": event.source,
+                "symbol": event.symbol,
+                "title": event.title,
+                "description": event.description or "",
+                "event_time": event.event_time.isoformat() if event.event_time else "",
+            }
+            prompt = _build_financial_results_prompt(event_data, pdf_text, screener_text)
+        else:
+            # Standard analysis with PDF extraction
+            desc_content = event.description or ""
+            if event.url and ".pdf" in (event.url or "").lower():
+                pdf_text = extract_pdf_text_from_url(event.url)
+                if pdf_text:
+                    desc_content += f"\n\n--- Extracted Filing PDF Document Content ---\n{pdf_text}"
+            
+            event_data = [{
+                "event_type": event.event_type,
+                "source": event.source,
+                "symbol": event.symbol,
+                "title": event.title,
+                "description": desc_content,
+                "event_time": event.event_time.isoformat() if event.event_time else "",
+            }]
+            prompt = _build_event_analysis_prompt(event_data)
+        
+        result, provider = _call_llm_for_analysis(prompt)
         if result and "analyses" in result and result["analyses"]:
             analysis = result["analyses"][0]
             event.ai_sentiment = analysis.get("sentiment", "neutral")
             event.ai_impact_score = analysis.get("impact_score", 0.0)
             event.ai_summary = analysis.get("summary", "")
             event.ai_affected_stocks = json.dumps(analysis.get("affected_stocks", []))
+            event.ai_provider = provider
             event.ai_analyzed_at = datetime.utcnow()
+            if analysis.get("category"):
+                event.category = analysis.get("category")
             db.commit()
             return {
                 "id": event.id,
