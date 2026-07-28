@@ -16,17 +16,17 @@ general:
 
 # --- Polling Intervals (in seconds) ---
 polling:
-  nse_bse_announcements: 1          # 1 second (ultra real-time speed)
+  nse_bse_announcements: 1          # 1 second (ultra real-time exchange speed)
   nse_bse_other: 1                  # 1 second
   nse_bse_bulk_deals: 1             # 1 second
   nse_bse_board_meetings: 1         # 1 second
   nse_bse_insider_trading: 1        # 1 second
-  news_aggregator: 1                # 1 second
-  social_media: 1                   # 1 second
-  company_filings: 5                # 5 seconds
-  ai_analysis_queue: 1              # 1 second
+  news_aggregator: 30               # 30 seconds (optimal for news RSS)
+  social_media: 30                  # 30 seconds
+  company_filings: 180              # 3 minutes
+  ai_analysis_queue: 30             # 30 seconds (optimal for AI API rate limits)
   # Off-market hours multiplier
-  off_market_multiplier: 1          # 1x (1-second polling active 24/7)
+  off_market_multiplier: 1          # 1x
 
 # --- Market Hours (IST) ---
 market_hours:

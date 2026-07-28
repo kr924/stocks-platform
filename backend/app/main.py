@@ -140,26 +140,26 @@ async def _intelligence_scheduler():
                 last_run["other_nse_bse"] = now
                 await asyncio.to_thread(_run_other_nse_bse_scraper)
             
-            # News Aggregation (Every 1s)
-            news_interval = polling.get("news_aggregator", 1) * multiplier
+            # News Aggregation (Every 30s)
+            news_interval = polling.get("news_aggregator", 30) * multiplier
             if now - last_run["news"] >= news_interval:
                 last_run["news"] = now
                 await asyncio.to_thread(_run_news_aggregator)
             
-            # Social Media (Every 1s)
-            social_interval = polling.get("social_media", 1) * multiplier
+            # Social Media (Every 30s)
+            social_interval = polling.get("social_media", 30) * multiplier
             if now - last_run["social"] >= social_interval:
                 last_run["social"] = now
                 await asyncio.to_thread(_run_social_monitor)
             
-            # Company Filings (Every 5s)
-            filings_interval = polling.get("company_filings", 5) * multiplier
+            # Company Filings (Every 180s)
+            filings_interval = polling.get("company_filings", 180) * multiplier
             if now - last_run["filings"] >= filings_interval:
                 last_run["filings"] = now
                 await asyncio.to_thread(_run_filings_scraper)
             
-            # AI Analysis (Every 1s)
-            ai_interval = polling.get("ai_analysis_queue", 1)
+            # AI Analysis (Every 30s)
+            ai_interval = polling.get("ai_analysis_queue", 30)
             if now - last_run["ai_analysis"] >= ai_interval:
                 last_run["ai_analysis"] = now
                 await asyncio.to_thread(_run_ai_analysis)
