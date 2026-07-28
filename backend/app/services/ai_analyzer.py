@@ -61,6 +61,7 @@ def _call_llm_for_analysis(prompt: str):
                 break
             
             try:
+                logger.info(f"🚀 [AI EXECUTION]: Calling LLM provider '{provider}' using Key #{ks.index + 1}...")
                 if provider == "groq":
                     res = call_groq(prompt, ks.key, "llama-3.3-70b-versatile")
                 elif provider == "gemini":
@@ -886,6 +887,7 @@ def analyze_pending_filings(db: Session) -> int:
     
     for filing in pending:
         try:
+            logger.info(f"🤖 [AI CALL REASON]: Analyzing unanalyzed CompanyFiling #{filing.id} [{filing.symbol}]: '{filing.title}'")
             filing_data = {
                 "filing_type": filing.filing_type,
                 "symbol": filing.symbol,
@@ -1225,6 +1227,7 @@ def get_market_sentiment(db: Session, force_refresh: bool = False) -> dict:
     
     sentiment_data = None
     try:
+        logger.info(f"🤖 [AI CALL REASON]: Synthesizing Market Sentiment (5-min cache expired / user force refresh)")
         res, provider = _call_llm_for_analysis(prompt)
         sentiment_data = res
     except Exception as e:

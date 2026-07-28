@@ -144,6 +144,7 @@ def call_gemini(prompt: str, api_key: str) -> dict:
 
 def analyze_stock_with_gemini(symbol: str, name: str, quote: dict, news_articles: List[Dict[str, Any]], candles: List[Any] = None) -> dict:
     """Analyze stock details using the active configured LLM provider (OpenAI, Groq, Anthropic, or Gemini) and return metrics."""
+    logger.info(f"🤖 [AI CALL REASON]: Single stock deep analysis requested for symbol '{symbol}' ({name})")
     # Force reload of environment variables from .env to pick up any runtime edits instantly
     cfg = reload_env_vars()
     
