@@ -269,6 +269,15 @@ def analyze_pending_events(db: Session) -> int:
         except Exception as e:
             logger.error(f"Error analyzing event {event.id}: {e}")
             db.rollback()
+            try:
+                event.ai_sentiment = "neutral"
+                event.ai_impact_score = 0.0
+                event.ai_summary = event.title
+                event.ai_provider = "stub"
+                event.ai_analyzed_at = datetime.utcnow()
+                db.commit()
+            except Exception:
+                db.rollback()
             continue
     
     logger.info(f"Analyzed {count} market events")
@@ -359,6 +368,15 @@ def analyze_pending_news(db: Session) -> int:
         except Exception as e:
             logger.error(f"Error analyzing news story {story.id}: {e}")
             db.rollback()
+            try:
+                story.ai_sentiment = "neutral"
+                story.ai_impact_score = 0.0
+                story.ai_summary = story.headline
+                story.ai_provider = "stub"
+                story.ai_analyzed_at = datetime.utcnow()
+                db.commit()
+            except Exception:
+                db.rollback()
             continue
             
     logger.info(f"Analyzed {count} news stories")
