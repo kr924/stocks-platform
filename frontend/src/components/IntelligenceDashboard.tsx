@@ -1220,13 +1220,13 @@ function IntelligenceDashboardContent() {
                           }}>
                             {sentiment.badgeText}
                           </span>
-                          {item.ai_impact_score !== null && (
+                          {item.ai_impact_score !== null && item.ai_impact_score !== undefined && (
                             <span style={{
                               fontSize: "11px",
                               fontWeight: "700",
                               color: item.ai_impact_score > 0 ? "#10b981" : item.ai_impact_score < 0 ? "#ef4444" : "#9ca3af"
                             }}>
-                              {item.ai_impact_score > 0 ? "+" : ""}{item.ai_impact_score.toFixed(1)}
+                              {item.ai_impact_score > 0 ? "+" : ""}{Number(item.ai_impact_score).toFixed(1)}
                             </span>
                           )}
                         </div>
@@ -1525,8 +1525,8 @@ function IntelligenceDashboardContent() {
                       </div>
                       <div style={{ display: "flex", justifyContent: "space-between", fontSize: "9px", color: "#475569" }}>
                         <span>Bearish</span>
-                        <span style={{ fontWeight: "700", color: marketSentiment.score > 0.2 ? "#10b981" : marketSentiment.score < -0.2 ? "#ef4444" : "#9ca3af" }}>
-                          Score: {marketSentiment.score > 0 ? "+" : ""}{marketSentiment.score.toFixed(2)}
+                        <span style={{ fontWeight: "700", color: (marketSentiment.score || 0) > 0.2 ? "#10b981" : (marketSentiment.score || 0) < -0.2 ? "#ef4444" : "#9ca3af" }}>
+                          Score: {marketSentiment.score !== null && marketSentiment.score !== undefined ? ((marketSentiment.score > 0 ? "+" : "") + Number(marketSentiment.score).toFixed(2)) : "0.00"}
                         </span>
                         <span>Bullish</span>
                       </div>
@@ -2191,12 +2191,12 @@ function IntelligenceDashboardContent() {
                   }}>
                     {getSentimentStyles(selectedItem.ai_sentiment).badgeText}
                   </div>
-                  {selectedItem.ai_impact_score !== null && (
+                  {selectedItem.ai_impact_score !== null && selectedItem.ai_impact_score !== undefined && (
                     <div style={{ fontSize: "13px", fontWeight: "700" }}>
                       AI Score: <span style={{
                         color: selectedItem.ai_impact_score > 0 ? "#10b981" : selectedItem.ai_impact_score < 0 ? "#ef4444" : "#9ca3af"
                       }}>
-                        {selectedItem.ai_impact_score > 0 ? "+" : ""}{selectedItem.ai_impact_score.toFixed(2)}
+                        {selectedItem.ai_impact_score > 0 ? "+" : ""}{Number(selectedItem.ai_impact_score).toFixed(2)}
                       </span>
                     </div>
                   )}
