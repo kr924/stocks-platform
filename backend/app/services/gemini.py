@@ -25,7 +25,7 @@ def reload_env_vars():
     }
 
 
-def call_ollama(prompt: str, base_url: str = "http://localhost:11434", model_name: str = "stocks-analyst") -> dict:
+def call_ollama(prompt: str, base_url: str = "http://localhost:11434", model_name: str = "stocks-analyst", timeout: int = 30) -> dict:
     payload = {
         "model": model_name,
         "messages": [
@@ -40,7 +40,7 @@ def call_ollama(prompt: str, base_url: str = "http://localhost:11434", model_nam
         }
     }
     url = base_url.rstrip("/") + "/api/chat"
-    res = requests.post(url, json=payload, timeout=3)
+    res = requests.post(url, json=payload, timeout=timeout)
     res.raise_for_status()
     raw_text = res.json()["message"]["content"]
     cleaned = clean_json_response(raw_text)

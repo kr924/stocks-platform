@@ -28,46 +28,70 @@ logger = logging.getLogger("app.ai_analyzer")
 
 def _call_llm_for_analysis(prompt: str):
     """
-    Call the configured LLM with a structured analysis prompt.
-    Tries primary provider, then fallbacks, and finally fast Rule Engine.
-    Returns tuple (parsed JSON dict, provider_name).
+    Call LLMs using smart key concurrency pool & state management.
+    1. Synchronizes env keys into thread-safe ProviderPools (Groq, Gemini, OpenAI, Anthropic).
+    2. Attempts to acquire an IDLE/FREE key for primary provider (Groq) or fallback cloud providers.
+    3. If ALL cloud keys across ALL providers are busy or rate-limited:
+       -> Routes request to local Ollama with 30s timeout!
+    4. If Ollama also fails -> Fallback to 0-CPU Rule Engine.
     """
     from app.services.gemini import (
-        reload_env_vars, call_gemini, call_groq, call_openai, call_anthropic, call_ollama, clean_json_response
+        reload_env_vars, call_gemini, call_groq, call_openai, call_anthropic, call_ollama
     )
+    from app.services.key_manager import key_manager
     
     config = get_intel_config()
     ai_config = config.ai
     primary = ai_config.get("primary_provider", "groq")
     fallbacks = ai_config.get("fallback_providers", ["gemini", "openai", "anthropic"])
     
-    providers = [primary] + [fb for fb in fallbacks if fb != primary]
+    cloud_providers = [primary] + [fb for fb in fallbacks if fb != primary and fb != "ollama"]
     env = reload_env_vars()
     
-    for provider in providers:
-        try:
-            if provider == "groq" and env.get("groq_key"):
-                res = call_groq(prompt, env["groq_key"], env.get("groq_model", "llama-3.3-70b-versatile"))
-                return res, "groq"
-            elif provider == "gemini" and env.get("gemini_key"):
-                key = env["gemini_key"].strip()
-                if key and not key.startswith("AQ."):
-                    res = call_gemini(prompt, key)
-                    return res, "gemini"
-            elif provider == "openai" and env.get("openai_key"):
-                res = call_openai(prompt, env["openai_key"])
-                return res, "openai"
-            elif provider == "anthropic" and env.get("anthropic_key"):
-                res = call_anthropic(prompt, env["anthropic_key"])
-                return res, "anthropic"
-            elif provider == "ollama" and env.get("ollama_url"):
-                res = call_ollama(prompt, env["ollama_url"], env.get("ollama_model", "stocks-analyst"))
-                return res, "ollama"
-        except Exception as e:
-            logger.warning(f"LLM provider {provider} failed: {e}")
-            continue
+    # Sync environment keys into key_manager pools
+    key_manager.sync_all(env)
     
-    # Fast 0-CPU Rule Engine fallback when cloud APIs are rate-limited
+    # ── Phase 1: Try Cloud Providers with Idle Key Pool Concurrency ──
+    for provider in cloud_providers:
+        # Loop to acquire any free/idle key for this provider
+        while True:
+            ks = key_manager.acquire_key_for_provider(provider)
+            if not ks:
+                # No free keys for this provider right now
+                break
+            
+            try:
+                if provider == "groq":
+                    res = call_groq(prompt, ks.key, "llama-3.3-70b-versatile")
+                elif provider == "gemini":
+                    res = call_gemini(prompt, ks.key)
+                elif provider == "openai":
+                    res = call_openai(prompt, ks.key)
+                elif provider == "anthropic":
+                    res = call_anthropic(prompt, ks.key)
+                else:
+                    res = None
+                
+                key_manager.release_key(ks, is_rate_limited=False)
+                if res:
+                    return res, provider
+            except Exception as e:
+                is_429 = "429" in str(e) or "Too Many Requests" in str(e) or "Rate limit" in str(e)
+                key_manager.release_key(ks, is_rate_limited=is_429, backoff_seconds=60.0)
+                logger.warning(f"[{provider.upper()}] Key #{ks.index + 1} call failed: {e}")
+                # Try next free key for this provider or move on
+
+    # ── Phase 2: If ALL Cloud Keys are Busy/Rate-Limited, Fallback to Local Ollama (30s timeout) ──
+    if env.get("ollama_url"):
+        try:
+            logger.info("🦙 [LLM FALLBACK]: All cloud keys busy/rate-limited. Routing to local Ollama (30s timeout)...")
+            res = call_ollama(prompt, env["ollama_url"], env.get("ollama_model", "stocks-analyst"), timeout=30)
+            return res, "ollama"
+        except Exception as ollama_err:
+            logger.warning(f"Local Ollama fallback failed: {ollama_err}")
+
+    # ── Phase 3: Fast 0-CPU Rule Engine fallback ──
+    logger.info("⚡ [LLM FALLBACK]: All LLMs unavailable. Using 0-CPU Rule Engine fallback...")
     res = _smart_rule_analysis(prompt)
     return res, "rule_engine"
 
