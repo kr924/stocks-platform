@@ -90,6 +90,7 @@ class LLMKeyManager:
     """Global manager singleton for all LLM provider key pools."""
     def __init__(self):
         self.pools: Dict[str, ProviderPool] = {
+            "openrouter": ProviderPool("openrouter"),
             "groq": ProviderPool("groq"),
             "gemini": ProviderPool("gemini"),
             "openai": ProviderPool("openai"),
@@ -97,6 +98,7 @@ class LLMKeyManager:
         }
 
     def sync_all(self, env_vars: dict):
+        self.pools["openrouter"].sync_keys(env_vars.get("openrouter_key", ""))
         self.pools["groq"].sync_keys(env_vars.get("groq_key", ""))
         self.pools["gemini"].sync_keys(env_vars.get("gemini_key", ""))
         self.pools["openai"].sync_keys(env_vars.get("openai_key", ""))

@@ -14,7 +14,9 @@ logger = logging.getLogger("app.gemini")
 def reload_env_vars():
     load_dotenv(override=True)
     groq_raw = os.getenv("GROQ_API_KEYS") or os.getenv("GROQ_API_KEY", "")
+    openrouter_raw = os.getenv("OPENROUTER_API_KEYS") or os.getenv("OPENROUTER_API_KEY", "")
     return {
+        "openrouter_key": openrouter_raw,
         "gemini_key": os.getenv("GEMINI_API_KEY", ""),
         "openai_key": os.getenv("OPENAI_API_KEY", ""),
         "anthropic_key": os.getenv("ANTHROPIC_API_KEY", ""),
@@ -76,6 +78,51 @@ def call_openai(prompt: str, api_key: str) -> dict:
     raw_text = res.json()["choices"][0]["message"]["content"]
     cleaned = clean_json_response(raw_text)
     return json.loads(cleaned)
+
+
+def call_openrouter(prompt: str, api_key: str) -> dict:
+    """Call OpenRouter API with auto-fallback across top free models."""
+    key = api_key.strip()
+    if not key or key.startswith("YOUR_"):
+        raise ValueError("Invalid or placeholder OpenRouter API key")
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {key}",
+        "HTTP-Referer": "https://github.com/kr924/stocks-platform",
+        "X-Title": "Stocks Platform AI",
+    }
+    
+    free_models = [
+        "meta-llama/llama-3.3-70b-instruct:free",
+        "qwen/qwen-2.5-72b-instruct:free",
+        "google/gemma-2-9b-it:free",
+        "deepseek/deepseek-r1:free",
+    ]
+    
+    last_err = None
+    for model_name in free_models:
+        payload = {
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": "Respond only with a raw, valid JSON object matching the requested schema. Do not output markdown code blocks."},
+                {"role": "user", "content": prompt}
+            ],
+            "response_format": {"type": "json_object"}
+        }
+        try:
+            res = requests.post("https://openrouter.ai/api/v1/chat/completions", json=payload, headers=headers, timeout=20)
+            if res.ok:
+                raw_text = res.json()["choices"][0]["message"]["content"]
+                cleaned = clean_json_response(raw_text)
+                return json.loads(cleaned)
+            else:
+                last_err = f"Model {model_name} HTTP {res.status_code}: {res.text[:100]}"
+        except Exception as e:
+            last_err = str(e)
+            continue
+            
+    raise RuntimeError(f"All OpenRouter free models failed: {last_err}")
 
 
 def call_groq(prompt: str, api_key: str, model_name: str = "llama-3.3-70b-versatile") -> dict:

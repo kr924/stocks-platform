@@ -36,14 +36,14 @@ def _call_llm_for_analysis(prompt: str):
     4. If Ollama also fails -> Fallback to 0-CPU Rule Engine.
     """
     from app.services.gemini import (
-        reload_env_vars, call_gemini, call_groq, call_openai, call_anthropic, call_ollama
+        reload_env_vars, call_gemini, call_groq, call_openai, call_anthropic, call_ollama, call_openrouter
     )
     from app.services.key_manager import key_manager
     
     config = get_intel_config()
     ai_config = config.ai
-    primary = ai_config.get("primary_provider", "groq")
-    fallbacks = ai_config.get("fallback_providers", ["gemini", "openai", "anthropic"])
+    primary = ai_config.get("primary_provider", "openrouter")
+    fallbacks = ai_config.get("fallback_providers", ["groq", "gemini", "openai", "anthropic"])
     
     cloud_providers = [primary] + [fb for fb in fallbacks if fb != primary and fb != "ollama"]
     env = reload_env_vars()
@@ -67,7 +67,9 @@ def _call_llm_for_analysis(prompt: str):
                     record_ai_log(f"Calling LLM provider '{provider.upper()}' using Key #{ks.index + 1}", provider=provider, key_index=ks.index + 1, tier="execution")
                 except Exception:
                     pass
-                if provider == "groq":
+                if provider == "openrouter":
+                    res = call_openrouter(prompt, ks.key)
+                elif provider == "groq":
                     res = call_groq(prompt, ks.key, "llama-3.3-70b-versatile")
                 elif provider == "gemini":
                     res = call_gemini(prompt, ks.key)
