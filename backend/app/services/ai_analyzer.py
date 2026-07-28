@@ -11,6 +11,7 @@ Processes market events, news items, and filings through the configured LLM
 """
 import json
 import logging
+import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
