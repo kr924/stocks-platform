@@ -389,9 +389,14 @@ export function IntelligenceDashboard() {
             ai_summary: data.ai_summary || null,
             category: data.category || "general",
           };
-          // Prepend new item, avoiding duplicates
+          // Prepend or update item in-place when AI analysis arrives
           setFeedItems(prev => {
-            if (prev.some(item => item.id === newItem.id)) return prev;
+            const idx = prev.findIndex(item => item.id === newItem.id);
+            if (idx !== -1) {
+              const updated = [...prev];
+              updated[idx] = { ...updated[idx], ...newItem };
+              return updated;
+            }
             return [newItem, ...prev].slice(0, 100);
           });
           setStreamEventCount(prev => prev + 1);

@@ -141,10 +141,27 @@ def _get_bse_session() -> BSESession:
 
 
 def _safe_datetime(date_str: str, formats: List[str] = None) -> datetime:
-    """Parse a date string trying multiple formats and return as UTC (converting from IST)."""
+    """Parse a date string trying dateutil parser first, then fallback formats, returning UTC (converting from IST)."""
     from datetime import timedelta
-    if not date_str:
+    if not date_str or not isinstance(date_str, str):
         return datetime.utcnow()
+    
+    clean_str = date_str.strip()
+    if not clean_str:
+        return datetime.utcnow()
+
+    # Try dateutil parser first
+    try:
+        from dateutil import parser
+        parsed = parser.parse(clean_str)
+        if parsed.tzinfo is not None:
+            parsed = parsed.replace(tzinfo=None)
+        return parsed - timedelta(hours=5, minutes=30)
+    except Exception:
+        pass
+
+    # Titlecase for strptime fallback ("28-JUL-2026" -> "28-Jul-2026")
+    title_str = clean_str.title()
     formats = formats or [
         "%d-%b-%Y %H:%M:%S",
         "%d-%b-%Y",
@@ -156,11 +173,11 @@ def _safe_datetime(date_str: str, formats: List[str] = None) -> datetime:
     ]
     for fmt in formats:
         try:
-            # All NSE/BSE dates are in Indian Standard Time (IST = UTC+5:30)
-            local_time = datetime.strptime(date_str.strip(), fmt)
+            local_time = datetime.strptime(title_str, fmt)
             return local_time - timedelta(hours=5, minutes=30)
         except (ValueError, AttributeError):
             continue
+            
     return datetime.utcnow()
 
 

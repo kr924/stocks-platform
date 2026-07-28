@@ -236,14 +236,32 @@ def analyze_pending_events(db: Session) -> int:
             event.ai_affected_stocks = json.dumps(analysis.get("affected_stocks", []))
             event.ai_analyzed_at = datetime.utcnow()
             
-            # Auto-assign category if missing
-            if not event.category:
-                from app.services.nse_bse_scraper import _classify_event_category
-                event.category = _classify_event_category(event.event_type, event.title)
-            
             db.commit()
             count += 1
             
+            # Broadcast updated item with AI analysis to SSE clients
+            try:
+                from app.services.sse_manager import sse_manager
+                from app.services.deduplication import to_iso_utc
+                sse_manager.broadcast("new_event", {
+                    "id": f"event_{event.id}",
+                    "type": "event",
+                    "event_type": event.event_type,
+                    "source": event.source,
+                    "symbol": event.symbol,
+                    "title": event.title,
+                    "description": event.ai_summary or event.description,
+                    "url": event.url,
+                    "time": to_iso_utc(event.event_time),
+                    "ai_sentiment": event.ai_sentiment,
+                    "ai_impact_score": event.ai_impact_score,
+                    "ai_summary": event.ai_summary,
+                    "ai_provider": event.ai_provider,
+                    "category": event.category,
+                })
+            except Exception as sse_err:
+                logger.warning(f"Failed to broadcast analyzed event {event.id}: {sse_err}")
+
             # Generate alert if high impact
             impact = abs(analysis.get("impact_score", 0.0))
             if impact >= alert_threshold:
