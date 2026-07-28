@@ -357,10 +357,6 @@ export function IntelligenceDashboard() {
       es = new EventSource(`${API_BASE}/api/intelligence/stream`);
       eventSourceRef.current = es;
 
-      es.onopen = () => {
-        setSseStatus("connected");
-      };
-
       es.addEventListener("connected", (e: MessageEvent) => {
         setSseStatus("connected");
         try {
@@ -562,8 +558,20 @@ export function IntelligenceDashboard() {
     }
   };
 
-  const forceTriggerReload = () => {
-    setRefreshTrigger(prev => prev + 1);
+  const [pollingNow, setPollingNow] = useState(false);
+
+  const forceTriggerReload = async () => {
+    setPollingNow(true);
+    try {
+      await fetch(`${API_BASE}/api/intelligence/poll`, { method: "POST" });
+    } catch (err) {
+      console.error("Error triggering manual poll:", err);
+    } finally {
+      setTimeout(() => {
+        setPollingNow(false);
+        setRefreshTrigger(prev => prev + 1);
+      }, 1500);
+    }
   };
 
   // UI Helper functions
@@ -922,10 +930,10 @@ export function IntelligenceDashboard() {
                       ? "rgba(234, 179, 8, 0.1)"
                       : "rgba(239, 68, 68, 0.1)",
                 border: `1px solid ${sseStatus === "connected"
-                    ? "rgba(16, 185, 129, 0.25)"
-                    : sseStatus === "connecting"
-                      ? "rgba(234, 179, 8, 0.25)"
-                      : "rgba(239, 68, 68, 0.25)"
+                  ? "rgba(16, 185, 129, 0.25)"
+                  : sseStatus === "connecting"
+                    ? "rgba(234, 179, 8, 0.25)"
+                    : "rgba(239, 68, 68, 0.25)"
                   }`,
                 color:
                   sseStatus === "connected"
@@ -995,9 +1003,10 @@ export function IntelligenceDashboard() {
               onMouseOut={(e) => {
                 e.currentTarget.style.backgroundColor = "rgba(59, 130, 246, 0.1)";
               }}
+              disabled={pollingNow}
             >
-              <RefreshCw size={14} />
-              Poll Now
+              <RefreshCw size={14} className={pollingNow ? "animate-spin" : ""} />
+              {pollingNow ? "Polling Web & Exchanges..." : "Poll Now"}
             </button>
           </div>
         </div>

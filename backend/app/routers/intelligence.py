@@ -824,7 +824,23 @@ def reanalyze_item_endpoint(item_type: str, item_id: int, db: Session = Depends(
     result = reanalyze_single_item(db, item_type, item_id)
     if not result:
         raise HTTPException(status_code=404, detail=f"Item '{item_type}' with ID {item_id} not found or analysis failed.")
-    return result
+@router.post("/poll")
+async def trigger_manual_poll():
+    """
+    Manually trigger immediate execution of all scrapers (NSE/BSE, news, filings).
+    """
+    import asyncio
+    from app.main import (
+        _run_corporate_announcements_scraper,
+        _run_other_nse_bse_scraper,
+        _run_news_aggregator,
+        _run_filings_scraper
+    )
+    asyncio.create_task(asyncio.to_thread(_run_corporate_announcements_scraper))
+    asyncio.create_task(asyncio.to_thread(_run_other_nse_bse_scraper))
+    asyncio.create_task(asyncio.to_thread(_run_news_aggregator))
+    asyncio.create_task(asyncio.to_thread(_run_filings_scraper))
+    return {"status": "ok", "message": "Triggered manual poll of all scrapers in background."}
 
 
 @router.get("/stream")
