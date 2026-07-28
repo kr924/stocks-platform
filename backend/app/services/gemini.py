@@ -91,7 +91,7 @@ def call_openai(prompt: str, api_key: str) -> dict:
 
 
 def call_openrouter(prompt: str, api_key: str) -> dict:
-    """Call OpenRouter API with auto-fallback across top free models."""
+    """Call OpenRouter API with dynamic live free model discovery and dual payload attempt."""
     key = api_key.strip().rstrip(">").strip('"').strip("'").strip()
     if not key or key.startswith("YOUR_"):
         raise ValueError("Invalid or placeholder OpenRouter API key")
@@ -103,39 +103,64 @@ def call_openrouter(prompt: str, api_key: str) -> dict:
         "X-Title": "Stocks Platform AI",
     }
     
-    free_models = [
-        "google/gemini-2.0-flash-lite-001:free",
-        "meta-llama/llama-3.3-70b-instruct:free",
-        "qwen/qwen-2.5-72b-instruct:free",
-        "google/gemma-2-9b-it:free",
-        "deepseek/deepseek-r1-distill-llama-70b:free",
-        "mistralai/mistral-7b-instruct:free",
-    ]
+    # 1. Fetch live free models dynamically from OpenRouter's API
+    free_models = []
+    try:
+        models_res = requests.get("https://openrouter.ai/api/v1/models", timeout=5)
+        if models_res.ok:
+            m_data = models_res.json().get("data", [])
+            for m in m_data:
+                m_id = m.get("id", "")
+                pricing = m.get("pricing", {})
+                p_prompt = str(pricing.get("prompt", "1"))
+                p_compl = str(pricing.get("completion", "1"))
+                if m_id.endswith(":free") or (p_prompt == "0" and p_compl == "0"):
+                    free_models.append(m_id)
+    except Exception as e:
+        logger.warning(f"Failed to fetch live OpenRouter models list: {e}")
     
+    # Fallback model list if dynamic fetch returned 0
+    if not free_models:
+        free_models = [
+            "openrouter/auto",
+            "google/gemini-2.0-flash-exp:free",
+            "meta-llama/llama-3.1-8b-instruct:free",
+            "qwen/qwen-2.5-coder-32b-instruct:free",
+            "mistralai/mistral-small-24b-instruct-2501:free",
+            "cognitivecomputations/dolphin3.0-r1-mistral-24b:free",
+        ]
+    
+    # Prepend openrouter/auto if not present
+    if "openrouter/auto" not in free_models:
+        free_models.insert(0, "openrouter/auto")
+        
     last_err = None
     for model_name in free_models:
-        payload = {
-            "model": model_name,
-            "messages": [
-                {"role": "system", "content": "Respond only with a raw, valid JSON object matching the requested schema. Do not output markdown code blocks."},
-                {"role": "user", "content": prompt}
-            ],
-            "response_format": {"type": "json_object"}
-        }
-        try:
-            res = requests.post("https://openrouter.ai/api/v1/chat/completions", json=payload, headers=headers, timeout=20)
-            if res.ok:
-                raw_text = res.json()["choices"][0]["message"]["content"]
-                cleaned = clean_json_response(raw_text)
-                logger.info(f"✨ [OPENROUTER] Analysis successfully generated using model: {model_name}")
-                return json.loads(cleaned)
-            else:
-                last_err = f"Model {model_name} HTTP {res.status_code}: {res.text[:100]}"
-                logger.warning(f"[OPENROUTER] Model {model_name} failed: {res.status_code} {res.text[:100]}")
-        except Exception as e:
-            last_err = str(e)
-            continue
-            
+        # Attempt with and without response_format parameter
+        for use_json_format in [True, False]:
+            payload = {
+                "model": model_name,
+                "messages": [
+                    {"role": "system", "content": "Respond only with a raw, valid JSON object matching the requested schema. Do not output markdown code blocks or conversational text."},
+                    {"role": "user", "content": prompt}
+                ]
+            }
+            if use_json_format:
+                payload["response_format"] = {"type": "json_object"}
+                
+            try:
+                res = requests.post("https://openrouter.ai/api/v1/chat/completions", json=payload, headers=headers, timeout=20)
+                if res.ok:
+                    raw_text = res.json()["choices"][0]["message"]["content"]
+                    cleaned = clean_json_response(raw_text)
+                    logger.info(f"✨ [OPENROUTER] Analysis successfully generated using model '{model_name}'!")
+                    return json.loads(cleaned)
+                else:
+                    last_err = f"Model {model_name} HTTP {res.status_code}: {res.text[:120]}"
+            except Exception as e:
+                last_err = str(e)
+                continue
+                
     raise RuntimeError(f"All OpenRouter free models failed: {last_err}")
 
 
