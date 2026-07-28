@@ -81,18 +81,38 @@ def call_groq(prompt: str, api_key: str, model_name: str = "llama-3.3-70b-versat
         "Content-Type": "application/json",
         "Authorization": f"Bearer {api_key}"
     }
-    payload = {
-        "model": model_name,
-        "messages": [{"role": "user", "content": prompt}]
-    }
-    if "deepseek" not in model_name.lower():
-        payload["response_format"] = {"type": "json_object"}
+    
+    # Model rotation pool to bypass per-model 429 rate limits
+    models_to_try = [model_name]
+    if model_name != "llama-3.1-8b-instant":
+        models_to_try.append("llama-3.1-8b-instant")
+    if "mixtral-8x7b-32768" not in models_to_try:
+        models_to_try.append("mixtral-8x7b-32768")
         
-    res = requests.post("https://api.groq.com/openai/v1/chat/completions", json=payload, headers=headers, timeout=15)
-    res.raise_for_status()
-    raw_text = res.json()["choices"][0]["message"]["content"]
-    cleaned = clean_json_response(raw_text)
-    return json.loads(cleaned)
+    last_exc = None
+    for m in models_to_try:
+        try:
+            payload = {
+                "model": m,
+                "messages": [{"role": "user", "content": prompt}],
+                "response_format": {"type": "json_object"}
+            }
+            res = requests.post("https://api.groq.com/openai/v1/chat/completions", json=payload, headers=headers, timeout=12)
+            if res.status_code == 429:
+                logger.warning(f"Groq model {m} 429 rate limit hit, rotating to alternate model...")
+                time.sleep(0.5)
+                continue
+            res.raise_for_status()
+            raw_text = res.json()["choices"][0]["message"]["content"]
+            cleaned = clean_json_response(raw_text)
+            return json.loads(cleaned)
+        except Exception as e:
+            last_exc = e
+            continue
+            
+    if last_exc:
+        raise last_exc
+    raise RuntimeError("All Groq models failed")
 
 
 def call_anthropic(prompt: str, api_key: str) -> dict:

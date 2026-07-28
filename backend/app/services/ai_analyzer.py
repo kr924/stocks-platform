@@ -81,18 +81,36 @@ def _smart_rule_analysis(prompt: str) -> dict:
     pos_matches = [kw for kw in pos_keywords if kw in text_lower]
     neg_matches = [kw for kw in neg_keywords if kw in text_lower]
     
-    if len(pos_matches) > len(neg_matches):
+    if "board meeting" in text_lower or "financial results" in text_lower or "results" in text_lower:
+        sentiment = "neutral"
+        category = "earnings"
+        score = 0.1
+        summary = "Corporate disclosure: Scheduled board meeting / financial results declaration."
+    elif "shareholders meeting" in text_lower or "egm" in text_lower or "agm" in text_lower:
+        sentiment = "neutral"
+        category = "corporate_action"
+        score = 0.0
+        summary = "Shareholders meeting filing & corporate governance notification."
+    elif "newspaper publication" in text_lower:
+        sentiment = "neutral"
+        category = "general"
+        score = 0.0
+        summary = "Statutory newspaper publication notice for regulatory compliance."
+    elif len(pos_matches) > len(neg_matches):
         sentiment = "positive"
+        category = "general"
         score = min(0.8, 0.4 + (len(pos_matches) * 0.15))
-        summary = f"Positive development: Key factors include {', '.join(pos_matches[:3])}."
+        summary = f"Positive market indicator: Highlights include {', '.join(pos_matches[:3])}."
     elif len(neg_matches) > len(pos_matches):
         sentiment = "negative"
+        category = "general"
         score = max(-0.8, -0.4 - (len(neg_matches) * 0.15))
         summary = f"Notice: Critical factors detected include {', '.join(neg_matches[:3])}."
     else:
         sentiment = "neutral"
+        category = "general"
         score = 0.0
-        summary = "Announcement processed via real-time market analysis engine."
+        summary = "Market filing processed for real-time exchange disclosure."
         
     return {
         "analyses": [{
@@ -100,7 +118,7 @@ def _smart_rule_analysis(prompt: str) -> dict:
             "impact_score": score,
             "summary": summary,
             "affected_stocks": [],
-            "category": "general"
+            "category": category
         }]
     }
 
