@@ -126,7 +126,7 @@ def _call_llm_for_analysis(prompt: str):
     logger.info("⚡ [LLM FALLBACK]: All LLMs unavailable. Using 0-CPU Rule Engine fallback...")
     try:
         from app.services.ai_log_tracker import record_ai_log
-        record_ai_log("⚡ All cloud & local LLMs unavailable. Using 0-CPU Rule Engine fallback", provider="rule_engine", tier="rule_engine", level="warning")
+        record_ai_log("⚡ All cloud & local LLMs unavailable. Using 0-CPU Rule Engine fallback (0 AI calls)", provider="", tier="rule_engine", level="warning")
     except Exception:
         pass
     res = _smart_rule_analysis(prompt)
