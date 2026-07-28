@@ -26,11 +26,11 @@ logger = logging.getLogger("app.ai_analyzer")
 
 # ─── LLM Call Helpers (reuse existing providers) ─────────────────────────
 
-def _call_llm_for_analysis(prompt: str):
+def _call_llm_for_analysis(prompt: str, event_info: str = ""):
     """
     Call LLMs using smart key concurrency pool & state management.
-    1. Synchronizes env keys into thread-safe ProviderPools (Groq, Gemini, OpenAI, Anthropic).
-    2. Attempts to acquire an IDLE/FREE key for primary provider (Groq) or fallback cloud providers.
+    1. Synchronizes env keys into thread-safe ProviderPools (OpenRouter, Groq, Gemini, OpenAI, Anthropic).
+    2. Attempts to acquire an IDLE/FREE key for OpenRouter first, then Groq / Gemini / OpenAI.
     3. If ALL cloud keys across ALL providers are busy or rate-limited:
        -> Routes request to local Ollama with 30s timeout!
     4. If Ollama also fails -> Fallback to 0-CPU Rule Engine.
@@ -51,6 +51,8 @@ def _call_llm_for_analysis(prompt: str):
     # Sync environment keys into key_manager pools
     key_manager.sync_all(env)
     
+    info_suffix = f" for {event_info}" if event_info else ""
+
     # ── Phase 1: Try Cloud Providers with Idle Key Pool Concurrency ──
     for provider in cloud_providers:
         # Loop to acquire any free/idle key for this provider
@@ -61,10 +63,10 @@ def _call_llm_for_analysis(prompt: str):
                 break
             
             try:
-                logger.info(f"🚀 [AI EXECUTION]: Calling LLM provider '{provider}' using Key #{ks.index + 1}...")
+                logger.info(f"🚀 [AI EXECUTION]: Calling LLM provider '{provider}' using Key #{ks.index + 1}{info_suffix}...")
                 try:
                     from app.services.ai_log_tracker import record_ai_log
-                    record_ai_log(f"Calling LLM provider '{provider.upper()}' using Key #{ks.index + 1}", provider=provider, key_index=ks.index + 1, tier="execution")
+                    record_ai_log(f"Calling LLM provider '{provider.upper()}' using Key #{ks.index + 1}{info_suffix}", provider=provider, key_index=ks.index + 1, tier="execution", details=event_info)
                 except Exception:
                     pass
                 if provider == "openrouter":
@@ -84,7 +86,7 @@ def _call_llm_for_analysis(prompt: str):
                 if res:
                     try:
                         from app.services.ai_log_tracker import record_ai_log
-                        record_ai_log(f"✅ AI Analysis completed via {provider.upper()} (Key #{ks.index + 1})", provider=provider, key_index=ks.index + 1, tier="success", level="success")
+                        record_ai_log(f"✅ AI Analysis completed via {provider.upper()} (Key #{ks.index + 1}){info_suffix}", provider=provider, key_index=ks.index + 1, tier="success", level="success", details=event_info)
                     except Exception:
                         pass
                     return res, provider
@@ -95,9 +97,10 @@ def _call_llm_for_analysis(prompt: str):
                 logger.warning(f"[{provider.upper()}] Key #{ks.index + 1} call failed: {err_msg}")
                 try:
                     from app.services.ai_log_tracker import record_ai_log
-                    record_ai_log(f"❌ {provider.upper()} Key #{ks.index + 1} Error: {err_msg[:120]}", provider=provider, key_index=ks.index + 1, tier="error", level="error", details=err_msg)
+                    record_ai_log(f"❌ {provider.upper()} Key #{ks.index + 1} Error: {err_msg[:100]}{info_suffix}", provider=provider, key_index=ks.index + 1, tier="error", level="error", details=err_msg)
                 except Exception:
                     pass
+                # Try next free key for this provider or move on
                 # Try next free key for this provider or move on
 
     # ── Phase 2: If ALL Cloud Keys are Busy/Rate-Limited, Fallback to Local Ollama (30s timeout) ──
@@ -714,7 +717,7 @@ def analyze_pending_events(db: Session) -> int:
                 }
                 
                 prompt = _build_financial_results_prompt(event_data, pdf_text, screener_text)
-                result, provider = _call_llm_for_analysis(prompt)
+                result, provider = _call_llm_for_analysis(prompt, event_info=f"[{event.symbol or 'GENERAL'}] '{event.title}'")
                 event.ai_provider = provider
                 event.category = "financial_results"  # Tag as financial results
                 
@@ -794,7 +797,7 @@ def analyze_pending_events(db: Session) -> int:
             }]
             
             prompt = _build_event_analysis_prompt(event_data)
-            result, provider = _call_llm_for_analysis(prompt)
+            result, provider = _call_llm_for_analysis(prompt, event_info=f"[{event.symbol or 'GENERAL'}] '{event.title}'")
             event.ai_provider = provider
             
             if not result or "analyses" not in result or not result["analyses"]:
