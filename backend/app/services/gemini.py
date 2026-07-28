@@ -114,7 +114,7 @@ def call_anthropic(prompt: str, api_key: str) -> dict:
 def call_gemini(prompt: str, api_key: str) -> dict:
     if api_key:
         genai.configure(api_key=api_key)
-    model_name = "gemini-1.5-flash-latest"
+    model_name = "gemini-1.5-flash"
     try:
         model = genai.GenerativeModel(model_name)
         response = model.generate_content(

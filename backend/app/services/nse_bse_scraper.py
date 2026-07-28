@@ -74,10 +74,16 @@ class NSESession:
                 self._refresh_cookies()
                 resp = self.session.get(url, params=params, timeout=timeout)
             resp.raise_for_status()
-            return resp.json()
-        except requests.exceptions.JSONDecodeError:
-            logger.error(f"Non-JSON response from {url}: {resp.text[:200]}")
-            return None
+            try:
+                return resp.json()
+            except Exception:
+                try:
+                    import gzip
+                    decompressed = gzip.decompress(resp.content)
+                    return json.loads(decompressed.decode("utf-8"))
+                except Exception as parse_err:
+                    logger.error(f"Non-JSON response from {url}: {resp.text[:200]}")
+                    return None
         except Exception as e:
             logger.error(f"NSE API error for {url}: {e}")
             return None
