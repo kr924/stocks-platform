@@ -651,7 +651,11 @@ def reload_config():
 @router.get("/upcoming-earnings")
 def get_upcoming_earnings(db: Session = Depends(get_db)):
     """Get stocks with upcoming earnings in the next 7 days."""
-    import dateutil.parser
+    try:
+        import dateutil.parser
+    except ImportError:
+        dateutil = None
+
     from datetime import datetime, timedelta
     
     bms = db.query(MarketEvent).filter(
@@ -677,7 +681,10 @@ def get_upcoming_earnings(db: Session = Depends(get_db)):
             except ValueError:
                 # Fallback parser
                 try:
-                    meeting_date = dateutil.parser.parse(meeting_date_str).date()
+                    if dateutil:
+                        meeting_date = dateutil.parser.parse(meeting_date_str).date()
+                    else:
+                        meeting_date = datetime.fromisoformat(meeting_date_str.replace("Z", "")).date()
                 except Exception:
                     continue
                 

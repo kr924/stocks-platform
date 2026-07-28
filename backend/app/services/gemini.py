@@ -33,17 +33,16 @@ def call_ollama(prompt: str, base_url: str = "http://localhost:11434", model_nam
         "stream": False,
         "format": "json",
         "options": {
-            "temperature": 0.3,
-            "num_predict": 2048
+            "temperature": 0.2,
+            "num_predict": 512
         }
     }
     url = base_url.rstrip("/") + "/api/chat"
-    res = requests.post(url, json=payload, timeout=60)
+    res = requests.post(url, json=payload, timeout=30)
     res.raise_for_status()
     raw_text = res.json()["message"]["content"]
     cleaned = clean_json_response(raw_text)
     return json.loads(cleaned)
-
 
 
 def clean_json_response(text: str) -> str:
@@ -115,7 +114,7 @@ def call_anthropic(prompt: str, api_key: str) -> dict:
 def call_gemini(prompt: str, api_key: str) -> dict:
     if api_key:
         genai.configure(api_key=api_key)
-    model_name = "gemini-2.5-flash"
+    model_name = "gemini-1.5-flash-latest"
     try:
         model = genai.GenerativeModel(model_name)
         response = model.generate_content(
@@ -124,8 +123,8 @@ def call_gemini(prompt: str, api_key: str) -> dict:
         )
     except Exception as api_err:
         if "429" in str(api_err) or "quota" in str(api_err).lower() or "404" in str(api_err):
-            logger.warning(f"Failed calling {model_name}, trying fallback gemini-1.5-flash: {api_err}")
-            model = genai.GenerativeModel("gemini-1.5-flash")
+            logger.warning(f"Failed calling {model_name}, trying fallback gemini-1.5-pro: {api_err}")
+            model = genai.GenerativeModel("gemini-1.5-pro")
             response = model.generate_content(
                 prompt,
                 generation_config={"response_mime_type": "application/json"}
