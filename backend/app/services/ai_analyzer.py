@@ -376,12 +376,13 @@ def analyze_pending_filings(db: Session) -> int:
             }
             
             prompt = _build_filing_analysis_prompt(filing_data)
-            result = _call_llm_for_analysis(prompt)
+            result, provider = _call_llm_for_analysis(prompt)
             
             if result:
                 filing.ai_sentiment = result.get("sentiment", "neutral")
                 filing.ai_summary = result.get("summary", "")
                 filing.ai_key_metrics = json.dumps(result.get("key_metrics", {}))
+                filing.ai_provider = provider
                 filing.ai_analyzed_at = datetime.utcnow()
                 count += 1
                 
@@ -705,7 +706,8 @@ def get_market_sentiment(db: Session, force_refresh: bool = False) -> dict:
     
     sentiment_data = None
     try:
-        sentiment_data = _call_llm_for_analysis(prompt)
+        res, provider = _call_llm_for_analysis(prompt)
+        sentiment_data = res
     except Exception as e:
         logger.error(f"Error calling LLM for market sentiment: {e}")
         
