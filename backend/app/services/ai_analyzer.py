@@ -161,7 +161,16 @@ _SKIP_SUBJECTS = {
     "copy of newspaper publication",
     "press release",
     "press release (revised)",
+    "analysts/institutional investor meet/con. call updates",
+    "investor presentation",
+    "certificate under sebi (depositories and participants) regulations",
 }
+
+# Subjects that trigger skip via 'contains' check (case-insensitive)
+_SKIP_SUBJECT_CONTAINS = [
+    "board meeting —",
+    "board meeting -",
+]
 
 # Details keywords that trigger skip when subject is "General Updates" / "Updates"
 _SKIP_DETAIL_KEYWORDS = ["newspaper publication", "press", "media"]
@@ -190,8 +199,12 @@ def _classify_ai_tier(event) -> str:
     
     # --- Exchange (NSE/BSE) events below ---
     
-    # Rule 1: Skip newspaper publications and press releases
+    # Rule 1: Skip newspaper publications, press releases, analyst meets, investor presentations, SEBI certificates
     if title_lower in _SKIP_SUBJECTS:
+        return "skip"
+    
+    # Rule 1b: Skip subjects containing "Board Meeting —" (intimation notices, not outcome)
+    if any(kw in title_lower for kw in _SKIP_SUBJECT_CONTAINS):
         return "skip"
     
     # Rule 2: Skip "General Updates" / "Updates" with newspaper/press/media in details
