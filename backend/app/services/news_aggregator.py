@@ -427,6 +427,8 @@ def fetch_all_news(db: Session) -> Dict[str, int]:
         now_utc = datetime.utcnow()
         for item_data in new_items_for_broadcast:
             pub_dt = item_data.get("published_at")
+            if pub_dt and pub_dt.tzinfo is not None:
+                pub_dt = pub_dt.replace(tzinfo=None)
             if pub_dt and (now_utc - pub_dt).total_seconds() > 172800:
                 continue  # Skip old archived articles from live SSE push
             sse_manager.broadcast("new_news", {

@@ -74,6 +74,7 @@ def call_openai(prompt: str, api_key: str) -> dict:
 
 
 def call_groq(prompt: str, api_key: str, model_name: str) -> dict:
+    import time
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {api_key}"
@@ -86,6 +87,11 @@ def call_groq(prompt: str, api_key: str, model_name: str) -> dict:
         payload["response_format"] = {"type": "json_object"}
         
     res = requests.post("https://api.groq.com/openai/v1/chat/completions", json=payload, headers=headers, timeout=15)
+    if res.status_code == 429:
+        logger.warning("Groq API 429 rate limit hit, backing off 2s before retry...")
+        time.sleep(2)
+        res = requests.post("https://api.groq.com/openai/v1/chat/completions", json=payload, headers=headers, timeout=15)
+        
     res.raise_for_status()
     raw_text = res.json()["choices"][0]["message"]["content"]
     cleaned = clean_json_response(raw_text)
@@ -112,27 +118,26 @@ def call_anthropic(prompt: str, api_key: str) -> dict:
 
 
 def call_gemini(prompt: str, api_key: str) -> dict:
-    if api_key:
-        genai.configure(api_key=api_key)
-    model_name = "gemini-1.5-flash"
-    try:
-        model = genai.GenerativeModel(model_name)
-        response = model.generate_content(
-            prompt,
-            generation_config={"response_mime_type": "application/json"}
-        )
-    except Exception as api_err:
-        if "429" in str(api_err) or "quota" in str(api_err).lower() or "404" in str(api_err):
-            logger.warning(f"Failed calling {model_name}, trying fallback gemini-1.5-pro: {api_err}")
-            model = genai.GenerativeModel("gemini-1.5-pro")
-            response = model.generate_content(
-                prompt,
-                generation_config={"response_mime_type": "application/json"}
-            )
-        else:
-            raise
+    if not api_key:
+        raise ValueError("Gemini API key is empty")
     
-    cleaned = clean_json_response(response.text.strip())
+    # Try gemini-1.5-flash via REST API
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"response_mime_type": "application/json"}
+    }
+    
+    res = requests.post(url, json=payload, headers=headers, timeout=15)
+    if not res.ok:
+        # Fallback to gemini-1.5-pro
+        fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key={api_key}"
+        res = requests.post(fallback_url, json=payload, headers=headers, timeout=15)
+    
+    res.raise_for_status()
+    raw_text = res.json()["candidates"][0]["content"]["parts"][0]["text"]
+    cleaned = clean_json_response(raw_text.strip())
     return json.loads(cleaned)
 
 
