@@ -72,12 +72,15 @@ def get_intelligence_feed(
     CLOUD_PROVIDERS = ["groq", "gemini", "openrouter", "openai", "anthropic", "cloud", "financial_results"]
 
     # Define strict Finance News SQL condition according to user rules:
-    # 1. Subject contains "Outcome of Board Meeting"
+    # 1. Subject contains "Outcome of Board Meeting" AND details contain "finan"
     # 2. Subject contains "Updates" AND details contain "finan", "revenue", or "profit"
     # 3. Subject or details contain "Acquisition", "Merger", "Dividend", "Bonus", "Split", "Financial Result", "Quarterly Result", "Audited Result"
     # 4. Analyzed by Cloud Finance AI
     finance_news_cond = or_(
-        MarketEvent.title.ilike("%Outcome of Board Meeting%"),
+        and_(
+            MarketEvent.title.ilike("%Outcome of Board Meeting%"),
+            MarketEvent.description.ilike("%finan%")
+        ),
         and_(
             MarketEvent.title.ilike("%Update%"),
             or_(

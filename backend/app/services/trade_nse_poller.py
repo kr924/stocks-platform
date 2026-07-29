@@ -132,14 +132,21 @@ def _get_armed_configs() -> List:
 def _check_match(announcement: dict, armed_configs: list) -> Optional[dict]:
     """Check if an NSE announcement matches any armed config's trigger subject + symbol."""
     subject = str(announcement.get("desc") or announcement.get("subject") or announcement.get("an_desc") or "").strip()
+    details = str(announcement.get("attchmntText") or announcement.get("details") or announcement.get("desc") or "").strip()
     ann_symbol = str(announcement.get("symbol") or announcement.get("sm_name") or "").strip().upper()
 
     if not subject or not ann_symbol:
         return None
 
+    full_text = f"{subject} {details}".lower()
+
     for config in armed_configs:
         trigger = config["trigger_subject"].lower()
         if trigger in subject.lower() and ann_symbol == config["symbol"]:
+            # If trigger subject is 'Outcome of Board Meeting', require 'finan' in details
+            if "outcome of board meeting" in trigger:
+                if "finan" not in full_text:
+                    continue
             return config
     return None
 
