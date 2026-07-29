@@ -1354,41 +1354,49 @@ function IntelligenceDashboardContent() {
                         </span>
                       )}
                       {item.ai_provider && (
-                        <span style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "4px",
-                          backgroundColor: item.ai_provider === "openrouter" ? "rgba(6, 182, 212, 0.15)"
-                            : item.ai_provider === "groq" ? "rgba(168, 85, 247, 0.15)"
-                            : item.ai_provider === "ollama" ? "rgba(245, 158, 11, 0.15)"
-                            : item.ai_provider === "gemini" ? "rgba(16, 185, 129, 0.15)"
-                            : "rgba(100, 116, 139, 0.15)",
-                          color: item.ai_provider === "openrouter" ? "#22d3ee"
-                            : item.ai_provider === "groq" ? "#c084fc"
-                            : item.ai_provider === "ollama" ? "#fbbf24"
-                            : item.ai_provider === "gemini" ? "#34d399"
-                            : "#94a3b8",
-                          padding: "3px 8px",
-                          borderRadius: "6px",
-                          fontSize: "10px",
-                          fontWeight: "700",
-                          border: `1px solid ${
-                            item.ai_provider === "openrouter" ? "rgba(6, 182, 212, 0.3)"
-                            : item.ai_provider === "groq" ? "rgba(168, 85, 247, 0.3)"
-                            : item.ai_provider === "ollama" ? "rgba(245, 158, 11, 0.3)"
-                            : item.ai_provider === "gemini" ? "rgba(16, 185, 129, 0.3)"
-                            : "rgba(100, 116, 139, 0.3)"
-                          }`
-                        }}>
-                          <Bot size={11} />
-                          {
-                            item.ai_provider === "openrouter" ? "OpenRouter AI"
-                            : item.ai_provider === "groq" ? "Groq AI"
-                            : item.ai_provider === "ollama" ? "Local Ollama"
-                            : item.ai_provider === "gemini" ? "Gemini AI"
-                            : item.ai_provider
-                          }
-                        </span>
+                        <div style={{ position: "relative" }} className="group">
+                          <span style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "4px",
+                            backgroundColor: item.ai_provider === "openrouter" ? "rgba(6, 182, 212, 0.15)"
+                              : item.ai_provider === "groq" ? "rgba(168, 85, 247, 0.15)"
+                              : item.ai_provider === "ollama" ? "rgba(245, 158, 11, 0.15)"
+                              : item.ai_provider === "gemini" ? "rgba(16, 185, 129, 0.15)"
+                              : item.ai_provider === "ollama_failed" ? "rgba(239, 68, 68, 0.15)"
+                              : "rgba(100, 116, 139, 0.15)",
+                            color: item.ai_provider === "openrouter" ? "#22d3ee"
+                              : item.ai_provider === "groq" ? "#c084fc"
+                              : item.ai_provider === "ollama" ? "#fbbf24"
+                              : item.ai_provider === "gemini" ? "#34d399"
+                              : item.ai_provider === "ollama_failed" ? "#f87171"
+                              : "#94a3b8",
+                            padding: "2px 8px",
+                            borderRadius: "6px",
+                            fontSize: "10px",
+                            fontWeight: "700",
+                            cursor: "help",
+                            border: `1px solid ${
+                              item.ai_provider === "openrouter" ? "rgba(6, 182, 212, 0.3)"
+                              : item.ai_provider === "groq" ? "rgba(168, 85, 247, 0.3)"
+                              : item.ai_provider === "ollama" ? "rgba(245, 158, 11, 0.3)"
+                              : item.ai_provider === "gemini" ? "rgba(16, 185, 129, 0.3)"
+                              : item.ai_provider === "ollama_failed" ? "rgba(239, 68, 68, 0.3)"
+                              : "rgba(100, 116, 139, 0.3)"
+                            }`
+                          }}
+                          title={`🤖 AI Log Execution Details:\nProvider: ${item.ai_provider.toUpperCase()}\nTier: ${item.category === "financial_results" ? "Financial Results (Cloud)" : "Standard (Local Ollama)"}\nStatus: ${item.ai_provider === "ollama_failed" ? "Failed / Offline" : "Analyzed OK"}`}>
+                            <Bot size={11} />
+                            {
+                              item.ai_provider === "openrouter" ? "OpenRouter AI"
+                              : item.ai_provider === "groq" ? "Groq AI"
+                              : item.ai_provider === "ollama" ? "Local Ollama"
+                              : item.ai_provider === "gemini" ? "Gemini AI"
+                              : item.ai_provider === "ollama_failed" ? "Ollama Failed"
+                              : item.ai_provider
+                            }
+                          </span>
+                        </div>
                       )}
                       <span style={{
                         display: "flex",
@@ -1397,22 +1405,22 @@ function IntelligenceDashboardContent() {
                         backgroundColor: "rgba(56, 189, 248, 0.08)",
                         color: "#38bdf8",
                         border: "1px solid rgba(56, 189, 248, 0.15)",
-                        padding: "3px 8px",
+                        padding: "2px 8px",
                         borderRadius: "6px",
-                        fontSize: "10.5px",
+                        fontSize: "10px",
                         fontWeight: "600"
                       }} title={`Arrived at: ${formatFullTimestamp(item.time)}`}>
                         <Clock size={11} style={{ color: "#38bdf8" }} />
                         <span>{formatFullTimestamp(item.time)}</span>
                         {formatTime(item.time) && (
-                          <span style={{ color: "#94a3b8", fontSize: "10px", fontWeight: "500" }}>
+                          <span style={{ color: "#94a3b8", fontSize: "9.5px", fontWeight: "500" }}>
                             ({formatTime(item.time)})
                           </span>
                         )}
                       </span>
                     </div>
 
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
                       {/* Provider selection dropdown for manual re-analysis */}
                       <select
                         value={selectedProviders[`${item.type}-${item.id}`] || ""}
@@ -1459,26 +1467,26 @@ function IntelligenceDashboardContent() {
                           border: "1px solid rgba(59, 130, 246, 0.3)",
                           color: "#60a5fa",
                           borderRadius: "6px",
-                          padding: "2px 8px",
-                          fontSize: "10.5px",
+                          padding: "2px 6px",
+                          fontSize: "10px",
                           fontWeight: "600",
                           cursor: "pointer",
                           transition: "all 0.2s"
                         }}
                       >
-                        <RefreshCw size={11} className={reanalyzingIds[`${item.type}-${item.id}`] ? "animate-spin" : ""} />
+                        <RefreshCw size={10} className={reanalyzingIds[`${item.type}-${item.id}`] ? "animate-spin" : ""} />
                         <span>{reanalyzingIds[`${item.type}-${item.id}`] ? "Analyzing..." : "Re-analyze"}</span>
                       </button>
 
                       {item.ai_sentiment && (
-                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                           <span style={{
                             backgroundColor: sentiment.bg,
                             color: sentiment.text,
                             border: `1px solid ${sentiment.border}`,
-                            fontSize: "10px",
+                            fontSize: "9.5px",
                             fontWeight: "700",
-                            padding: "2px 8px",
+                            padding: "2px 6px",
                             borderRadius: "4px",
                             textTransform: "uppercase"
                           }}>
@@ -1486,7 +1494,7 @@ function IntelligenceDashboardContent() {
                           </span>
                           {item.ai_impact_score !== null && item.ai_impact_score !== undefined && (
                             <span style={{
-                              fontSize: "11px",
+                              fontSize: "10.5px",
                               fontWeight: "700",
                               color: item.ai_impact_score > 0 ? "#10b981" : item.ai_impact_score < 0 ? "#ef4444" : "#9ca3af"
                             }}>
@@ -1499,103 +1507,29 @@ function IntelligenceDashboardContent() {
                   </div>
 
                   <h3 style={{
-                    fontSize: "14px",
+                    fontSize: "13.5px",
                     fontWeight: "600",
                     color: "#f1f5f9",
-                    margin: 0,
-                    lineHeight: "1.4"
+                    margin: "2px 0 0 0",
+                    lineHeight: "1.35"
                   }}>
                     {item.title}
                   </h3>
 
                   {item.ai_summary && (
                     <p style={{
-                      fontSize: "12px",
+                      fontSize: "11.5px",
                       color: "#cbd5e1",
-                      margin: 0,
-                      lineHeight: "1.5"
+                      margin: "2px 0 0 0",
+                      lineHeight: "1.45"
                     }}>
                       {item.ai_summary}
                     </p>
                   )}
 
-                  {/* Enhanced AI Log Details Box for each news item */}
-                  {item.ai_provider && (
-                    <div style={{
-                      fontSize: "11px",
-                      color: "#cbd5e1",
-                      backgroundColor: item.ai_provider === "ollama_failed" ? "rgba(239, 68, 68, 0.1)" : "rgba(15, 23, 42, 0.75)",
-                      border: `1px solid ${
-                        item.ai_provider === "groq" ? "rgba(168, 85, 247, 0.3)"
-                        : item.ai_provider === "gemini" ? "rgba(16, 185, 129, 0.3)"
-                        : item.ai_provider === "ollama" ? "rgba(245, 158, 11, 0.3)"
-                        : item.ai_provider === "openrouter" ? "rgba(6, 182, 212, 0.3)"
-                        : item.ai_provider === "ollama_failed" ? "rgba(239, 68, 68, 0.4)"
-                        : "rgba(100, 116, 139, 0.25)"
-                      }`,
-                      borderLeft: `4px solid ${
-                        item.ai_provider === "groq" ? "#c084fc"
-                        : item.ai_provider === "gemini" ? "#34d399"
-                        : item.ai_provider === "ollama" ? "#fbbf24"
-                        : item.ai_provider === "openrouter" ? "#22d3ee"
-                        : item.ai_provider === "ollama_failed" ? "#ef4444"
-                        : "#60a5fa"
-                      }`,
-                      padding: "8px 12px",
-                      borderRadius: "6px",
-                      marginTop: "6px",
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "4px"
-                    }}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "6px" }}>
-                        <span style={{
-                          color: item.ai_provider === "groq" ? "#c084fc" : item.ai_provider === "gemini" ? "#34d399" : item.ai_provider === "ollama" ? "#fbbf24" : item.ai_provider === "ollama_failed" ? "#f87171" : "#60a5fa",
-                          fontWeight: 700,
-                          fontSize: "11px",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "5px"
-                        }}>
-                          <Bot size={13} />
-                          AI Log Execution: {item.ai_provider.toUpperCase()}
-                        </span>
-                        <span style={{ fontSize: "10px", color: "#94a3b8", fontWeight: "500" }}>
-                          Tier: {
-                            item.category === "financial_results" || (item.title && item.title.toLowerCase().includes("financial"))
-                              ? "Financial Results (Cloud)"
-                              : item.ai_provider === "auto_skip"
-                                ? "Auto-Skip (0 AI)"
-                                : item.ai_provider === "manual_pending"
-                                  ? "Manual Pending"
-                                  : "Standard (Local Ollama)"
-                          }
-                        </span>
-                      </div>
-
-                      <div style={{ fontSize: "11px", color: "#94a3b8", lineHeight: "1.4" }}>
-                        {item.ai_provider === "ollama_failed" ? (
-                          <span style={{ color: "#f87171", fontWeight: 600 }}>
-                            🚫 Local Ollama engine was unavailable. Select a cloud provider above and click Re-analyze.
-                          </span>
-                        ) : item.ai_provider === "auto_skip" ? (
-                          <span>⏭️ Routine filing auto-skipped from AI queue to preserve API quota.</span>
-                        ) : item.ai_provider === "manual_pending" ? (
-                          <span>🔒 Non-exchange news article — choose a provider above to analyze on demand.</span>
-                        ) : item.category === "financial_results" || (item.title && item.title.toLowerCase().includes("financial")) ? (
-                          <span>📊 Deep Financial Results (PDF + Screener.in) analyzed via {item.ai_provider.toUpperCase()}</span>
-                        ) : item.ai_provider === "rule_engine" ? (
-                          <span>⚡ 0-CPU Rule Engine keyword analysis (Cloud LLMs offline/rate-limited)</span>
-                        ) : (
-                          <span>Exchange Market Intelligence analyzed via {item.ai_provider.toUpperCase()}</span>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Collapsible Source Description / Extracted Content */}
+                  {/* Compact Collapsible Source Description / Extracted Content */}
                   {item.description && (
-                    <div style={{ marginTop: "4px" }}>
+                    <div style={{ marginTop: "2px" }}>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -1606,30 +1540,30 @@ function IntelligenceDashboardContent() {
                           background: "none",
                           border: "none",
                           color: "#38bdf8",
-                          fontSize: "11px",
+                          fontSize: "10.5px",
                           fontWeight: "600",
                           cursor: "pointer",
                           padding: 0,
                           display: "flex",
                           alignItems: "center",
-                          gap: "4px"
+                          gap: "3px"
                         }}
                       >
-                        {expandedDetailsIds[`${item.type}-${item.id}`] ? "▲ Hide Source Details" : "▼ Show Source Details / Raw Text"}
+                        {expandedDetailsIds[`${item.type}-${item.id}`] ? "▲ Hide Source Details" : "▼ Show Source Details"}
                       </button>
 
                       {expandedDetailsIds[`${item.type}-${item.id}`] && (
                         <div style={{
-                          fontSize: "11.5px",
+                          fontSize: "11px",
                           color: "#cbd5e1",
                           backgroundColor: "rgba(0, 0, 0, 0.35)",
                           border: "1px solid rgba(255, 255, 255, 0.08)",
-                          padding: "10px 12px",
+                          padding: "8px 10px",
                           borderRadius: "6px",
-                          marginTop: "6px",
+                          marginTop: "4px",
                           whiteSpace: "pre-line",
-                          lineHeight: "1.5",
-                          maxHeight: "220px",
+                          lineHeight: "1.45",
+                          maxHeight: "180px",
                           overflowY: "auto"
                         }}>
                           {item.description}

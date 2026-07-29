@@ -695,8 +695,8 @@ Respond with a JSON object:
       "event_index": 0,
       "sentiment": "positive",
       "impact_score": 0.7,
-      "affected_stocks": ["RELIANCE", "ONGC", "BPCL"],
-      "summary": "Reliance Industries Q1 Net Profit surged +24% YoY to ₹18,900 Cr, driven by strong gross refining margins and retail segment growth. Revenue stood at ₹2.3 Lakh Cr (+12%). Sector Impact: Oil & Gas / Energy -> Prominent stocks: RELIANCE, ONGC, BPCL.",
+      "affected_stocks": ["TICKER"],
+      "summary": "Brief 2-3 sentence financial and market impact analysis strictly based on event 1 above. Sector Impact: [Sector Name] -> Prominent stocks: TICKER.",
       "urgency": "immediate"
     }}
   ]
@@ -788,8 +788,8 @@ Respond with a JSON object:
       "sentiment": "positive",
       "impact_score": 0.5,
       "category": "market_update",
-      "affected_stocks": ["TCS", "INFY", "HCLTECH"],
-      "summary": "The US Fed hints at interest rate cuts, which will likely prompt global enterprises to resume deferred IT spending budgets, benefiting top-tier Indian IT service exporters. Sector Impact: IT Services -> Prominent stocks: TCS, INFY, HCLTECH.",
+      "affected_stocks": ["TICKER"],
+      "summary": "Brief 2-3 sentence financial and market impact analysis strictly based on article 1 above. Sector Impact: [Sector Name] -> Prominent stocks: TICKER.",
       "urgency": "short_term"
     }}
   ]
