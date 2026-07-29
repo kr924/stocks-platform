@@ -53,14 +53,19 @@ def call_ollama(prompt: str, base_url: str = "http://host.docker.internal:11434"
         }
     }
     
-    # Try host gateway URLs (host.docker.internal, 172.17.0.1) first before container local loopbacks
+    # Filter candidate URLs: when inside Docker container, ignore localhost/127.0.0.1 to avoid connection refused
+    is_docker = os.path.exists('/.dockerenv')
+    raw_list = [base_url, os.getenv("OLLAMA_BASE_URL", ""), "http://host.docker.internal:11434", "http://172.17.0.1:11434"]
     candidate_urls = []
-    for alt in [base_url, "http://host.docker.internal:11434", "http://172.17.0.1:11434", "http://localhost:11434"]:
-        if alt and alt not in candidate_urls:
-            if "localhost" in alt or "127.0.0.1" in alt:
-                candidate_urls.append(alt)
-            else:
-                candidate_urls.insert(0, alt)
+    for u in raw_list:
+        if not u:
+            continue
+        if is_docker and ("localhost" in u or "127.0.0.1" in u):
+            continue
+        if u not in candidate_urls:
+            candidate_urls.append(u)
+    if not candidate_urls:
+        candidate_urls = ["http://host.docker.internal:11434" if is_docker else "http://localhost:11434"]
         
     last_err = None
     for b_url in candidate_urls:
