@@ -19,7 +19,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, func, desc, case
+from sqlalchemy import or_, and_, func, desc, case
 
 from app.database import (
     get_db, MarketEvent, NewsItem, NewsStory, CompanyFiling, AIAlert
