@@ -3042,27 +3042,27 @@ export default function App() {
         transform: "translateX(-50%)",
         zIndex: 1000,
         display: "flex",
-        gap: "4px",
-        backgroundColor: "rgba(13, 19, 31, 0.85)",
-        backdropFilter: "blur(12px)",
-        WebkitBackdropFilter: "blur(12px)",
-        padding: "4px",
-        borderRadius: "10px",
-        border: "1px solid rgba(255, 255, 255, 0.08)",
-        boxShadow: "0 8px 32px rgba(0, 0, 0, 0.5)"
+        gap: "6px",
+        backgroundColor: "rgba(30, 41, 59, 0.95)",
+        backdropFilter: "blur(16px)",
+        WebkitBackdropFilter: "blur(16px)",
+        padding: "6px",
+        borderRadius: "12px",
+        border: "1px solid rgba(255, 255, 255, 0.15)",
+        boxShadow: "0 12px 40px rgba(0, 0, 0, 0.6)"
       }}>
         <button
           onClick={() => setActiveView("tracker")}
           style={{
-            padding: "8px 18px",
+            padding: "9px 20px",
             fontSize: "12px",
             fontWeight: "700",
-            borderRadius: "7px",
+            borderRadius: "8px",
             border: "none",
             cursor: "pointer",
             backgroundColor: activeView === "tracker" ? "#2563eb" : "transparent",
-            color: activeView === "tracker" ? "#ffffff" : "#94a3b8",
-            boxShadow: activeView === "tracker" ? "0 2px 10px rgba(37,99,235,0.4)" : "none",
+            color: activeView === "tracker" ? "#ffffff" : "#cbd5e1",
+            boxShadow: activeView === "tracker" ? "0 2px 14px rgba(37, 99, 235, 0.5)" : "none",
             transition: "all 0.2s"
           }}
         >

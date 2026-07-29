@@ -617,24 +617,24 @@ function IntelligenceDashboardContent() {
     switch (sentiment) {
       case "positive":
         return {
-          bg: "rgba(16, 185, 129, 0.1)",
-          text: "#10b981",
-          border: "rgba(16, 185, 129, 0.2)",
+          bg: "rgba(52, 211, 153, 0.18)",
+          text: "#34d399",
+          border: "rgba(52, 211, 153, 0.4)",
           badgeText: "Positive Impact"
         };
       case "negative":
         return {
-          bg: "rgba(239, 68, 68, 0.1)",
-          text: "#ef4444",
-          border: "rgba(239, 68, 68, 0.2)",
+          bg: "rgba(244, 63, 94, 0.18)",
+          text: "#f43f5e",
+          border: "rgba(244, 63, 94, 0.4)",
           badgeText: "Negative Impact"
         };
       case "neutral":
       default:
         return {
-          bg: "rgba(107, 114, 128, 0.1)",
-          text: "#9ca3af",
-          border: "rgba(107, 114, 128, 0.2)",
+          bg: "rgba(56, 189, 248, 0.15)",
+          text: "#38bdf8",
+          border: "rgba(56, 189, 248, 0.35)",
           badgeText: "Neutral / Minimal"
         };
     }
@@ -786,8 +786,8 @@ function IntelligenceDashboardContent() {
       gap: "20px",
       padding: "20px",
       minHeight: "calc(100vh - 80px)",
-      backgroundColor: "#090d16",
-      color: "#e2e8f0",
+      backgroundColor: "#0f172a",
+      color: "#f8fafc",
       fontFamily: "system-ui, sans-serif"
     }}>
       {/* LEFT COLUMN: Filters, Feed Stream, Modal */}
@@ -801,26 +801,27 @@ function IntelligenceDashboardContent() {
             gap: "12px"
           }}>
             {[
-              { label: "Events Ingested", value: stats.events_24h, icon: <Layers size={18} />, color: "#3b82f6" },
+              { label: "Events Ingested", value: stats.events_24h, icon: <Layers size={18} />, color: "#38bdf8" },
               { label: "News Stories", value: stats.news_stories_24h, icon: <Newspaper size={18} />, color: "#06b6d4" },
-              { label: "Results & Filings", value: stats.filings_24h, icon: <FileText size={18} />, color: "#f59e0b" },
-              { label: "Positive Impact Events", value: stats.sentiment_distribution.positive, icon: <TrendingUp size={18} />, color: "#10b981" },
-              { label: "Negative Impact Events", value: stats.sentiment_distribution.negative, icon: <TrendingDown size={18} />, color: "#ef4444" }
+              { label: "Results & Filings", value: stats.filings_24h, icon: <FileText size={18} />, color: "#fbbf24" },
+              { label: "Positive Impact Events", value: stats.sentiment_distribution.positive, icon: <TrendingUp size={18} />, color: "#34d399" },
+              { label: "Negative Impact Events", value: stats.sentiment_distribution.negative, icon: <TrendingDown size={18} />, color: "#f43f5e" }
             ].map((stat, i) => (
               <div key={i} style={{
-                background: "rgba(17, 24, 39, 0.6)",
-                border: "1px solid rgba(255, 255, 255, 0.05)",
+                background: "#1e293b",
+                border: "1px solid rgba(255, 255, 255, 0.12)",
+                boxShadow: "0 4px 16px rgba(0, 0, 0, 0.2)",
                 backdropFilter: "blur(10px)",
-                padding: "12px 16px",
+                padding: "14px 16px",
                 borderRadius: "12px",
                 display: "flex",
                 alignItems: "center",
                 gap: "14px"
               }}>
                 <div style={{
-                  padding: "8px",
-                  borderRadius: "8px",
-                  backgroundColor: `${stat.color}15`,
+                  padding: "10px",
+                  borderRadius: "10px",
+                  backgroundColor: `${stat.color}20`,
                   color: stat.color,
                   display: "flex",
                   alignItems: "center",
@@ -829,8 +830,8 @@ function IntelligenceDashboardContent() {
                   {stat.icon}
                 </div>
                 <div>
-                  <div style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "500" }}>{stat.label}</div>
-                  <div style={{ fontSize: "18px", fontWeight: "700", color: "#f8fafc", marginTop: "2px" }}>{stat.value}</div>
+                  <div style={{ fontSize: "11px", color: "#cbd5e1", fontWeight: "600" }}>{stat.label}</div>
+                  <div style={{ fontSize: "20px", fontWeight: "800", color: "#ffffff", marginTop: "2px" }}>{stat.value}</div>
                 </div>
               </div>
             ))}
@@ -839,8 +840,9 @@ function IntelligenceDashboardContent() {
 
         {/* Toolbar & Filters */}
         <div style={{
-          background: "rgba(17, 24, 39, 0.4)",
-          border: "1px solid rgba(255, 255, 255, 0.05)",
+          background: "#1e293b",
+          border: "1px solid rgba(255, 255, 255, 0.12)",
+          boxShadow: "0 4px 16px rgba(0, 0, 0, 0.2)",
           padding: "16px",
           borderRadius: "12px",
           display: "flex",
@@ -852,7 +854,7 @@ function IntelligenceDashboardContent() {
           {/* Filters section */}
           <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
             <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-              <Search size={15} style={{ position: "absolute", left: "10px", color: "#64748b" }} />
+              <Search size={15} style={{ position: "absolute", left: "10px", color: "#94a3b8" }} />
               <input
                 type="text"
                 placeholder="Search symbol or words..."
@@ -862,12 +864,12 @@ function IntelligenceDashboardContent() {
                   setPage(1);
                 }}
                 style={{
-                  backgroundColor: "#0d131f",
-                  border: "1px solid rgba(255, 255, 255, 0.08)",
+                  backgroundColor: "#0f172a",
+                  border: "1px solid rgba(255, 255, 255, 0.15)",
                   borderRadius: "8px",
                   padding: "8px 12px 8px 32px",
                   fontSize: "12px",
-                  color: "#f8fafc",
+                  color: "#ffffff",
                   width: "180px",
                   outline: "none"
                 }}
@@ -1413,11 +1415,12 @@ function IntelligenceDashboardContent() {
                   key={item.id}
                   onClick={() => setSelectedItem(item)}
                   style={{
-                    background: "rgba(17, 24, 39, 0.4)",
+                    background: "#1e293b",
                     borderLeft: `4px solid ${sentiment.text}`,
-                    borderTop: "1px solid rgba(255, 255, 255, 0.04)",
-                    borderRight: "1px solid rgba(255, 255, 255, 0.04)",
-                    borderBottom: "1px solid rgba(255, 255, 255, 0.04)",
+                    borderTop: "1px solid rgba(255, 255, 255, 0.12)",
+                    borderRight: "1px solid rgba(255, 255, 255, 0.12)",
+                    borderBottom: "1px solid rgba(255, 255, 255, 0.12)",
+                    boxShadow: "0 4px 16px rgba(0, 0, 0, 0.2)",
                     borderRadius: "0 12px 12px 0",
                     padding: "16px",
                     cursor: "pointer",
@@ -1428,10 +1431,10 @@ function IntelligenceDashboardContent() {
                   }}
                   className="hover-card"
                   onMouseOver={(e) => {
-                    e.currentTarget.style.backgroundColor = "rgba(17, 24, 39, 0.6)";
+                    e.currentTarget.style.backgroundColor = "#273549";
                   }}
                   onMouseOut={(e) => {
-                    e.currentTarget.style.backgroundColor = "rgba(17, 24, 39, 0.4)";
+                    e.currentTarget.style.backgroundColor = "#1e293b";
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "10px" }}>
@@ -1687,21 +1690,21 @@ function IntelligenceDashboardContent() {
                   </div>
 
                   <h3 style={{
-                    fontSize: "13.5px",
-                    fontWeight: "600",
-                    color: "#f1f5f9",
+                    fontSize: "15px",
+                    fontWeight: "700",
+                    color: "#ffffff",
                     margin: "2px 0 0 0",
-                    lineHeight: "1.35"
+                    lineHeight: "1.4"
                   }}>
                     {item.title}
                   </h3>
 
                   {item.ai_summary && (
                     <p style={{
-                      fontSize: "11.5px",
-                      color: "#cbd5e1",
-                      margin: "2px 0 0 0",
-                      lineHeight: "1.45"
+                      fontSize: "12.5px",
+                      color: "#e2e8f0",
+                      margin: "4px 0 0 0",
+                      lineHeight: "1.5"
                     }}>
                       {item.ai_summary}
                     </p>

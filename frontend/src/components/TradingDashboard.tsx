@@ -425,9 +425,9 @@ export function TradingDashboard() {
   return (
     <div style={{
       padding: "20px",
-      backgroundColor: "#090d16",
+      backgroundColor: "#0f172a",
       minHeight: "calc(100vh - 80px)",
-      color: "#e2e8f0",
+      color: "#f8fafc",
       fontFamily: "system-ui, sans-serif"
     }}>
       {/* TOP POLLER STATUS HEADER */}
@@ -438,8 +438,9 @@ export function TradingDashboard() {
         marginBottom: "20px"
       }}>
         <div style={{
-          background: "rgba(17, 24, 39, 0.6)",
-          border: "1px solid rgba(255, 255, 255, 0.08)",
+          background: "#1e293b",
+          border: "1px solid rgba(255, 255, 255, 0.12)",
+          boxShadow: "0 4px 16px rgba(0, 0, 0, 0.2)",
           borderRadius: "12px",
           padding: "14px 18px",
           display: "flex",
@@ -449,13 +450,13 @@ export function TradingDashboard() {
           <div style={{
             padding: "10px",
             borderRadius: "10px",
-            backgroundColor: pollerStatus?.running ? "rgba(16, 185, 129, 0.15)" : "rgba(239, 68, 68, 0.15)",
-            color: pollerStatus?.running ? "#10b981" : "#ef4444"
+            backgroundColor: pollerStatus?.running ? "rgba(52, 211, 153, 0.2)" : "rgba(244, 63, 94, 0.2)",
+            color: pollerStatus?.running ? "#34d399" : "#f43f5e"
           }}>
             <Zap size={22} />
           </div>
           <div>
-            <div style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "600" }}>NSE REAL-TIME POLLER</div>
+            <div style={{ fontSize: "11px", color: "#cbd5e1", fontWeight: "600" }}>NSE REAL-TIME POLLER</div>
             <div style={{ fontSize: "15px", fontWeight: "800", color: pollerStatus?.running ? "#34d399" : "#f87171", marginTop: "2px" }}>
               {pollerStatus?.running ? `🟢 ACTIVE (${pollerStatus?.mode || 'Adaptive'})` : "🔴 IDLE"}
             </div>
@@ -463,8 +464,9 @@ export function TradingDashboard() {
         </div>
 
         <div style={{
-          background: "rgba(17, 24, 39, 0.6)",
-          border: "1px solid rgba(255, 255, 255, 0.08)",
+          background: "#1e293b",
+          border: "1px solid rgba(255, 255, 255, 0.12)",
+          boxShadow: "0 4px 16px rgba(0, 0, 0, 0.2)",
           borderRadius: "12px",
           padding: "14px 18px",
           display: "flex",
