@@ -167,6 +167,16 @@ def _is_recent_announcement(announcement: dict, max_age_minutes: int = 30) -> bo
         return True
 
 
+def _is_high_speed_polling_hours() -> bool:
+    """Check if current time is Monday-Friday 9:00 AM to 3:30 PM IST."""
+    now = datetime.now(IST)
+    if now.weekday() > 4:  # Saturday = 5, Sunday = 6
+        return False
+    start_time = now.replace(hour=9, minute=0, second=0, microsecond=0)
+    end_time = now.replace(hour=15, minute=30, second=0, microsecond=0)
+    return start_time <= now <= end_time
+
+
 # Track already-triggered event hashes to avoid duplicate triggers
 _triggered_hashes = set()
 
@@ -176,7 +186,7 @@ async def _poll_loop():
     global _poller_running, _last_poll_status, _triggered_hashes
     _poller_running = True
     _last_poll_status["running"] = True
-    logger.info("🚀 [TRADE POLLER]: Starting ultra-fast NSE polling loop")
+    logger.info("🚀 [TRADE POLLER]: Starting adaptive NSE polling loop")
 
     nse = _get_trade_nse_session()
     consecutive_errors = 0
@@ -190,6 +200,9 @@ async def _poll_loop():
                 # No armed configs — sleep longer and recheck
                 await asyncio.sleep(10)
                 continue
+
+            is_market_open = _is_high_speed_polling_hours()
+            _last_poll_status["mode"] = "high_speed (500ms-1s)" if is_market_open else "off_market_45m"
 
             # Fetch announcements
             announcements = await asyncio.get_event_loop().run_in_executor(
@@ -225,8 +238,14 @@ async def _poll_loop():
                 # Run trade execution in a background task to avoid blocking the poller
                 asyncio.create_task(_execute_trade(matched_config, ann))
 
-            # Sleep between polls
-            await asyncio.sleep(_poll_interval)
+            # Adaptive Sleep:
+            # - During market hours (Mon-Fri 9:00 AM to 3:30 PM IST): high speed (_poll_interval)
+            # - Outside market hours: 45 minutes (2700s) to avoid unnecessary server calls
+            if is_market_open:
+                await asyncio.sleep(_poll_interval)
+            else:
+                logger.info("🌙 [TRADE POLLER]: Outside market hours (Mon-Fri 9:00 AM - 3:30 PM). Next poll in 45 minutes.")
+                await asyncio.sleep(45 * 60)
 
         except asyncio.CancelledError:
             break
