@@ -354,6 +354,13 @@ _SKIP_SUBJECT_CONTAINS = [
     "scrutinizer report",
     "loss of share certificate",
     "duplicate share certificate",
+    "trading window",
+    "closure of trading window",
+    "trading window closure",
+    "appointment",
+    "re-appointment",
+    "reappointment",
+    "resignation",
 ]
 
 # Details keywords that trigger skip when subject is "General Updates" / "Updates"
