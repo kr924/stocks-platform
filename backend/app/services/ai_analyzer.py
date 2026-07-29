@@ -345,8 +345,10 @@ _SKIP_SUBJECTS = {
 
 # Subjects that trigger skip via 'contains' check (case-insensitive)
 _SKIP_SUBJECT_CONTAINS = [
-    "board meeting —",
-    "board meeting -",
+    "board meeting — financial results",
+    "board meeting - financial results",
+    "allotment of securities",
+    "certificate under sebi",
     "shareholders meeting",
     "voting results",
     "scrutinizer report",
@@ -365,7 +367,7 @@ def _classify_ai_tier(event) -> str:
     Returns one of:
       'skip'              – auto-mark neutral, ZERO AI calls
       'financial_results' – deep analysis with PDF + Screener.in
-      'standard'          – normal Groq AI analysis
+      'standard'          – normal local Ollama / rule engine analysis
       'manual_only'       – no auto AI; user must click Re-analyze
     """
     source = (event.source or "").lower().strip()
@@ -379,26 +381,44 @@ def _classify_ai_tier(event) -> str:
         # Non-exchange events: no auto AI
         return "manual_only"
     
-    # --- Exchange (NSE/BSE) events below ---
-    
-    # PRIORITY RULE 1: Financial Results (must take precedence before intimation skips)
-    is_financial = any(kw in title_lower or kw in desc_lower for kw in ["financial", "finan", "quarterly result", "financial results"])
-    is_board_meeting_or_outcome = any(kw in title_lower for kw in ["board meeting", "outcome", "results", "declaration"])
-    if is_financial and is_board_meeting_or_outcome and "intimation" not in title_lower:
-        return "financial_results"
-
-    # RULE 2: Skip routine disclosures (newspaper, press releases, analyst meets, investor presentations, SEBI certificates)
-    if title_lower in _SKIP_SUBJECTS:
+    # ── RULE 1: Auto-skip subjects requested by user ──
+    # - "Board Meeting — Financial Results" / "Board Meeting - Financial Results"
+    # - "Allotment of Securities"
+    # - "Certificate under SEBI"
+    if (
+        "board meeting — financial results" in title_lower or
+        "board meeting - financial results" in title_lower or
+        "allotment of securities" in title_lower or
+        "certificate under sebi" in title_lower or
+        title_lower in _SKIP_SUBJECTS
+    ):
         return "skip"
     
-    # RULE 2b: Skip Intimation notices (e.g. "Board Meeting Intimation", "Prior Intimation")
     if "intimation" in title_lower or "notice of board meeting" in title_lower:
         return "skip"
 
-    if any(kw in title_lower for kw in _SKIP_SUBJECT_CONTAINS) and not is_financial:
+    # ── RULE 2: Financial Results / Finance AI Routing ──
+    # Subject contains "updates" AND description contains "finan"
+    has_updates_subject = "update" in title_lower
+    has_finan_details = "finan" in desc_lower
+    is_financial = any(kw in title_lower or kw in desc_lower for kw in ["financial", "finan", "quarterly result", "financial results"])
+    is_board_meeting_or_outcome = any(kw in title_lower for kw in ["board meeting", "outcome", "results", "declaration"])
+    
+    if (has_updates_subject and has_finan_details) or (is_financial and is_board_meeting_or_outcome and "intimation" not in title_lower):
+        # ── RULE 3: 30-Minute Recency Filter for Financial Results ──
+        # Finance AI only analyzes fresh live news (< 30 mins of current time) to avoid old news AI requests
+        if event.event_time:
+            now_utc = datetime.utcnow()
+            event_age = now_utc - event.event_time
+            if event_age > timedelta(minutes=30):
+                logger.info(f"⏳ [FINANCIAL RESULTS RECENCY SKIP]: Event [{event.symbol or 'GENERAL'}] '{event.title}' is {event_age.total_seconds()/60:.1f} mins old (>30m). Routing to standard tier.")
+                return "standard"
+        return "financial_results"
+
+    if any(kw in title_lower for kw in _SKIP_SUBJECT_CONTAINS):
         return "skip"
     
-    # RULE 2c: Skip "General Updates" / "Updates" with newspaper/press/media in details
+    # Rule 2c: Skip "General Updates" / "Updates" with newspaper/press/media in details
     if title_lower in ("general updates", "updates"):
         if any(kw in desc_lower for kw in _SKIP_DETAIL_KEYWORDS):
             return "skip"
