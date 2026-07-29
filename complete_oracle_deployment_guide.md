@@ -94,7 +94,7 @@ GEMINI_API_KEY=YOUR_GEMINI_API_KEY
 GROQ_API_KEY=YOUR_GROQ_API_KEY
 GROQ_MODEL=llama-3.3-70b-versatile
 OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=stocks-analyst
+OLLAMA_MODEL=qwen2.5:3b
 
 FRONTEND_URL=https://mesh-deferred-legendary-ellis.trycloudflare.com
 DATABASE_URL=sqlite:////app/backend/market_tracker.db

@@ -106,7 +106,7 @@ def _call_cloud_llm(prompt: str, event_info: str = ""):
     if env.get("ollama_url"):
         try:
             logger.info("🦙 [CLOUD→OLLAMA FALLBACK]: All cloud keys busy. Routing to Ollama...")
-            res = call_ollama(prompt, env["ollama_url"], env.get("ollama_model", "stocks-analyst"), timeout=70)
+            res = call_ollama(prompt, env["ollama_url"], env.get("ollama_model", "qwen2.5:3b"), timeout=70)
             try:
                 from app.services.ai_log_tracker import record_ai_log
                 record_ai_log("✅ Ollama fallback completed", provider="ollama", tier="success", level="success")
@@ -140,7 +140,7 @@ def _call_local_llm(prompt: str, event_info: str = ""):
     env = reload_env_vars()
     default_ollama = "http://host.docker.internal:11434" if os.path.exists('/.dockerenv') else "http://localhost:11434"
     ollama_url = env.get("ollama_url") or default_ollama
-    ollama_model = env.get("ollama_model", "stocks-analyst")
+    ollama_model = env.get("ollama_model", "qwen2.5:3b")
     info_suffix = f" for {event_info}" if event_info else ""
     
     for attempt in range(1, 3):  # Try up to 2 times
@@ -201,7 +201,7 @@ def _call_chosen_provider(prompt: str, provider_name: str, event_info: str = "")
             logger.info(f"🦙 [MANUAL]: Calling Ollama{info_suffix}...")
             default_ollama = "http://host.docker.internal:11434" if os.path.exists('/.dockerenv') else "http://localhost:11434"
             target_url = env.get("ollama_url") or default_ollama
-            res = call_ollama(prompt, target_url, env.get("ollama_model", "stocks-analyst"), timeout=70)
+            res = call_ollama(prompt, target_url, env.get("ollama_model", "qwen2.5:3b"), timeout=70)
             return res, "ollama"
         except Exception as e:
             raise RuntimeError(f"Ollama call failed: {e}")
