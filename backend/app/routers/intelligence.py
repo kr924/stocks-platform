@@ -82,15 +82,10 @@ def get_intelligence_feed(
             )
         )
     elif category in ("nse_bse_general", "nse_bse_active"):
-        # Category 2: NSE/BSE General Updates (Excludes auto-skipped AND excludes Cloud Finance AI analyzed)
+        # Category 2: NSE/BSE General Updates (Excludes auto-skipped, includes announcements like appointment/resignation/general notices)
         events_q = events_q.filter(
             MarketEvent.source.in_(["nse", "bse"]),
-            or_(
-                MarketEvent.ai_provider.is_(None),
-                MarketEvent.ai_provider == "",
-                MarketEvent.ai_provider.notin_(CLOUD_PROVIDERS)
-            ),
-            MarketEvent.ai_provider != "auto_skip",
+            or_(MarketEvent.ai_provider.is_(None), MarketEvent.ai_provider != "auto_skip"),
             or_(MarketEvent.category.is_(None), MarketEvent.category != "auto_skip")
         )
     elif category == "other_news":
@@ -103,12 +98,12 @@ def get_intelligence_feed(
             )
         )
     elif category in ("finance_ai", "all", None):
-        # Category 1: Finance AI Generated (Default View)
-        # Strictly includes items that were analyzed by Cloud AI providers or marked as financial results
+        # Category 1: Finance News (Default View)
+        # Includes all active non-skipped financial news & AI-analyzed intelligence
         events_q = events_q.filter(
             or_(
-                MarketEvent.ai_provider.in_(CLOUD_PROVIDERS),
-                MarketEvent.category == "financial_results"
+                MarketEvent.ai_provider.is_(None),
+                MarketEvent.ai_provider != "auto_skip"
             )
         )
     elif category not in ("news", "filing"):

@@ -1103,7 +1103,7 @@ function IntelligenceDashboardContent() {
             Feed Segregation:
           </span>
 
-          {/* Tab 1: Finance AI Generated (DEFAULT VIEW) */}
+          {/* Tab 1: Finance News (DEFAULT VIEW) */}
           <button
             onClick={() => { setFilterCategory("finance_ai"); setPage(1); }}
             style={{
@@ -1125,7 +1125,7 @@ function IntelligenceDashboardContent() {
             }}
           >
             <span>🤖</span>
-            <span>Finance AI Generated</span>
+            <span>Finance News</span>
             <span style={{
               fontSize: "10px",
               fontWeight: "800",
