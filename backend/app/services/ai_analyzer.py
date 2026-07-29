@@ -500,6 +500,22 @@ def apply_instant_tier_classification(event):
                 event.ai_summary = f"{event.symbol or ''} financial results filed. Review attached PDF for details."
                 event.ai_affected_stocks = json.dumps([event.symbol] if event.symbol else [])
             event.ai_analyzed_at = datetime.utcnow()
+            
+            # Real-time Telegram alert for financial results
+            try:
+                from app.services.telegram_notifier import send_telegram_alert
+                send_telegram_alert(
+                    title=event.title or "Financial Results",
+                    symbol=event.symbol,
+                    sentiment=event.ai_sentiment or "neutral",
+                    impact_score=event.ai_impact_score or 0.0,
+                    summary=event.ai_summary or "",
+                    provider=event.ai_provider or "cloud",
+                    url=event.url,
+                    alert_type="FINANCIAL RESULTS ALERT"
+                )
+            except Exception as tg_err:
+                logger.debug(f"Telegram dispatch error: {tg_err}")
         except Exception as e:
             logger.error(f"Immediate financial_results AI failed for [{event.symbol}]: {e}")
             # Fallback: mark as analyzed with neutral so it doesn't re-queue

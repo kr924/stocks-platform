@@ -1384,8 +1384,7 @@ function IntelligenceDashboardContent() {
                               : item.ai_provider === "ollama_failed" ? "rgba(239, 68, 68, 0.3)"
                               : "rgba(100, 116, 139, 0.3)"
                             }`
-                          }}
-                          title={`🤖 AI Log Execution Details:\nProvider: ${item.ai_provider.toUpperCase()}\nTier: ${item.category === "financial_results" ? "Financial Results (Cloud)" : "Standard (Local Ollama)"}\nStatus: ${item.ai_provider === "ollama_failed" ? "Failed / Offline" : "Analyzed OK"}`}>
+                          }}>
                             <Bot size={11} />
                             {
                               item.ai_provider === "openrouter" ? "OpenRouter AI"
@@ -1396,6 +1395,59 @@ function IntelligenceDashboardContent() {
                               : item.ai_provider
                             }
                           </span>
+
+                          {/* Rich Floating Hover Tooltip Card for AI Execution Log */}
+                          <div style={{
+                            position: "absolute",
+                            left: 0,
+                            top: "100%",
+                            marginTop: "4px",
+                            width: "280px",
+                            padding: "10px 12px",
+                            borderRadius: "8px",
+                            backgroundColor: "rgba(15, 23, 42, 0.95)",
+                            border: "1px solid rgba(59, 130, 246, 0.3)",
+                            boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.5)",
+                            backdropFilter: "blur(8px)",
+                            zIndex: 50,
+                            display: "none",
+                            flexDirection: "column",
+                            gap: "6px"
+                          }} className="group-hover:flex">
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid rgba(255, 255, 255, 0.1)", paddingBottom: "6px" }}>
+                              <span style={{ color: "#fbbf24", fontWeight: 700, fontSize: "11px", display: "flex", alignItems: "center", gap: "4px" }}>
+                                <Bot size={12} />
+                                AI Execution Log
+                              </span>
+                              <span style={{ fontSize: "9.5px", color: "#94a3b8", fontWeight: "600", backgroundColor: "rgba(255, 255, 255, 0.05)", padding: "1px 6px", borderRadius: "4px" }}>
+                                {item.category === "financial_results" ? "Financial (Cloud)" : "Standard (Ollama)"}
+                              </span>
+                            </div>
+                            <div style={{ fontSize: "10.5px", color: "#e2e8f0", display: "flex", flexDirection: "column", gap: "3px" }}>
+                              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                                <span style={{ color: "#94a3b8" }}>Provider:</span>
+                                <span style={{ fontWeight: 600, color: "#38bdf8" }}>{item.ai_provider?.toUpperCase()}</span>
+                              </div>
+                              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                                <span style={{ color: "#94a3b8" }}>Sentiment Verdict:</span>
+                                <span style={{ fontWeight: 700, color: item.ai_sentiment === "positive" ? "#34d399" : item.ai_sentiment === "negative" ? "#f87171" : "#94a3b8" }}>
+                                  {(item.ai_sentiment || "neutral").toUpperCase()} ({item.ai_impact_score > 0 ? "+" : ""}{Number(item.ai_impact_score || 0).toFixed(1)})
+                                </span>
+                              </div>
+                              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                                <span style={{ color: "#94a3b8" }}>Execution Status:</span>
+                                <span style={{ fontWeight: 600, color: item.ai_provider === "ollama_failed" ? "#f87171" : "#34d399" }}>
+                                  {item.ai_provider === "ollama_failed" ? "❌ Failed / Offline" : "🟢 Analyzed OK"}
+                                </span>
+                              </div>
+                              {item.symbol && (
+                                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                                  <span style={{ color: "#94a3b8" }}>Affected Stock:</span>
+                                  <span style={{ fontWeight: 700, color: "#fbbf24" }}>#{item.symbol}</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
                         </div>
                       )}
                       <span style={{
