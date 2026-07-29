@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { Chart } from "./components/Chart";
 import { IntelligenceDashboard } from "./components/IntelligenceDashboard";
+import { TradingDashboard } from "./components/TradingDashboard";
 
 const API_BASE = import.meta.env.VITE_API_BASE || (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" ? "http://localhost:8000" : "");
 
@@ -1239,7 +1240,11 @@ export default function App() {
       )}
 
       {/* Main Content Area */}
-      {activeView === "intelligence" ? (
+      {activeView === "trading" ? (
+        <div className="main-scroll-area" style={{ padding: 0, paddingBottom: "80px" }}>
+          <TradingDashboard />
+        </div>
+      ) : activeView === "intelligence" ? (
         <div className="main-scroll-area" style={{ padding: 0, paddingBottom: "80px" }}>
           <IntelligenceDashboard />
         </div>
@@ -3050,6 +3055,23 @@ export default function App() {
           }}
         >
           💡 AI Intelligence
+        </button>
+        <button
+          onClick={() => setActiveView("trading")}
+          style={{
+            padding: "8px 18px",
+            fontSize: "12px",
+            fontWeight: "700",
+            borderRadius: "7px",
+            border: "none",
+            cursor: "pointer",
+            backgroundColor: activeView === "trading" ? "#10b981" : "transparent",
+            color: activeView === "trading" ? "#ffffff" : "#94a3b8",
+            boxShadow: activeView === "trading" ? "0 2px 10px rgba(16,185,129,0.4)" : "none",
+            transition: "all 0.2s"
+          }}
+        >
+          ⚡ Auto Trading
         </button>
       </div>
     </div>

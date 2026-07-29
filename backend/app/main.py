@@ -29,6 +29,10 @@ app = FastAPI(title="Indian Stock Market Intelligence Platform")
 from app.routers.intelligence import router as intelligence_router
 app.include_router(intelligence_router)
 
+# Register Trading Engine API router
+from app.routers.trading import router as trading_router
+app.include_router(trading_router)
+
 @app.exception_handler(UpstoxAuthError)
 def upstox_auth_error_handler(request, exc: UpstoxAuthError):
     """FastAPI exception handler to automatically clear invalid/expired Upstox sessions."""
@@ -88,6 +92,16 @@ async def on_startup():
     # Initialize SSE manager with the running event loop for cross-thread broadcasts
     from app.services.sse_manager import sse_manager
     sse_manager.set_event_loop(asyncio.get_running_loop())
+
+    # Launch Trading Engine background tasks
+    try:
+        from app.services.trade_nse_poller import start_trade_poller
+        from app.services.stoploss_monitor import start_stoploss_monitor
+        start_trade_poller()
+        start_stoploss_monitor()
+        logger.info("⚡ Trading Engine: NSE poller + stoploss monitor started")
+    except Exception as e:
+        logger.error(f"Failed to start Trading Engine background tasks: {e}")
 
 
 async def _intelligence_scheduler():

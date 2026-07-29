@@ -219,6 +219,72 @@ class AIAlert(Base):
     )
 
 
+# ─── Trading Automation Engine Tables ────────────────────────────────────────
+
+class TradeConfig(Base):
+    """User-configured stock trading targets with purchase date, quantity, stoploss."""
+    __tablename__ = "trade_configs"
+    id = Column(Integer, primary_key=True, index=True)
+    symbol = Column(String(50), nullable=False, index=True)           # e.g. "RELIANCE"
+    instrument_key = Column(String(100), nullable=True)               # e.g. "NSE_EQ|INE002A01018"
+    purchase_date = Column(String(20), nullable=False)                 # e.g. "2026-07-30"
+    quantity = Column(Integer, nullable=False, default=1)
+    stoploss_pct = Column(Float, nullable=False, default=2.0)         # e.g. 2.0 means 2%
+    stoploss_type = Column(String(20), default="software")            # "software" or "bracket"
+    broker = Column(String(20), default="upstox")                     # "upstox" or "zerodha"
+    order_type = Column(String(20), default="MARKET")                 # "MARKET" or "LIMIT"
+    limit_price = Column(Float, nullable=True)                        # used when order_type = "LIMIT"
+    ai_provider = Column(String(50), default="groq")                  # premium AI provider for this stock
+    status = Column(String(30), default="pending", index=True)        # pending → armed → triggered → bought → sold → cancelled
+    is_active = Column(Boolean, default=True, index=True)
+    trigger_subject = Column(String(200), default="Outcome of Board Meeting")
+    buy_price = Column(Float, nullable=True)                          # actual fill price after buy
+    sell_price = Column(Float, nullable=True)                         # actual fill price after sell
+    pnl = Column(Float, nullable=True)                                # profit/loss after sell
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    triggered_at = Column(DateTime, nullable=True)                    # when NSE news was detected
+    bought_at = Column(DateTime, nullable=True)
+    sold_at = Column(DateTime, nullable=True)
+
+
+class TradeOrder(Base):
+    """Executed broker orders (buy/sell) linked to a TradeConfig."""
+    __tablename__ = "trade_orders"
+    id = Column(Integer, primary_key=True, index=True)
+    config_id = Column(Integer, nullable=False, index=True)           # FK to TradeConfig.id
+    symbol = Column(String(50), nullable=False, index=True)
+    side = Column(String(10), nullable=False)                         # "BUY" or "SELL"
+    quantity = Column(Integer, nullable=False)
+    order_type = Column(String(20), default="MARKET")                 # "MARKET" or "LIMIT"
+    limit_price = Column(Float, nullable=True)
+    price = Column(Float, nullable=True)                              # fill price
+    stoploss_price = Column(Float, nullable=True)
+    broker = Column(String(20), nullable=False)                       # "upstox" or "zerodha"
+    broker_order_id = Column(String(100), nullable=True)              # broker's order ID
+    broker_response = Column(Text, nullable=True)                     # raw JSON response
+    status = Column(String(30), default="pending", index=True)        # pending → placed → filled → failed → cancelled
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    filled_at = Column(DateTime, nullable=True)
+
+
+class TradeAILog(Base):
+    """Premium AI analysis logs for purchased stocks (separate from standard AI pipeline)."""
+    __tablename__ = "trade_ai_logs"
+    id = Column(Integer, primary_key=True, index=True)
+    config_id = Column(Integer, nullable=True, index=True)            # FK to TradeConfig.id
+    symbol = Column(String(50), nullable=False, index=True)
+    provider = Column(String(50), nullable=False)                     # "gemini", "groq", etc.
+    prompt_summary = Column(Text, nullable=True)                      # brief description of what was analyzed
+    ai_sentiment = Column(String(20), nullable=True)
+    ai_impact_score = Column(Float, nullable=True)
+    ai_summary = Column(Text, nullable=True)
+    raw_response = Column(Text, nullable=True)                        # full LLM response JSON
+    nse_event_title = Column(String(500), nullable=True)              # the NSE announcement that triggered this
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 # ─── Database Initialization ────────────────────────────────────────────────
 
 def init_db():
@@ -252,3 +318,4 @@ def get_db():
         yield db
     finally:
         db.close()
+
