@@ -79,14 +79,12 @@ def get_intelligence_feed(
                 MarketEvent.ai_summary.ilike("Auto-skipped%")
             )
         )
-    elif category == "nse_bse_active":
-        # Category 2: NSE/BSE Active (Non-Skipped)
+    elif category in ("nse_bse_general", "nse_bse_active"):
+        # Category 2: NSE/BSE General Updates (Excludes auto-skipped AND excludes Finance AI analyzed)
         events_q = events_q.filter(
             MarketEvent.source.in_(["nse", "bse"]),
-            or_(
-                MarketEvent.ai_provider.is_(None),
-                MarketEvent.ai_provider != "auto_skip"
-            )
+            or_(MarketEvent.ai_provider.is_(None), MarketEvent.ai_provider == ""),
+            or_(MarketEvent.category.is_(None), MarketEvent.category != "auto_skip")
         )
     elif category == "other_news":
         # Category 3: Other Market News (Media stories & web updates)
@@ -98,12 +96,12 @@ def get_intelligence_feed(
             )
         )
     elif category in ("finance_ai", "all", None):
-        # Category 1: Finance AI Analyzed (Default View)
+        # Category 1: Finance AI Generated (Default View)
+        # Includes items that were analyzed by cloud AI providers (ai_provider set and not auto_skip)
         events_q = events_q.filter(
-            or_(
-                MarketEvent.ai_provider.is_(None),
-                MarketEvent.ai_provider != "auto_skip"
-            )
+            MarketEvent.ai_provider.isnot(None),
+            MarketEvent.ai_provider != "",
+            MarketEvent.ai_provider != "auto_skip"
         )
     elif category not in ("news", "filing"):
         events_q = events_q.filter(MarketEvent.category == category)
@@ -141,7 +139,7 @@ def get_intelligence_feed(
         })
     
     # 2. News Stories (deduplicated)
-    if (not event_type or event_type == "news") and category not in ("auto_skip", "nse_bse_active"):
+    if (not event_type or event_type == "news") and category not in ("auto_skip", "nse_bse_general", "nse_bse_active"):
         stories_q = db.query(NewsStory).filter(NewsStory.last_published >= since)
         if sentiment:
             stories_q = stories_q.filter(NewsStory.ai_sentiment == sentiment)

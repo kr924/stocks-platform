@@ -1103,7 +1103,7 @@ function IntelligenceDashboardContent() {
             Feed Segregation:
           </span>
 
-          {/* Tab 1: Finance AI Analyzed (DEFAULT VIEW) */}
+          {/* Tab 1: Finance AI Generated (DEFAULT VIEW) */}
           <button
             onClick={() => { setFilterCategory("finance_ai"); setPage(1); }}
             style={{
@@ -1125,7 +1125,7 @@ function IntelligenceDashboardContent() {
             }}
           >
             <span>🤖</span>
-            <span>Finance AI Analyzed</span>
+            <span>Finance AI Generated</span>
             <span style={{
               fontSize: "10px",
               fontWeight: "800",
@@ -1138,9 +1138,9 @@ function IntelligenceDashboardContent() {
             </span>
           </button>
 
-          {/* Tab 2: NSE / BSE Active (Non-Skipped) */}
+          {/* Tab 2: NSE / BSE General Updates */}
           <button
-            onClick={() => { setFilterCategory("nse_bse_active"); setPage(1); }}
+            onClick={() => { setFilterCategory("nse_bse_general"); setPage(1); }}
             style={{
               display: "inline-flex",
               alignItems: "center",
@@ -1149,18 +1149,18 @@ function IntelligenceDashboardContent() {
               borderRadius: "8px",
               fontSize: "12px",
               fontWeight: "700",
-              border: filterCategory === "nse_bse_active" ? "1px solid rgba(16, 185, 129, 0.6)" : "1px solid rgba(255, 255, 255, 0.08)",
-              background: filterCategory === "nse_bse_active"
+              border: filterCategory === "nse_bse_general" || filterCategory === "nse_bse_active" ? "1px solid rgba(16, 185, 129, 0.6)" : "1px solid rgba(255, 255, 255, 0.08)",
+              background: filterCategory === "nse_bse_general" || filterCategory === "nse_bse_active"
                 ? "linear-gradient(135deg, rgba(5, 150, 105, 0.35), rgba(16, 185, 129, 0.35))"
                 : "rgba(13, 19, 31, 0.6)",
-              color: filterCategory === "nse_bse_active" ? "#34d399" : "#94a3b8",
-              boxShadow: filterCategory === "nse_bse_active" ? "0 0 14px rgba(16, 185, 129, 0.35)" : "none",
+              color: filterCategory === "nse_bse_general" || filterCategory === "nse_bse_active" ? "#34d399" : "#94a3b8",
+              boxShadow: filterCategory === "nse_bse_general" || filterCategory === "nse_bse_active" ? "0 0 14px rgba(16, 185, 129, 0.35)" : "none",
               cursor: "pointer",
               transition: "all 0.2s ease"
             }}
           >
             <span>🏢</span>
-            <span>NSE / BSE Non-Skipped</span>
+            <span>NSE / BSE General Updates</span>
           </button>
 
           {/* Tab 3: Other Market News */}
