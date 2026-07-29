@@ -37,7 +37,7 @@ def reload_env_vars():
     }
 
 
-def call_ollama(prompt: str, base_url: str = "http://localhost:11434", model_name: str = "stocks-analyst", timeout: int = 30) -> dict:
+def call_ollama(prompt: str, base_url: str = "http://localhost:11434", model_name: str = "stocks-analyst", timeout: int = 60) -> dict:
     payload = {
         "model": model_name,
         "messages": [
@@ -48,7 +48,8 @@ def call_ollama(prompt: str, base_url: str = "http://localhost:11434", model_nam
         "format": "json",
         "options": {
             "temperature": 0.1,
-            "num_predict": 256
+            "num_predict": 128,
+            "num_ctx": 1024
         }
     }
     

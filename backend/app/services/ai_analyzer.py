@@ -149,7 +149,7 @@ def _call_local_llm(prompt: str, event_info: str = ""):
                 record_ai_log(f"Ollama attempt {attempt}/2{info_suffix}", provider="ollama", tier="execution", level="info")
             except Exception:
                 pass
-            res = call_ollama(prompt, ollama_url, ollama_model, timeout=30)
+            res = call_ollama(prompt, ollama_url, ollama_model, timeout=60)
             try:
                 from app.services.ai_log_tracker import record_ai_log
                 record_ai_log(f"✅ Local Ollama completed (attempt {attempt}){info_suffix}", provider="ollama", tier="success", level="success")
