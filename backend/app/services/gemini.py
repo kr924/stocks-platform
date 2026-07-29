@@ -32,12 +32,12 @@ def reload_env_vars():
         "anthropic_key": os.getenv("ANTHROPIC_API_KEY", ""),
         "groq_key": groq_raw,
         "groq_model": "llama-3.3-70b-versatile",
-        "ollama_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+        "ollama_url": os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434"),
         "ollama_model": os.getenv("OLLAMA_MODEL", "stocks-analyst")
     }
 
 
-def call_ollama(prompt: str, base_url: str = "http://localhost:11434", model_name: str = "stocks-analyst", timeout: int = 70) -> dict:
+def call_ollama(prompt: str, base_url: str = "http://host.docker.internal:11434", model_name: str = "stocks-analyst", timeout: int = 70) -> dict:
     payload = {
         "model": model_name,
         "messages": [
@@ -53,11 +53,14 @@ def call_ollama(prompt: str, base_url: str = "http://localhost:11434", model_nam
         }
     }
     
-    # Try specified base_url first, then Docker host gateway candidate URLs
-    candidate_urls = [base_url]
-    for alt in ["http://172.17.0.1:11434", "http://host.docker.internal:11434", "http://127.0.0.1:11434"]:
-        if alt not in candidate_urls:
-            candidate_urls.append(alt)
+    # Try host gateway URLs (host.docker.internal, 172.17.0.1) first before container local loopbacks
+    candidate_urls = []
+    for alt in [base_url, "http://host.docker.internal:11434", "http://172.17.0.1:11434", "http://localhost:11434"]:
+        if alt and alt not in candidate_urls:
+            if "localhost" in alt or "127.0.0.1" in alt:
+                candidate_urls.append(alt)
+            else:
+                candidate_urls.insert(0, alt)
         
     last_err = None
     for b_url in candidate_urls:
