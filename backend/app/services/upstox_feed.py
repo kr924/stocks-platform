@@ -15,6 +15,18 @@ class UpstoxMarketFeed(BaseMarketFeed):
     def __init__(self):
         self.access_token = None
         self.base_url = "https://api.upstox.com/v2"
+        self._quotes_cache: Dict[str, Dict[str, Any]] = {}
+
+    def _is_market_hours(self) -> bool:
+        """Check if current time is within market hours (Mon-Fri 9:00 AM - 3:35 PM IST)."""
+        from datetime import datetime, timezone, timedelta
+        ist = timezone(timedelta(hours=5, minutes=30))
+        now = datetime.now(ist)
+        if now.weekday() > 4:  # Weekend (Saturday=5, Sunday=6)
+            return False
+        market_open = now.replace(hour=9, minute=0, second=0, microsecond=0)
+        market_close = now.replace(hour=15, minute=35, second=0, microsecond=0)
+        return market_open <= now <= market_close
 
     def get_auth_url(self) -> str:
         client_id = os.getenv("UPSTOX_CLIENT_ID", UPSTOX_CLIENT_ID)
@@ -63,6 +75,13 @@ class UpstoxMarketFeed(BaseMarketFeed):
         }
 
     def get_quotes(self, instrument_keys: List[str]) -> Dict[str, Dict[str, Any]]:
+        # If outside market hours (3:35 PM to 9:00 AM IST) and we have cached quotes for requested keys,
+        # return the cached quotes directly to avoid unnecessary Upstox API calls when market is closed.
+        if not self._is_market_hours() and self._quotes_cache:
+            cached_result = {k: self._quotes_cache[k] for k in instrument_keys if k in self._quotes_cache}
+            if len(cached_result) == len(instrument_keys):
+                return cached_result
+
         # Upstox supports up to 500 comma separated instrument keys in one call
         url = f"{self.base_url}/market-quote/quotes"
         params = {"instrument_key": ",".join(instrument_keys)}
@@ -71,6 +90,9 @@ class UpstoxMarketFeed(BaseMarketFeed):
         if response.status_code == 401:
             raise UpstoxAuthError(f"Unauthorized Upstox API call: {response.text}")
         elif response.status_code != 200:
+            # If request fails off-market, return cache if available
+            if self._quotes_cache:
+                return {k: self._quotes_cache[k] for k in instrument_keys if k in self._quotes_cache}
             raise Exception(f"Failed to fetch Upstox quotes: {response.text}")
             
         data = response.json().get("data", {})
@@ -110,15 +132,15 @@ class UpstoxMarketFeed(BaseMarketFeed):
                     weight = 1.0 / (abs(price - last_price) + epsilon)
                     total_sell_qty_weighted += qty * weight
             
-            weighted_total = total_buy_qty_weighted + total_sell_qty_weighted
-            if weighted_total > 0:
-                depth_buy_pct = round((total_buy_qty_weighted / weighted_total) * 100, 2)
+            grand_total = total_buy_qty_weighted + total_sell_qty_weighted
+            if grand_total > 0:
+                depth_buy_pct = round((total_buy_qty_weighted / grand_total) * 100, 2)
                 depth_sell_pct = round(100.0 - depth_buy_pct, 2)
             else:
                 depth_buy_pct = 50.0
                 depth_sell_pct = 50.0
 
-            result[resolved_key] = {
+            item_quote = {
                 "last_price": last_price,
                 "volume": val.get("volume", 0),
                 "ohlc": {
@@ -136,6 +158,8 @@ class UpstoxMarketFeed(BaseMarketFeed):
                 "total_buy_qty": total_buy_qty_raw,
                 "total_sell_qty": total_sell_qty_raw
             }
+            result[resolved_key] = item_quote
+            self._quotes_cache[resolved_key] = item_quote
         return result
 
     def get_historical_candles(self, instrument_key: str, interval: str, to_date: str, from_date: Optional[str] = None) -> List[List[Any]]:

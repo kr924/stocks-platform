@@ -422,14 +422,43 @@ export default function App() {
     fetchMovers("today");
     fetchIndices();
 
-    // Auto-refresh quotes every 10 seconds to show dynamic ticks
+    // Check if current IST time is within NSE market hours (Mon-Fri 9:00 AM to 3:35 PM IST)
+    const checkIsMarketHours = () => {
+      try {
+        const now = new Date();
+        const istStr = now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" });
+        const istDate = new Date(istStr);
+        const day = istDate.getDay(); // 0 = Sun, 6 = Sat
+        if (day === 0 || day === 6) return false;
+        const timeInMins = istDate.getHours() * 60 + istDate.getMinutes();
+        return timeInMins >= 540 && timeInMins <= 935; // 9:00 AM (540m) to 3:35 PM (935m)
+      } catch {
+        return true;
+      }
+    };
+
+    // Auto-refresh quotes every 10 seconds during market hours
     const interval = setInterval(() => {
-      refreshLiveQuotes();
-      refreshLiveMovers();
-      fetchIndices();
+      if (checkIsMarketHours()) {
+        refreshLiveQuotes();
+        refreshLiveMovers();
+        fetchIndices();
+      }
     }, 10000);
 
-    return () => clearInterval(interval);
+    // Off-market refresh (every 5 minutes) to conserve API calls when trading is closed
+    const offMarketInterval = setInterval(() => {
+      if (!checkIsMarketHours()) {
+        refreshLiveQuotes();
+        refreshLiveMovers();
+        fetchIndices();
+      }
+    }, 300000);
+
+    return () => {
+      clearInterval(interval);
+      clearInterval(offMarketInterval);
+    };
   }, []);
 
   const fetchIndices = async () => {
