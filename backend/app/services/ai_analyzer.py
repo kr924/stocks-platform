@@ -9,6 +9,7 @@ Processes market events, news items, and filings through the configured LLM
 4. Generate human-readable summaries
 5. Create AIAlerts for high-impact events
 """
+import os
 import json
 import logging
 import time
