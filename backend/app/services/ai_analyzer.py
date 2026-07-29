@@ -137,6 +137,7 @@ def _call_local_llm(prompt: str, event_info: str = ""):
     """
     from app.services.gemini import reload_env_vars, call_ollama
     
+    env = reload_env_vars()
     default_ollama = "http://host.docker.internal:11434" if os.path.exists('/.dockerenv') else "http://localhost:11434"
     ollama_url = env.get("ollama_url") or default_ollama
     ollama_model = env.get("ollama_model", "stocks-analyst")
