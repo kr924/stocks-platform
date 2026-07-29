@@ -285,6 +285,24 @@ export function TradingDashboard() {
     }
   };
 
+  // Manual On-Demand Poll
+  const [manualPolling, setManualPolling] = useState(false);
+  const handlePollNow = async () => {
+    setManualPolling(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/trading/poller/poll-now`, { method: "POST" });
+      if (res.ok) {
+        const data = await res.json();
+        alert(`⚡ Manual Poll Complete!\n• Announcements Fetched: ${data.announcements_fetched}\n• Armed Targets Checked: ${data.armed_configs_checked}\n• Triggers Found: ${data.triggers_found}`);
+      }
+      fetchData();
+    } catch (err) {
+      console.error("Manual poll failed:", err);
+    } finally {
+      setManualPolling(false);
+    }
+  };
+
   // Delete config
   const handleDeleteConfig = async (id: number) => {
     if (!window.confirm("Delete this trade target configuration?")) return;
@@ -439,7 +457,7 @@ export function TradingDashboard() {
           <div>
             <div style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "600" }}>NSE REAL-TIME POLLER</div>
             <div style={{ fontSize: "15px", fontWeight: "800", color: pollerStatus?.running ? "#34d399" : "#f87171", marginTop: "2px" }}>
-              {pollerStatus?.running ? "🟢 ACTIVE (500ms Loop)" : "🔴 IDLE"}
+              {pollerStatus?.running ? `🟢 ACTIVE (${pollerStatus?.mode || 'Adaptive'})` : "🔴 IDLE"}
             </div>
           </div>
         </div>
@@ -519,7 +537,28 @@ export function TradingDashboard() {
         <h2 style={{ fontSize: "16px", fontWeight: "700", color: "#f8fafc", display: "flex", alignItems: "center", gap: "8px" }}>
           ⚡ Auto-Trading Target Stock Configurations
         </h2>
-        <div style={{ display: "flex", gap: "10px" }}>
+        <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+          <button
+            onClick={handlePollNow}
+            disabled={manualPolling}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+              padding: "8px 16px",
+              fontSize: "12px",
+              fontWeight: "700",
+              borderRadius: "8px",
+              backgroundColor: "rgba(168, 85, 247, 0.2)",
+              color: "#c084fc",
+              border: "1px solid rgba(168, 85, 247, 0.3)",
+              cursor: "pointer",
+              transition: "all 0.2s"
+            }}
+          >
+            <Zap size={15} className={manualPolling ? "animate-spin" : ""} />
+            {manualPolling ? "Polling NSE..." : "⚡ Poll Now (On-Demand)"}
+          </button>
           <button
             onClick={() => setShowAddForm(!showAddForm)}
             style={{

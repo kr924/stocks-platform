@@ -167,6 +167,9 @@ def _is_recent_announcement(announcement: dict, max_age_minutes: int = 30) -> bo
         return True
 
 
+_offmarket_interval_minutes = 45.0
+
+
 def _is_high_speed_polling_hours() -> bool:
     """Check if current time is Monday-Friday 9:00 AM to 3:30 PM IST."""
     now = datetime.now(IST)
@@ -183,7 +186,7 @@ _triggered_hashes = set()
 
 async def _poll_loop():
     """Main polling loop — runs continuously while there are armed configs."""
-    global _poller_running, _last_poll_status, _triggered_hashes
+    global _poller_running, _last_poll_status, _triggered_hashes, _offmarket_interval_minutes
     _poller_running = True
     _last_poll_status["running"] = True
     logger.info("🚀 [TRADE POLLER]: Starting adaptive NSE polling loop")
@@ -202,7 +205,9 @@ async def _poll_loop():
                 continue
 
             is_market_open = _is_high_speed_polling_hours()
-            _last_poll_status["mode"] = "high_speed (500ms-1s)" if is_market_open else "off_market_45m"
+            _last_poll_status["mode"] = f"high_speed ({_poll_interval}s)" if is_market_open else f"off_market ({_offmarket_interval_minutes}m)"
+            _last_poll_status["offmarket_interval_minutes"] = _offmarket_interval_minutes
+            _last_poll_status["poll_interval_seconds"] = _poll_interval
 
             # Fetch announcements
             announcements = await asyncio.get_event_loop().run_in_executor(
@@ -240,12 +245,12 @@ async def _poll_loop():
 
             # Adaptive Sleep:
             # - During market hours (Mon-Fri 9:00 AM to 3:30 PM IST): high speed (_poll_interval)
-            # - Outside market hours: 45 minutes (2700s) to avoid unnecessary server calls
+            # - Outside market hours: _offmarket_interval_minutes (default 45 min)
             if is_market_open:
                 await asyncio.sleep(_poll_interval)
             else:
-                logger.info("🌙 [TRADE POLLER]: Outside market hours (Mon-Fri 9:00 AM - 3:30 PM). Next poll in 45 minutes.")
-                await asyncio.sleep(45 * 60)
+                logger.info(f"🌙 [TRADE POLLER]: Outside market hours (Mon-Fri 9:00 AM - 3:30 PM). Next poll in {_offmarket_interval_minutes} minutes.")
+                await asyncio.sleep(_offmarket_interval_minutes * 60)
 
         except asyncio.CancelledError:
             break
@@ -259,6 +264,65 @@ async def _poll_loop():
     _poller_running = False
     _last_poll_status["running"] = False
     logger.info("🛑 [TRADE POLLER]: Polling loop stopped")
+
+
+def execute_manual_poll() -> dict:
+    """Trigger an immediate, on-demand manual poll of NSE announcements."""
+    logger.info("⚡ [TRADE POLLER]: Manual poll requested by user")
+    nse = _get_trade_nse_session()
+    announcements = nse.fetch_announcements()
+    armed = _get_armed_configs()
+
+    _last_poll_status["polls_total"] += 1
+    _last_poll_status["last_poll_at"] = datetime.now(IST).isoformat()
+
+    triggers_count = 0
+    matched_items = []
+
+    for ann in announcements:
+        if not isinstance(ann, dict):
+            continue
+        matched_config = _check_match(ann, armed)
+        if not matched_config:
+            continue
+        if not _is_recent_announcement(ann, max_age_minutes=30):
+            continue
+
+        subject = str(ann.get("desc") or ann.get("subject") or "")
+        ann_date = str(ann.get("an_dt") or ann.get("bcastDate") or "")
+        evt_hash = f"{matched_config['symbol']}:{subject[:100]}:{ann_date}"
+        if evt_hash in _triggered_hashes:
+            continue
+        _triggered_hashes.add(evt_hash)
+
+        triggers_count += 1
+        matched_items.append({
+            "symbol": matched_config["symbol"],
+            "subject": subject,
+            "config_id": matched_config["id"]
+        })
+
+        try:
+            loop = asyncio.get_event_loop()
+            loop.create_task(_execute_trade(matched_config, ann))
+        except Exception:
+            pass
+
+    return {
+        "success": True,
+        "announcements_fetched": len(announcements),
+        "armed_configs_checked": len(armed),
+        "triggers_found": triggers_count,
+        "matched_items": matched_items,
+        "timestamp": datetime.now(IST).isoformat()
+    }
+
+
+def set_offmarket_interval(minutes: float):
+    """Set the off-market polling interval in minutes (min 1m, max 1440m/24h)."""
+    global _offmarket_interval_minutes
+    _offmarket_interval_minutes = max(1.0, min(1440.0, minutes))
+    logger.info(f"[TRADE POLLER]: Off-market polling interval set to {_offmarket_interval_minutes} minutes")
 
 
 async def _execute_trade(config: dict, announcement: dict):

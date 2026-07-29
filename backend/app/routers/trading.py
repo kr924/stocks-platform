@@ -448,12 +448,30 @@ def start_poller():
     return {"message": "Trade poller started"}
 
 
-@router.post("/poller/stop")
-def stop_poller():
-    """Manually stop the trading NSE poller."""
-    from app.services.trade_nse_poller import stop_trade_poller
-    stop_trade_poller()
-    return {"message": "Trade poller stopped"}
+@router.post("/poller/poll-now")
+def trigger_poll_now():
+    """Trigger an immediate, on-demand manual poll of NSE corporate announcements."""
+    from app.services.trade_nse_poller import execute_manual_poll
+    result = execute_manual_poll()
+    return result
+
+
+@router.post("/poller/interval")
+def set_poller_interval(
+    seconds: Optional[float] = None,
+    offmarket_minutes: Optional[float] = None,
+):
+    """Customize polling intervals (high-speed market seconds or off-market minutes)."""
+    from app.services.trade_nse_poller import set_poll_interval, set_offmarket_interval
+    if seconds is not None:
+        set_poll_interval(seconds)
+    if offmarket_minutes is not None:
+        set_offmarket_interval(offmarket_minutes)
+    return {
+        "message": "Poller interval updated",
+        "seconds": seconds,
+        "offmarket_minutes": offmarket_minutes
+    }
 
 
 @router.get("/stoploss/status")
