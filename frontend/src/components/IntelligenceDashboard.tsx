@@ -555,8 +555,10 @@ function IntelligenceDashboardContent() {
   };
 
   const [reanalyzingIds, setReanalyzingIds] = useState<Record<string, boolean>>({});
+  const [selectedProviders, setSelectedProviders] = useState<Record<string, string>>({});
+  const [expandedDetailsIds, setExpandedDetailsIds] = useState<Record<string, boolean>>({});
 
-  const handleReanalyzeItem = async (e: React.MouseEvent, item: FeedItem) => {
+  const handleReanalyzeItem = async (e: React.MouseEvent, item: FeedItem, chosenProvider?: string) => {
     e.stopPropagation();
     const key = `${item.type}-${item.id}`;
     if (reanalyzingIds[key]) return;
@@ -564,9 +566,11 @@ function IntelligenceDashboardContent() {
     setReanalyzingIds(prev => ({ ...prev, [key]: true }));
 
     const rawId = String(item.id).replace(/^(event_|story_|news_|filing_)/, "");
+    const providerToUse = chosenProvider || selectedProviders[key];
 
     try {
-      const res = await fetch(`${API_BASE}/api/intelligence/reanalyze/${item.type}/${rawId}`, {
+      const url = `${API_BASE}/api/intelligence/reanalyze/${item.type}/${rawId}${providerToUse ? `?provider=${encodeURIComponent(providerToUse)}` : ""}`;
+      const res = await fetch(url, {
         method: "POST"
       });
       if (res.ok) {
@@ -578,7 +582,8 @@ function IntelligenceDashboardContent() {
               ai_sentiment: updated.sentiment || f.ai_sentiment,
               ai_impact_score: updated.impact_score !== undefined ? updated.impact_score : f.ai_impact_score,
               ai_summary: updated.summary || f.ai_summary,
-              ai_affected_stocks: updated.affected_stocks || f.ai_affected_stocks
+              ai_affected_stocks: updated.affected_stocks || f.ai_affected_stocks,
+              ai_provider: updated.provider || f.ai_provider,
             };
           }
           return f;
@@ -1407,17 +1412,51 @@ function IntelligenceDashboardContent() {
                       </span>
                     </div>
 
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                      {/* Provider selection dropdown for manual re-analysis */}
+                      <select
+                        value={selectedProviders[`${item.type}-${item.id}`] || ""}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          const val = e.target.value;
+                          setSelectedProviders(prev => ({ ...prev, [`${item.type}-${item.id}`]: val }));
+                          if (val) {
+                            handleReanalyzeItem(e as any, item, val);
+                          }
+                        }}
+                        style={{
+                          backgroundColor: "rgba(15, 23, 42, 0.8)",
+                          border: "1px solid rgba(59, 130, 246, 0.3)",
+                          color: "#93c5fd",
+                          borderRadius: "6px",
+                          padding: "2px 6px",
+                          fontSize: "10px",
+                          fontWeight: "600",
+                          cursor: "pointer",
+                          outline: "none"
+                        }}
+                        title="Select AI provider for re-analysis"
+                      >
+                        <option value="">Auto / Cloud</option>
+                        <option value="groq">⚡ Groq (Llama 3.3 70B)</option>
+                        <option value="openrouter">🌐 OpenRouter (Free Pool)</option>
+                        <option value="gemini">✨ Gemini 2.5 Flash</option>
+                        <option value="openai">🤖 OpenAI (GPT-4o Mini)</option>
+                        <option value="anthropic">🧠 Anthropic (Claude 3.5)</option>
+                        <option value="ollama">🦙 Local Ollama</option>
+                      </select>
+
                       <button
                         onClick={(e) => handleReanalyzeItem(e, item)}
                         disabled={reanalyzingIds[`${item.type}-${item.id}`]}
-                        title="Re-analyze this news item with AI (Groq API -> Ollama fallback)"
+                        title="Re-analyze this news item with selected AI provider"
                         style={{
                           display: "inline-flex",
                           alignItems: "center",
                           gap: "4px",
-                          backgroundColor: "rgba(59, 130, 246, 0.1)",
-                          border: "1px solid rgba(59, 130, 246, 0.25)",
+                          backgroundColor: "rgba(59, 130, 246, 0.12)",
+                          border: "1px solid rgba(59, 130, 246, 0.3)",
                           color: "#60a5fa",
                           borderRadius: "6px",
                           padding: "2px 8px",
@@ -1472,7 +1511,7 @@ function IntelligenceDashboardContent() {
                   {item.ai_summary && (
                     <p style={{
                       fontSize: "12px",
-                      color: "#94a3b8",
+                      color: "#cbd5e1",
                       margin: 0,
                       lineHeight: "1.5"
                     }}>
@@ -1480,38 +1519,122 @@ function IntelligenceDashboardContent() {
                     </p>
                   )}
 
-                  {item.ai_provider && item.ai_provider !== "auto_skip" && item.ai_provider !== "manual_pending" && (
+                  {/* Enhanced AI Log Details Box for each news item */}
+                  {item.ai_provider && (
                     <div style={{
                       fontSize: "11px",
                       color: "#cbd5e1",
-                      backgroundColor: "rgba(15, 23, 42, 0.7)",
-                      borderLeft: `3px solid ${
+                      backgroundColor: item.ai_provider === "ollama_failed" ? "rgba(239, 68, 68, 0.1)" : "rgba(15, 23, 42, 0.75)",
+                      border: `1px solid ${
+                        item.ai_provider === "groq" ? "rgba(168, 85, 247, 0.3)"
+                        : item.ai_provider === "gemini" ? "rgba(16, 185, 129, 0.3)"
+                        : item.ai_provider === "ollama" ? "rgba(245, 158, 11, 0.3)"
+                        : item.ai_provider === "openrouter" ? "rgba(6, 182, 212, 0.3)"
+                        : item.ai_provider === "ollama_failed" ? "rgba(239, 68, 68, 0.4)"
+                        : "rgba(100, 116, 139, 0.25)"
+                      }`,
+                      borderLeft: `4px solid ${
                         item.ai_provider === "groq" ? "#c084fc"
                         : item.ai_provider === "gemini" ? "#34d399"
                         : item.ai_provider === "ollama" ? "#fbbf24"
+                        : item.ai_provider === "openrouter" ? "#22d3ee"
+                        : item.ai_provider === "ollama_failed" ? "#ef4444"
                         : "#60a5fa"
                       }`,
-                      padding: "5px 10px",
-                      borderRadius: "0 6px 6px 0",
-                      marginTop: "4px",
+                      padding: "8px 12px",
+                      borderRadius: "6px",
+                      marginTop: "6px",
                       display: "flex",
-                      alignItems: "center",
-                      gap: "6px"
+                      flexDirection: "column",
+                      gap: "4px"
                     }}>
-                      <span style={{
-                        color: item.ai_provider === "groq" ? "#c084fc" : item.ai_provider === "gemini" ? "#34d399" : "#60a5fa",
-                        fontWeight: 700,
-                        fontSize: "10.5px"
-                      }}>
-                        🤖 AI Invoked:
-                      </span>
-                      <span>
-                        {item.category === "financial_results" || (item.title && item.title.toLowerCase().includes("financial"))
-                          ? `Deep Financial Results (PDF + Screener.in) analyzed via ${item.ai_provider.toUpperCase()}`
-                          : item.ai_provider === "rule_engine"
-                            ? "0-CPU Rule Engine keyword analysis (Cloud LLMs offline/rate-limited)"
-                            : `Exchange Market Intelligence analyzed via ${item.ai_provider.toUpperCase()}`}
-                      </span>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "6px" }}>
+                        <span style={{
+                          color: item.ai_provider === "groq" ? "#c084fc" : item.ai_provider === "gemini" ? "#34d399" : item.ai_provider === "ollama" ? "#fbbf24" : item.ai_provider === "ollama_failed" ? "#f87171" : "#60a5fa",
+                          fontWeight: 700,
+                          fontSize: "11px",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "5px"
+                        }}>
+                          <Bot size={13} />
+                          AI Log Execution: {item.ai_provider.toUpperCase()}
+                        </span>
+                        <span style={{ fontSize: "10px", color: "#94a3b8", fontWeight: "500" }}>
+                          Tier: {
+                            item.category === "financial_results" || (item.title && item.title.toLowerCase().includes("financial"))
+                              ? "Financial Results (Cloud)"
+                              : item.ai_provider === "auto_skip"
+                                ? "Auto-Skip (0 AI)"
+                                : item.ai_provider === "manual_pending"
+                                  ? "Manual Pending"
+                                  : "Standard (Local Ollama)"
+                          }
+                        </span>
+                      </div>
+
+                      <div style={{ fontSize: "11px", color: "#94a3b8", lineHeight: "1.4" }}>
+                        {item.ai_provider === "ollama_failed" ? (
+                          <span style={{ color: "#f87171", fontWeight: 600 }}>
+                            🚫 Local Ollama engine was unavailable. Select a cloud provider above and click Re-analyze.
+                          </span>
+                        ) : item.ai_provider === "auto_skip" ? (
+                          <span>⏭️ Routine filing auto-skipped from AI queue to preserve API quota.</span>
+                        ) : item.ai_provider === "manual_pending" ? (
+                          <span>🔒 Non-exchange news article — choose a provider above to analyze on demand.</span>
+                        ) : item.category === "financial_results" || (item.title && item.title.toLowerCase().includes("financial")) ? (
+                          <span>📊 Deep Financial Results (PDF + Screener.in) analyzed via {item.ai_provider.toUpperCase()}</span>
+                        ) : item.ai_provider === "rule_engine" ? (
+                          <span>⚡ 0-CPU Rule Engine keyword analysis (Cloud LLMs offline/rate-limited)</span>
+                        ) : (
+                          <span>Exchange Market Intelligence analyzed via {item.ai_provider.toUpperCase()}</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Collapsible Source Description / Extracted Content */}
+                  {item.description && (
+                    <div style={{ marginTop: "4px" }}>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const k = `${item.type}-${item.id}`;
+                          setExpandedDetailsIds(prev => ({ ...prev, [k]: !prev[k] }));
+                        }}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          color: "#38bdf8",
+                          fontSize: "11px",
+                          fontWeight: "600",
+                          cursor: "pointer",
+                          padding: 0,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "4px"
+                        }}
+                      >
+                        {expandedDetailsIds[`${item.type}-${item.id}`] ? "▲ Hide Source Details" : "▼ Show Source Details / Raw Text"}
+                      </button>
+
+                      {expandedDetailsIds[`${item.type}-${item.id}`] && (
+                        <div style={{
+                          fontSize: "11.5px",
+                          color: "#cbd5e1",
+                          backgroundColor: "rgba(0, 0, 0, 0.35)",
+                          border: "1px solid rgba(255, 255, 255, 0.08)",
+                          padding: "10px 12px",
+                          borderRadius: "6px",
+                          marginTop: "6px",
+                          whiteSpace: "pre-line",
+                          lineHeight: "1.5",
+                          maxHeight: "220px",
+                          overflowY: "auto"
+                        }}>
+                          {item.description}
+                        </div>
+                      )}
                     </div>
                   )}
 
