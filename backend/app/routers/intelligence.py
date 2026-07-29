@@ -865,10 +865,13 @@ def reanalyze_item_endpoint(
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid numeric item ID: '{item_id}'")
         
-    result = reanalyze_single_item(db, item_type, numeric_id, provider_name=provider)
-    if not result:
-        raise HTTPException(status_code=404, detail=f"Item '{item_type}' with ID {item_id} not found or analysis failed.")
-    return result
+    try:
+        result = reanalyze_single_item(db, item_type, numeric_id, provider_name=provider)
+        if not result:
+            raise HTTPException(status_code=404, detail=f"Item '{item_type}' with ID {item_id} not found or analysis failed.")
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Re-analysis via provider '{provider or 'auto'}' failed: {str(e)}")
 
 
 @router.get("/logs")
