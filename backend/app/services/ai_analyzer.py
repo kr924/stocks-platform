@@ -105,7 +105,7 @@ def _call_cloud_llm(prompt: str, event_info: str = ""):
     if env.get("ollama_url"):
         try:
             logger.info("🦙 [CLOUD→OLLAMA FALLBACK]: All cloud keys busy. Routing to Ollama...")
-            res = call_ollama(prompt, env["ollama_url"], env.get("ollama_model", "stocks-analyst"), timeout=30)
+            res = call_ollama(prompt, env["ollama_url"], env.get("ollama_model", "stocks-analyst"), timeout=70)
             try:
                 from app.services.ai_log_tracker import record_ai_log
                 record_ai_log("✅ Ollama fallback completed", provider="ollama", tier="success", level="success")
@@ -149,7 +149,7 @@ def _call_local_llm(prompt: str, event_info: str = ""):
                 record_ai_log(f"Ollama attempt {attempt}/2{info_suffix}", provider="ollama", tier="execution", level="info")
             except Exception:
                 pass
-            res = call_ollama(prompt, ollama_url, ollama_model, timeout=60)
+            res = call_ollama(prompt, ollama_url, ollama_model, timeout=70)
             try:
                 from app.services.ai_log_tracker import record_ai_log
                 record_ai_log(f"✅ Local Ollama completed (attempt {attempt}){info_suffix}", provider="ollama", tier="success", level="success")
@@ -197,7 +197,7 @@ def _call_chosen_provider(prompt: str, provider_name: str, event_info: str = "")
     if provider == "ollama":
         try:
             logger.info(f"🦙 [MANUAL]: Calling Ollama{info_suffix}...")
-            res = call_ollama(prompt, env.get("ollama_url", "http://localhost:11434"), env.get("ollama_model", "stocks-analyst"), timeout=30)
+            res = call_ollama(prompt, env.get("ollama_url", "http://localhost:11434"), env.get("ollama_model", "stocks-analyst"), timeout=70)
             return res, "ollama"
         except Exception as e:
             raise RuntimeError(f"Ollama call failed: {e}")

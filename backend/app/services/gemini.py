@@ -37,7 +37,7 @@ def reload_env_vars():
     }
 
 
-def call_ollama(prompt: str, base_url: str = "http://localhost:11434", model_name: str = "stocks-analyst", timeout: int = 60) -> dict:
+def call_ollama(prompt: str, base_url: str = "http://localhost:11434", model_name: str = "stocks-analyst", timeout: int = 70) -> dict:
     payload = {
         "model": model_name,
         "messages": [
