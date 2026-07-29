@@ -71,40 +71,64 @@ def get_intelligence_feed(
 
     CLOUD_PROVIDERS = ["groq", "gemini", "openrouter", "openai", "anthropic", "cloud", "financial_results"]
 
-    # Category handling
+    # Define strict Finance News SQL condition according to user rules:
+    # 1. Subject contains "Outcome of Board Meeting"
+    # 2. Subject contains "Updates" AND details contain "finan", "revenue", or "profit"
+    # 3. Subject or details contain "Acquisition", "Merger", "Dividend", "Bonus", "Split", "Financial Result", "Quarterly Result", "Audited Result"
+    # 4. Analyzed by Cloud Finance AI
+    finance_news_cond = or_(
+        MarketEvent.title.ilike("%Outcome of Board Meeting%"),
+        and_(
+            MarketEvent.title.ilike("%Update%"),
+            or_(
+                MarketEvent.description.ilike("%finan%"),
+                MarketEvent.description.ilike("%revenue%"),
+                MarketEvent.description.ilike("%profit%")
+            )
+        ),
+        MarketEvent.title.ilike("%Acquisition%"),
+        MarketEvent.title.ilike("%Merger%"),
+        MarketEvent.title.ilike("%Dividend%"),
+        MarketEvent.title.ilike("%Bonus%"),
+        MarketEvent.title.ilike("%Split%"),
+        MarketEvent.title.ilike("%Financial Result%"),
+        MarketEvent.title.ilike("%Quarterly Result%"),
+        MarketEvent.title.ilike("%Audited Result%"),
+        MarketEvent.description.ilike("%Acquisition%"),
+        MarketEvent.description.ilike("%Merger%"),
+        MarketEvent.description.ilike("%Dividend%"),
+        MarketEvent.description.ilike("%Bonus%"),
+        MarketEvent.description.ilike("%Split%"),
+        MarketEvent.category == "financial_results",
+        MarketEvent.ai_provider.in_(CLOUD_PROVIDERS)
+    )
+
+    auto_skip_cond = or_(
+        MarketEvent.ai_provider == "auto_skip",
+        MarketEvent.category == "auto_skip",
+        MarketEvent.ai_summary.ilike("Auto-skipped%")
+    )
+
+    # Category handling (Strictly Mutually Exclusive across all 4 tabs)
     if category == "auto_skip":
         # Category 4: NSE/BSE Auto-Skipped
-        events_q = events_q.filter(
-            or_(
-                MarketEvent.ai_provider == "auto_skip",
-                MarketEvent.category == "auto_skip",
-                MarketEvent.ai_summary.ilike("Auto-skipped%")
-            )
-        )
+        events_q = events_q.filter(auto_skip_cond)
+    elif category in ("finance_ai", "all", None):
+        # Category 1: Finance News (Default View)
+        events_q = events_q.filter(~auto_skip_cond, finance_news_cond)
     elif category in ("nse_bse_general", "nse_bse_active"):
-        # Category 2: NSE/BSE General Updates (Excludes auto-skipped, includes announcements like appointment/resignation/general notices)
+        # Category 2: NSE/BSE General Updates
         events_q = events_q.filter(
             MarketEvent.source.in_(["nse", "bse"]),
-            or_(MarketEvent.ai_provider.is_(None), MarketEvent.ai_provider != "auto_skip"),
-            or_(MarketEvent.category.is_(None), MarketEvent.category != "auto_skip")
+            ~auto_skip_cond,
+            ~finance_news_cond
         )
     elif category == "other_news":
         # Category 3: Other Market News (Media stories & web updates)
         events_q = events_q.filter(
             MarketEvent.source.notin_(["nse", "bse"]),
-            or_(
-                MarketEvent.ai_provider.is_(None),
-                MarketEvent.ai_provider != "auto_skip"
-            )
-        )
-    elif category in ("finance_ai", "all", None):
-        # Category 1: Finance News (Default View)
-        # Includes all active non-skipped financial news & AI-analyzed intelligence
-        events_q = events_q.filter(
-            or_(
-                MarketEvent.ai_provider.is_(None),
-                MarketEvent.ai_provider != "auto_skip"
-            )
+            ~auto_skip_cond,
+            ~finance_news_cond
         )
     elif category not in ("news", "filing"):
         events_q = events_q.filter(MarketEvent.category == category)
