@@ -235,6 +235,7 @@ def init_db():
         _safe_alter(conn, "ALTER TABLE market_events ADD COLUMN ai_provider VARCHAR(50)")
         _safe_alter(conn, "ALTER TABLE news_stories ADD COLUMN ai_provider VARCHAR(50)")
         _safe_alter(conn, "ALTER TABLE news_items ADD COLUMN ai_provider VARCHAR(50)")
+        _safe_alter(conn, "ALTER TABLE company_filings ADD COLUMN ai_provider VARCHAR(50)")
 
 
 def _safe_alter(conn, sql: str):

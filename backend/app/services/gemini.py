@@ -51,12 +51,26 @@ def call_ollama(prompt: str, base_url: str = "http://localhost:11434", model_nam
             "num_predict": 256
         }
     }
-    url = base_url.rstrip("/") + "/api/chat"
-    res = requests.post(url, json=payload, timeout=timeout)
-    res.raise_for_status()
-    raw_text = res.json()["message"]["content"]
-    cleaned = clean_json_response(raw_text)
-    return json.loads(cleaned)
+    
+    # Try specified base_url first, then Docker host gateway candidate URLs if localhost is refused
+    candidate_urls = [base_url]
+    if "localhost" in base_url or "127.0.0.1" in base_url:
+        candidate_urls.extend(["http://172.17.0.1:11434", "http://host.docker.internal:11434"])
+        
+    last_err = None
+    for b_url in candidate_urls:
+        url = b_url.rstrip("/") + "/api/chat"
+        try:
+            res = requests.post(url, json=payload, timeout=timeout)
+            res.raise_for_status()
+            raw_text = res.json()["message"]["content"]
+            cleaned = clean_json_response(raw_text)
+            return json.loads(cleaned)
+        except Exception as e:
+            last_err = e
+            continue
+            
+    raise last_err or RuntimeError("Failed to connect to Ollama service")
 
 
 def clean_json_response(text: str) -> str:
