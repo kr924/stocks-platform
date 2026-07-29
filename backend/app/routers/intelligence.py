@@ -71,6 +71,7 @@ def get_intelligence_feed(
 
     # Category handling
     if category == "auto_skip":
+        # Category 4: NSE/BSE Auto-Skipped
         events_q = events_q.filter(
             or_(
                 MarketEvent.ai_provider == "auto_skip",
@@ -78,11 +79,26 @@ def get_intelligence_feed(
                 MarketEvent.ai_summary.ilike("Auto-skipped%")
             )
         )
-    elif category == "all_with_skipped":
-        # Include all items (active + auto-skipped)
-        pass
-    elif category == "all" or not category:
-        # Default: Exclude auto-skipped routine disclosures
+    elif category == "nse_bse_active":
+        # Category 2: NSE/BSE Active (Non-Skipped)
+        events_q = events_q.filter(
+            MarketEvent.source.in_(["nse", "bse"]),
+            or_(
+                MarketEvent.ai_provider.is_(None),
+                MarketEvent.ai_provider != "auto_skip"
+            )
+        )
+    elif category == "other_news":
+        # Category 3: Other Market News (Media stories & web updates)
+        events_q = events_q.filter(
+            MarketEvent.source.notin_(["nse", "bse"]),
+            or_(
+                MarketEvent.ai_provider.is_(None),
+                MarketEvent.ai_provider != "auto_skip"
+            )
+        )
+    elif category in ("finance_ai", "all", None):
+        # Category 1: Finance AI Analyzed (Default View)
         events_q = events_q.filter(
             or_(
                 MarketEvent.ai_provider.is_(None),
@@ -125,13 +141,13 @@ def get_intelligence_feed(
         })
     
     # 2. News Stories (deduplicated)
-    if not event_type or event_type == "news":
+    if (not event_type or event_type == "news") and category not in ("auto_skip", "nse_bse_active"):
         stories_q = db.query(NewsStory).filter(NewsStory.last_published >= since)
         if sentiment:
             stories_q = stories_q.filter(NewsStory.ai_sentiment == sentiment)
         if symbol:
             stories_q = stories_q.filter(NewsStory.symbols.contains(symbol.upper()))
-        if category and category != "news":
+        if category and category not in ("finance_ai", "all", "other_news", "news"):
             stories_q = stories_q.filter(NewsStory.category == category)
         if search:
             search_pattern = f"%{search}%"

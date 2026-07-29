@@ -130,7 +130,7 @@ function IntelligenceDashboardContent() {
   const [totalPages, setTotalPages] = useState(1);
 
   // Filter state
-  const [filterCategory, setFilterCategory] = useState<string>("all");
+  const [filterCategory, setFilterCategory] = useState<string>("finance_ai");
   const [filterSentiment, setFilterSentiment] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [debouncedSearch, setDebouncedSearch] = useState<string>("");
@@ -1084,6 +1084,134 @@ function IntelligenceDashboardContent() {
               )}
             </button>
           </div>
+        </div>
+
+        {/* Highlighted News Segregation Bar (Primary Category Tabs) */}
+        <div style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "10px",
+          padding: "10px 14px",
+          borderRadius: "12px",
+          background: "linear-gradient(135deg, rgba(15, 23, 42, 0.9), rgba(30, 41, 59, 0.8))",
+          border: "1px solid rgba(255, 255, 255, 0.1)",
+          boxShadow: "0 4px 20px rgba(0, 0, 0, 0.3)",
+          overflowX: "auto",
+          whiteSpace: "nowrap"
+        }}>
+          <span style={{ fontSize: "11px", fontWeight: "700", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.5px", paddingRight: "4px" }}>
+            Feed Segregation:
+          </span>
+
+          {/* Tab 1: Finance AI Analyzed (DEFAULT VIEW) */}
+          <button
+            onClick={() => { setFilterCategory("finance_ai"); setPage(1); }}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "8px",
+              padding: "8px 16px",
+              borderRadius: "8px",
+              fontSize: "12px",
+              fontWeight: "700",
+              border: filterCategory === "finance_ai" || filterCategory === "all" ? "1px solid rgba(59, 130, 246, 0.6)" : "1px solid rgba(255, 255, 255, 0.08)",
+              background: filterCategory === "finance_ai" || filterCategory === "all"
+                ? "linear-gradient(135deg, rgba(37, 99, 235, 0.35), rgba(124, 58, 237, 0.35))"
+                : "rgba(13, 19, 31, 0.6)",
+              color: filterCategory === "finance_ai" || filterCategory === "all" ? "#60a5fa" : "#94a3b8",
+              boxShadow: filterCategory === "finance_ai" || filterCategory === "all" ? "0 0 14px rgba(37, 99, 235, 0.35)" : "none",
+              cursor: "pointer",
+              transition: "all 0.2s ease"
+            }}
+          >
+            <span>🤖</span>
+            <span>Finance AI Analyzed</span>
+            <span style={{
+              fontSize: "10px",
+              fontWeight: "800",
+              padding: "2px 6px",
+              borderRadius: "10px",
+              backgroundColor: filterCategory === "finance_ai" || filterCategory === "all" ? "#2563eb" : "rgba(255, 255, 255, 0.1)",
+              color: "#ffffff"
+            }}>
+              DEFAULT
+            </span>
+          </button>
+
+          {/* Tab 2: NSE / BSE Active (Non-Skipped) */}
+          <button
+            onClick={() => { setFilterCategory("nse_bse_active"); setPage(1); }}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "8px",
+              padding: "8px 16px",
+              borderRadius: "8px",
+              fontSize: "12px",
+              fontWeight: "700",
+              border: filterCategory === "nse_bse_active" ? "1px solid rgba(16, 185, 129, 0.6)" : "1px solid rgba(255, 255, 255, 0.08)",
+              background: filterCategory === "nse_bse_active"
+                ? "linear-gradient(135deg, rgba(5, 150, 105, 0.35), rgba(16, 185, 129, 0.35))"
+                : "rgba(13, 19, 31, 0.6)",
+              color: filterCategory === "nse_bse_active" ? "#34d399" : "#94a3b8",
+              boxShadow: filterCategory === "nse_bse_active" ? "0 0 14px rgba(16, 185, 129, 0.35)" : "none",
+              cursor: "pointer",
+              transition: "all 0.2s ease"
+            }}
+          >
+            <span>🏢</span>
+            <span>NSE / BSE Non-Skipped</span>
+          </button>
+
+          {/* Tab 3: Other Market News */}
+          <button
+            onClick={() => { setFilterCategory("other_news"); setPage(1); }}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "8px",
+              padding: "8px 16px",
+              borderRadius: "8px",
+              fontSize: "12px",
+              fontWeight: "700",
+              border: filterCategory === "other_news" ? "1px solid rgba(6, 182, 212, 0.6)" : "1px solid rgba(255, 255, 255, 0.08)",
+              background: filterCategory === "other_news"
+                ? "linear-gradient(135deg, rgba(2, 132, 199, 0.35), rgba(6, 182, 212, 0.35))"
+                : "rgba(13, 19, 31, 0.6)",
+              color: filterCategory === "other_news" ? "#38bdf8" : "#94a3b8",
+              boxShadow: filterCategory === "other_news" ? "0 0 14px rgba(6, 182, 212, 0.35)" : "none",
+              cursor: "pointer",
+              transition: "all 0.2s ease"
+            }}
+          >
+            <span>📰</span>
+            <span>Other Market News</span>
+          </button>
+
+          {/* Tab 4: NSE / BSE Auto-Skipped */}
+          <button
+            onClick={() => { setFilterCategory("auto_skip"); setPage(1); }}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "8px",
+              padding: "8px 16px",
+              borderRadius: "8px",
+              fontSize: "12px",
+              fontWeight: "700",
+              border: filterCategory === "auto_skip" ? "1px solid rgba(245, 158, 11, 0.6)" : "1px solid rgba(255, 255, 255, 0.08)",
+              background: filterCategory === "auto_skip"
+                ? "linear-gradient(135deg, rgba(217, 119, 6, 0.35), rgba(245, 158, 11, 0.35))"
+                : "rgba(13, 19, 31, 0.6)",
+              color: filterCategory === "auto_skip" ? "#fbbf24" : "#94a3b8",
+              boxShadow: filterCategory === "auto_skip" ? "0 0 14px rgba(245, 158, 11, 0.35)" : "none",
+              cursor: "pointer",
+              transition: "all 0.2s ease"
+            }}
+          >
+            <span>⏭️</span>
+            <span>NSE / BSE Auto-Skipped</span>
+          </button>
         </div>
 
         {/* Live AI Activity Terminal Drawer */}
