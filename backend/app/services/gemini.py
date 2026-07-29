@@ -48,7 +48,7 @@ def call_ollama(prompt: str, base_url: str = "http://host.docker.internal:11434"
         "format": "json",
         "options": {
             "temperature": 0.1,
-            "num_predict": 128,
+            "num_predict": 512,
             "num_ctx": 1024
         }
     }
@@ -84,13 +84,25 @@ def call_ollama(prompt: str, base_url: str = "http://host.docker.internal:11434"
 
 
 def clean_json_response(text: str) -> str:
-    """Strip markdown blocks and reasoning tags from LLM responses before JSON parsing."""
-    # Remove DeepSeek R1 reasoning block
+    """Strip markdown blocks, reasoning tags, and repair truncated JSON responses before parsing."""
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
-    # Extract code blocks if any
     match = re.search(r"```(?:json)?\s*(.*?)\s*```", text, flags=re.DOTALL)
     if match:
         text = match.group(1).strip()
+        
+    # Auto-repair truncated JSON strings/brackets if cut off
+    text = text.strip()
+    if text:
+        quotes = text.count('"') - text.count('\\"')
+        if quotes % 2 != 0:
+            text += '"'
+        open_brackets = text.count('[') - text.count(']')
+        open_braces = text.count('{') - text.count('}')
+        if open_brackets > 0:
+            text += ']' * open_brackets
+        if open_braces > 0:
+            text += '}' * open_braces
+            
     return text
 
 
