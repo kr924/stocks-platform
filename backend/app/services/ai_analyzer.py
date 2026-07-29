@@ -24,16 +24,14 @@ from app.services.intel_config import get_intel_config
 logger = logging.getLogger("app.ai_analyzer")
 
 
-# ─── LLM Call Helpers (reuse existing providers) ─────────────────────────
+# ─── LLM Call Helpers — Tier-Based Routing ────────────────────────────────
 
-def _call_llm_for_analysis(prompt: str, event_info: str = ""):
+def _call_cloud_llm(prompt: str, event_info: str = ""):
     """
-    Call LLMs using smart key concurrency pool & state management.
-    1. Synchronizes env keys into thread-safe ProviderPools (OpenRouter, Groq, Gemini, OpenAI, Anthropic).
-    2. Attempts to acquire an IDLE/FREE key for OpenRouter first, then Groq / Gemini / OpenAI.
-    3. If ALL cloud keys across ALL providers are busy or rate-limited:
-       -> Routes request to local Ollama with 30s timeout!
-    4. If Ollama also fails -> Fallback to 0-CPU Rule Engine.
+    Cloud-first LLM routing for HIGH-PRIORITY items (financial_results + market sentiment).
+    1. Tries cloud providers via key pool concurrency (OpenRouter → Groq → Gemini → OpenAI → Anthropic).
+    2. If ALL cloud keys are busy/rate-limited → falls back to local Ollama (30s timeout).
+    3. If Ollama also fails → falls back to 0-CPU Rule Engine.
     """
     from app.services.gemini import (
         reload_env_vars, call_gemini, call_groq, call_openai, call_anthropic, call_ollama, call_openrouter
@@ -59,18 +57,16 @@ def _call_llm_for_analysis(prompt: str, event_info: str = ""):
 
     # ── Phase 1: Try Cloud Providers with Idle Key Pool Concurrency ──
     for provider in cloud_providers:
-        # Loop to acquire any free/idle key for this provider
         while True:
             ks = key_manager.acquire_key_for_provider(provider)
             if not ks:
-                # No free keys for this provider right now
                 break
             
             try:
-                logger.info(f"🚀 [AI EXECUTION]: Calling LLM provider '{provider}' using Key #{ks.index + 1}{info_suffix}...")
+                logger.info(f"🚀 [CLOUD AI]: Calling '{provider}' Key #{ks.index + 1}{info_suffix}...")
                 try:
                     from app.services.ai_log_tracker import record_ai_log
-                    record_ai_log(f"Calling LLM provider '{provider.upper()}' using Key #{ks.index + 1}{info_suffix}", provider=provider, key_index=ks.index + 1, tier="execution", details=event_info)
+                    record_ai_log(f"Calling '{provider.upper()}' Key #{ks.index + 1}{info_suffix}", provider=provider, key_index=ks.index + 1, tier="execution", details=event_info)
                 except Exception:
                     pass
                 if provider == "openrouter":
@@ -90,7 +86,7 @@ def _call_llm_for_analysis(prompt: str, event_info: str = ""):
                 if res:
                     try:
                         from app.services.ai_log_tracker import record_ai_log
-                        record_ai_log(f"✅ AI Analysis completed via {provider.upper()} (Key #{ks.index + 1}){info_suffix}", provider=provider, key_index=ks.index + 1, tier="success", level="success", details=event_info)
+                        record_ai_log(f"✅ Cloud AI done via {provider.upper()} Key #{ks.index + 1}{info_suffix}", provider=provider, key_index=ks.index + 1, tier="success", level="success", details=event_info)
                     except Exception:
                         pass
                     return res, provider
@@ -104,42 +100,145 @@ def _call_llm_for_analysis(prompt: str, event_info: str = ""):
                     record_ai_log(f"❌ {provider.upper()} Key #{ks.index + 1} Error: {err_msg[:100]}{info_suffix}", provider=provider, key_index=ks.index + 1, tier="error", level="error", details=err_msg)
                 except Exception:
                     pass
-                # Try next free key for this provider or move on
-                # Try next free key for this provider or move on
 
-    # ── Phase 2: If ALL Cloud Keys are Busy/Rate-Limited, Fallback to Local Ollama (30s timeout) ──
+    # ── Phase 2: Ollama fallback ──
     if env.get("ollama_url"):
         try:
-            logger.info("🦙 [LLM FALLBACK]: All cloud keys busy/rate-limited. Routing to local Ollama (30s timeout)...")
-            try:
-                from app.services.ai_log_tracker import record_ai_log
-                record_ai_log("🦙 All cloud keys rate-limited. Routing to local Ollama (30s timeout)...", provider="ollama", tier="execution", level="info")
-            except Exception:
-                pass
+            logger.info("🦙 [CLOUD→OLLAMA FALLBACK]: All cloud keys busy. Routing to Ollama...")
             res = call_ollama(prompt, env["ollama_url"], env.get("ollama_model", "stocks-analyst"), timeout=30)
             try:
                 from app.services.ai_log_tracker import record_ai_log
-                record_ai_log("✅ Local Ollama analysis completed successfully", provider="ollama", tier="success", level="success")
+                record_ai_log("✅ Ollama fallback completed", provider="ollama", tier="success", level="success")
             except Exception:
                 pass
             return res, "ollama"
         except Exception as ollama_err:
-            logger.warning(f"Local Ollama fallback failed: {ollama_err}")
-            try:
-                from app.services.ai_log_tracker import record_ai_log
-                record_ai_log(f"❌ Local Ollama fallback error: {str(ollama_err)[:120]}", provider="ollama", tier="error", level="error")
-            except Exception:
-                pass
+            logger.warning(f"Ollama fallback failed: {ollama_err}")
 
-    # ── Phase 3: Fast 0-CPU Rule Engine fallback ──
-    logger.info("⚡ [LLM FALLBACK]: All LLMs unavailable. Using 0-CPU Rule Engine fallback...")
+    # ── Phase 3: Rule Engine fallback ──
+    logger.info("⚡ [RULE ENGINE]: All LLMs unavailable. Using keyword rule engine...")
     try:
         from app.services.ai_log_tracker import record_ai_log
-        record_ai_log("⚡ All cloud & local LLMs unavailable. Using 0-CPU Rule Engine fallback (0 AI calls)", provider="", tier="rule_engine", level="warning")
+        record_ai_log("⚡ All LLMs unavailable. Rule Engine fallback (0 AI calls)", provider="", tier="rule_engine", level="warning")
     except Exception:
         pass
     res = _smart_rule_analysis(prompt)
     return res, "rule_engine"
+
+
+def _call_local_llm(prompt: str, event_info: str = ""):
+    """
+    Local-only LLM routing for STANDARD tier items.
+    1. Calls local Ollama with 30s timeout.
+    2. If fails, retries ONCE more.
+    3. If second attempt also fails → returns (None, 'ollama_failed').
+       The caller must leave the item unanalyzed for manual re-analysis.
+    """
+    from app.services.gemini import reload_env_vars, call_ollama
+    
+    env = reload_env_vars()
+    ollama_url = env.get("ollama_url", "http://localhost:11434")
+    ollama_model = env.get("ollama_model", "stocks-analyst")
+    info_suffix = f" for {event_info}" if event_info else ""
+    
+    for attempt in range(1, 3):  # Try up to 2 times
+        try:
+            logger.info(f"🦙 [LOCAL LLM]: Ollama attempt {attempt}/2{info_suffix}...")
+            try:
+                from app.services.ai_log_tracker import record_ai_log
+                record_ai_log(f"Ollama attempt {attempt}/2{info_suffix}", provider="ollama", tier="execution", level="info")
+            except Exception:
+                pass
+            res = call_ollama(prompt, ollama_url, ollama_model, timeout=30)
+            try:
+                from app.services.ai_log_tracker import record_ai_log
+                record_ai_log(f"✅ Local Ollama completed (attempt {attempt}){info_suffix}", provider="ollama", tier="success", level="success")
+            except Exception:
+                pass
+            return res, "ollama"
+        except Exception as e:
+            logger.warning(f"[OLLAMA] Attempt {attempt}/2 failed: {e}")
+            try:
+                from app.services.ai_log_tracker import record_ai_log
+                record_ai_log(f"❌ Ollama attempt {attempt}/2 failed: {str(e)[:100]}{info_suffix}", provider="ollama", tier="error", level="error")
+            except Exception:
+                pass
+            if attempt < 2:
+                time.sleep(2)  # Brief pause before retry
+    
+    # Both attempts failed — return failure signal
+    logger.warning(f"🚫 [LOCAL LLM FAILED]: Ollama unavailable after 2 attempts{info_suffix}. Leaving unanalyzed for manual re-analysis.")
+    try:
+        from app.services.ai_log_tracker import record_ai_log
+        record_ai_log(f"🚫 Ollama failed after 2 attempts{info_suffix}. Awaiting manual re-analysis.", provider="ollama", tier="error", level="warning")
+    except Exception:
+        pass
+    return None, "ollama_failed"
+
+
+def _call_chosen_provider(prompt: str, provider_name: str, event_info: str = ""):
+    """
+    Call a SPECIFIC provider by name for manual re-analysis.
+    The user chooses which provider to use from the dashboard.
+    Falls back to cloud chain if the chosen provider fails.
+    """
+    from app.services.gemini import (
+        reload_env_vars, call_gemini, call_groq, call_openai, call_anthropic, call_ollama, call_openrouter
+    )
+    from app.services.key_manager import key_manager
+    
+    env = reload_env_vars()
+    key_manager.sync_all(env)
+    info_suffix = f" for {event_info}" if event_info else ""
+    
+    provider = provider_name.lower().strip()
+    
+    # Handle local Ollama separately (no key pool)
+    if provider == "ollama":
+        try:
+            logger.info(f"🦙 [MANUAL]: Calling Ollama{info_suffix}...")
+            res = call_ollama(prompt, env.get("ollama_url", "http://localhost:11434"), env.get("ollama_model", "stocks-analyst"), timeout=30)
+            return res, "ollama"
+        except Exception as e:
+            raise RuntimeError(f"Ollama call failed: {e}")
+    
+    # Cloud provider — acquire key from pool
+    ks = key_manager.acquire_key_for_provider(provider)
+    if not ks:
+        raise RuntimeError(f"No available API key for provider '{provider}'. Check your .env configuration.")
+    
+    try:
+        logger.info(f"🎯 [MANUAL]: Calling '{provider}' Key #{ks.index + 1}{info_suffix}...")
+        try:
+            from app.services.ai_log_tracker import record_ai_log
+            record_ai_log(f"Manual re-analysis via '{provider.upper()}' Key #{ks.index + 1}{info_suffix}", provider=provider, key_index=ks.index + 1, tier="execution", details=event_info)
+        except Exception:
+            pass
+        
+        if provider == "openrouter":
+            res = call_openrouter(prompt, ks.key)
+        elif provider == "groq":
+            res = call_groq(prompt, ks.key, "llama-3.3-70b-versatile")
+        elif provider == "gemini":
+            res = call_gemini(prompt, ks.key)
+        elif provider == "openai":
+            res = call_openai(prompt, ks.key)
+        elif provider == "anthropic":
+            res = call_anthropic(prompt, ks.key)
+        else:
+            raise ValueError(f"Unknown provider: '{provider}'")
+        
+        key_manager.release_key(ks, is_rate_limited=False)
+        try:
+            from app.services.ai_log_tracker import record_ai_log
+            record_ai_log(f"✅ Manual re-analysis done via {provider.upper()}{info_suffix}", provider=provider, key_index=ks.index + 1, tier="success", level="success")
+        except Exception:
+            pass
+        return res, provider
+    except Exception as e:
+        is_429 = "429" in str(e) or "Too Many Requests" in str(e) or "Rate limit" in str(e)
+        key_manager.release_key(ks, is_rate_limited=is_429, backoff_seconds=60.0)
+        raise
 
 
 def _smart_rule_analysis(prompt: str) -> dict:
@@ -307,9 +406,9 @@ def _classify_ai_tier(event) -> str:
 def apply_instant_tier_classification(event):
     """
     Check AI tier immediately upon ingestion/creation of a MarketEvent.
-    If the event belongs to the 'skip' or 'manual_only' tier, set its ai_provider
-    and ai_analyzed_at fields instantly BEFORE saving to DB and broadcasting SSE.
-    This prevents auto-skipped items from ever showing up in the UI main feed!
+    - 'skip' / 'manual_only': Set fields instantly (0 AI calls).
+    - 'financial_results': Trigger IMMEDIATE cloud AI analysis inline (PDF + Screener.in + cloud LLM).
+    - 'standard': Leave ai_analyzed_at = NULL for background local-LLM queue.
     """
     tier = _classify_ai_tier(event)
     if tier == "skip":
@@ -331,6 +430,62 @@ def apply_instant_tier_classification(event):
         event.ai_affected_stocks = json.dumps([event.symbol] if event.symbol else [])
         event.ai_provider = "manual_pending"
         event.ai_analyzed_at = datetime.utcnow()
+    elif tier == "financial_results":
+        # ── IMMEDIATE cloud AI analysis for financial results ──
+        try:
+            logger.info(f"📊 [IMMEDIATE AI]: Financial results detected at ingestion — [{event.symbol or 'GENERAL'}] '{event.title}'")
+            try:
+                from app.services.ai_log_tracker import record_ai_log
+                record_ai_log(f"📊 Immediate cloud AI for financial results: [{event.symbol or 'GENERAL'}] '{event.title}'", provider="", tier="financial_results", level="info")
+            except Exception:
+                pass
+            
+            # Extract PDF text from attached filing
+            pdf_text = ""
+            if event.url:
+                pdf_text = extract_pdf_text_from_url(event.url)
+            
+            # Fetch historical financials from Screener.in
+            screener_text = ""
+            if event.symbol:
+                screener_text = fetch_screener_financials(event.symbol)
+            
+            event_data = {
+                "event_type": getattr(event, "event_type", "announcement"),
+                "source": getattr(event, "source", "nse"),
+                "symbol": event.symbol,
+                "title": event.title,
+                "description": event.description or "",
+                "event_time": event.event_time.isoformat() if event.event_time else "",
+            }
+            
+            prompt = _build_financial_results_prompt(event_data, pdf_text, screener_text)
+            result, provider = _call_cloud_llm(prompt, event_info=f"[{event.symbol or 'GENERAL'}] '{event.title}'")
+            event.ai_provider = provider
+            event.category = "financial_results"
+            
+            if result and "analyses" in result and result["analyses"]:
+                analysis = result["analyses"][0]
+                event.ai_sentiment = analysis.get("sentiment", "neutral")
+                event.ai_impact_score = analysis.get("impact_score", 0.0)
+                event.ai_summary = analysis.get("summary", "")
+                event.ai_affected_stocks = json.dumps(analysis.get("affected_stocks", []))
+            else:
+                event.ai_sentiment = "neutral"
+                event.ai_impact_score = 0.0
+                event.ai_summary = f"{event.symbol or ''} financial results filed. Review attached PDF for details."
+                event.ai_affected_stocks = json.dumps([event.symbol] if event.symbol else [])
+            event.ai_analyzed_at = datetime.utcnow()
+        except Exception as e:
+            logger.error(f"Immediate financial_results AI failed for [{event.symbol}]: {e}")
+            # Fallback: mark as analyzed with neutral so it doesn't re-queue
+            event.ai_sentiment = "neutral"
+            event.ai_impact_score = 0.0
+            event.ai_summary = f"{event.symbol or ''} financial results filed. AI analysis failed — click Re-analyze to retry."
+            event.ai_affected_stocks = json.dumps([event.symbol] if event.symbol else [])
+            event.ai_provider = "failed"
+            event.ai_analyzed_at = datetime.utcnow()
+    # 'standard' tier: leave ai_analyzed_at = NULL → picked up by background queue
 
 
 def _auto_mark_skip(db, event, reason: str):
@@ -618,7 +773,7 @@ Respond with a JSON object:
 
 
 def _build_filing_analysis_prompt(filing: dict) -> str:
-    """Build analysis prompt for a company filing."""
+    """Build analysis prompt for a company filing. Uses same unified JSON schema as events/news."""
     return f"""You are a senior Indian stock market analyst. Conduct a deep, in-depth financial analysis of this company filing and assess its market impact.
 
 Filing Details:
@@ -630,33 +785,38 @@ Period: {filing.get('period', 'N/A')}
 Extracted Content (if available):
 {(filing.get('extracted_text', '') or 'No text available')[:3000]}
 
-Provide your analysis as JSON:
+For this filing, determine:
+1. sentiment: "positive", "negative", or "neutral"
+2. impact_score: float from -1.0 (extremely negative) to 1.0 (extremely positive)
+3. affected_stocks: List of NSE stock symbols directly impacted
+4. summary: In-depth financial analysis (3-4 sentences). Detail growth vectors, margins, and end with "Sector Impact: [Sector] -> Prominent stocks: [TICKER1, TICKER2]".
+5. category: One of: "earnings", "corporate_action", "general"
+
+Respond with a JSON object:
 {{
-  "sentiment": "positive/negative/neutral",
-  "impact_score": 0.0,
-  "summary": "In-depth financial analysis detailing growth vectors, balance sheet/operational metrics, margin shifts, and the long-term sector outlook. Sector Impact: [Sector Name] -> Prominent stocks: [TICKER1, TICKER2]",
-  "key_metrics": {{
-    "revenue_growth": "X%",
-    "profit_change": "X%",
-    "margin_percentage": "X%",
-    "notable_items": ["item1", "item2"]
-  }},
-  "affected_stocks": ["{filing.get('symbol', '')}"],
-  "recommendation": "Detailed recommendation for long-term and short-term investors"
+  "analyses": [
+    {{
+      "sentiment": "positive",
+      "impact_score": 0.5,
+      "affected_stocks": ["{filing.get('symbol', '')}"],
+      "summary": "Detailed analysis...",
+      "category": "earnings"
+    }}
+  ]
 }}"""
 
 
 # ─── Analysis Processing ───────────────────────────────────────────────────
 
 def analyze_pending_events(db: Session) -> int:
-    """Analyze market events with smart tier-based routing to minimize API calls."""
+    """Analyze market events: standard tier → local Ollama only. Financial results are already analyzed at ingestion."""
     config = get_intel_config()
     if not config.ai.get("enabled", True):
         return 0
     
     batch_size = config.ai.get("batch_size", 10)
     
-    # Find unanalyzed events
+    # Find unanalyzed events (ai_analyzed_at = NULL means not yet processed)
     pending = db.query(MarketEvent).filter(
         MarketEvent.ai_analyzed_at.is_(None)
     ).order_by(MarketEvent.event_time.desc()).limit(batch_size).all()
@@ -667,121 +827,48 @@ def analyze_pending_events(db: Session) -> int:
     count = 0
     skipped = 0
     manual_only_count = 0
-    financial_results_count = 0
+    ollama_failed_count = 0
     alert_threshold = config.ai.get("thresholds", {}).get("alert_threshold", 0.6)
     critical_threshold = config.ai.get("thresholds", {}).get("critical_threshold", 0.85)
     
     for event in pending:
         try:
-            # ── Step 1: Classify event into AI tier ──
             tier = _classify_ai_tier(event)
             
-            # ── TIER: SKIP — no AI call, auto-mark neutral ──
+            # ── SKIP ──
             if tier == "skip":
                 _auto_mark_skip(db, event, f"Subject '{event.title}' is excluded from AI analysis")
                 count += 1
                 skipped += 1
                 continue
             
-            # ── TIER: MANUAL_ONLY — no auto AI, user clicks Re-analyze ──
+            # ── MANUAL_ONLY ──
             if tier == "manual_only":
                 _auto_mark_manual_only(db, event)
                 count += 1
                 manual_only_count += 1
                 continue
             
-            # ── TIER: FINANCIAL_RESULTS — deep analysis with PDF + Screener.in ──
+            # ── FINANCIAL_RESULTS — should already be analyzed at ingestion ──
             if tier == "financial_results":
-                msg = f"Deep Financial Results analysis for [{event.symbol or 'GENERAL'}]: '{event.title}' with PDF + Screener.in"
-                logger.info(f"📊 [AI TIER: FINANCIAL_RESULTS] {msg}")
-                try:
-                    from app.services.ai_log_tracker import record_ai_log
-                    record_ai_log(msg, provider="groq", tier="financial_results", level="info")
-                except Exception:
-                    pass
-                financial_results_count += 1
-                
-                # Extract PDF text from attached filing
-                pdf_text = ""
-                if event.url:
-                    pdf_text = extract_pdf_text_from_url(event.url)
-                
-                # Fetch historical financials from Screener.in
-                screener_text = ""
-                if event.symbol:
-                    screener_text = fetch_screener_financials(event.symbol)
-                
-                event_data = {
-                    "event_type": event.event_type,
-                    "source": event.source,
-                    "symbol": event.symbol,
-                    "title": event.title,
-                    "description": event.description or "",
-                    "event_time": event.event_time.isoformat() if event.event_time else "",
-                }
-                
-                prompt = _build_financial_results_prompt(event_data, pdf_text, screener_text)
-                result, provider = _call_llm_for_analysis(prompt, event_info=f"[{event.symbol or 'GENERAL'}] '{event.title}'")
-                event.ai_provider = provider
-                event.category = "financial_results"  # Tag as financial results
-                
-                if not result or "analyses" not in result or not result["analyses"]:
-                    event.ai_sentiment = "neutral"
-                    event.ai_impact_score = 0.0
-                    event.ai_summary = f"{event.symbol or ''} financial results filed. Review attached PDF for detailed figures."
-                    event.ai_affected_stocks = json.dumps([event.symbol] if event.symbol else [])
-                    event.ai_analyzed_at = datetime.utcnow()
-                    db.commit()
-                    count += 1
-                    time.sleep(1.2)
-                    continue
-                
-                analysis = result["analyses"][0]
-                event.ai_sentiment = analysis.get("sentiment", "neutral")
-                event.ai_impact_score = analysis.get("impact_score", 0.0)
-                event.ai_summary = analysis.get("summary", "")
-                event.ai_affected_stocks = json.dumps(analysis.get("affected_stocks", []))
+                # If we reach here, the ingestion-time analysis must have been missed.
+                # Mark it for manual re-analysis rather than using cloud API from the queue.
+                logger.warning(f"⚠️ Financial results event #{event.id} [{event.symbol}] was not analyzed at ingestion. Marking for manual re-analysis.")
+                event.ai_sentiment = "neutral"
+                event.ai_impact_score = 0.0
+                event.ai_summary = f"{event.symbol or ''} financial results filed. Click Re-analyze to get AI analysis."
+                event.ai_affected_stocks = json.dumps([event.symbol] if event.symbol else [])
+                event.ai_provider = "manual_pending"
                 event.ai_analyzed_at = datetime.utcnow()
-                
                 db.commit()
                 count += 1
-                
-                # Broadcast with financial_results category
-                try:
-                    from app.services.sse_manager import sse_manager
-                    from app.services.deduplication import to_iso_utc
-                    sse_manager.broadcast("new_event", {
-                        "id": f"event_{event.id}",
-                        "type": "event",
-                        "event_type": event.event_type,
-                        "source": event.source,
-                        "symbol": event.symbol,
-                        "title": event.title,
-                        "description": event.ai_summary or event.description,
-                        "url": event.url,
-                        "time": to_iso_utc(event.event_time),
-                        "ai_sentiment": event.ai_sentiment,
-                        "ai_impact_score": event.ai_impact_score,
-                        "ai_summary": event.ai_summary,
-                        "ai_provider": event.ai_provider,
-                        "category": "financial_results",
-                    })
-                except Exception as sse_err:
-                    logger.warning(f"Failed to broadcast analyzed event {event.id}: {sse_err}")
-                
-                # Generate alert if high impact
-                impact = abs(analysis.get("impact_score", 0.0))
-                if impact >= alert_threshold:
-                    _create_alert_from_event(db, event, analysis, alert_threshold, critical_threshold)
-                
-                time.sleep(1.2)
                 continue
             
-            # ── TIER: STANDARD — normal Groq AI analysis ──
-            logger.info(f"🤖 [AI TIER: STANDARD] Event #{event.id} [{event.symbol or 'GENERAL'}]: '{event.title}'")
+            # ── STANDARD — Local Ollama only (retry once) ──
+            logger.info(f"🦙 [STANDARD → LOCAL LLM] Event #{event.id} [{event.symbol or 'GENERAL'}]: '{event.title}'")
             try:
                 from app.services.ai_log_tracker import record_ai_log
-                record_ai_log(f"Analyzing MarketEvent [{event.symbol or 'GENERAL'}]: '{event.title}'", provider="groq", tier="standard", level="info")
+                record_ai_log(f"Standard tier → Local Ollama: [{event.symbol or 'GENERAL'}] '{event.title}'", provider="ollama", tier="standard", level="info")
             except Exception:
                 pass
             
@@ -801,7 +888,21 @@ def analyze_pending_events(db: Session) -> int:
             }]
             
             prompt = _build_event_analysis_prompt(event_data)
-            result, provider = _call_llm_for_analysis(prompt, event_info=f"[{event.symbol or 'GENERAL'}] '{event.title}'")
+            result, provider = _call_local_llm(prompt, event_info=f"[{event.symbol or 'GENERAL'}] '{event.title}'")
+            
+            # If local LLM failed → leave unanalyzed for manual re-analysis
+            if result is None or provider == "ollama_failed":
+                event.ai_sentiment = "neutral"
+                event.ai_impact_score = 0.0
+                event.ai_summary = f"Local LLM unavailable. Click Re-analyze and choose a provider."
+                event.ai_affected_stocks = json.dumps([event.symbol] if event.symbol else [])
+                event.ai_provider = "ollama_failed"
+                event.ai_analyzed_at = datetime.utcnow()
+                db.commit()
+                count += 1
+                ollama_failed_count += 1
+                continue
+            
             event.ai_provider = provider
             
             if not result or "analyses" not in result or not result["analyses"]:
@@ -852,8 +953,6 @@ def analyze_pending_events(db: Session) -> int:
             if impact >= alert_threshold:
                 _create_alert_from_event(db, event, analysis, alert_threshold, critical_threshold)
             
-            # Pace requests smoothly (1.2s delay) to respect API rate limits
-            time.sleep(1.2)
         except Exception as e:
             logger.error(f"Error analyzing event {event.id}: {e}")
             db.rollback()
@@ -868,12 +967,12 @@ def analyze_pending_events(db: Session) -> int:
                 db.rollback()
             continue
     
-    logger.info(f"Analyzed {count} market events (skipped={skipped}, manual_only={manual_only_count}, financial_results={financial_results_count})")
+    logger.info(f"Analyzed {count} market events (skipped={skipped}, manual_only={manual_only_count}, ollama_failed={ollama_failed_count})")
     return count
 
 
 def analyze_pending_news(db: Session) -> int:
-    """Analyze news stories one by one for deep, focused analysis and assign category."""
+    """Analyze news stories via local Ollama only. Cloud providers used only for manual re-analysis."""
     config = get_intel_config()
     if not config.ai.get("enabled", True):
         return 0
@@ -894,7 +993,7 @@ def analyze_pending_news(db: Session) -> int:
     
     for story in pending_stories:
         try:
-            logger.info(f"🤖 [AI CALL REASON]: Analyzing unanalyzed NewsStory #{story.id} [{story.symbols or 'GENERAL'}]: '{story.headline}'")
+            logger.info(f"🦙 [NEWS → LOCAL LLM]: Analyzing NewsStory #{story.id} [{story.symbols or 'GENERAL'}]: '{story.headline}'")
             
             # Fetch the actual articles belonging to this clustered story
             news_items = db.query(NewsItem).filter(NewsItem.story_id == story.id).all()
@@ -910,8 +1009,27 @@ def analyze_pending_news(db: Session) -> int:
             }]
             
             prompt = _build_news_analysis_prompt(story_data)
-            result, provider = _call_llm_for_analysis(prompt)
+            result, provider = _call_local_llm(prompt, event_info=f"[{story.symbols or 'GENERAL'}] '{story.headline}'")
             story.ai_provider = provider
+            
+            # If local LLM failed → leave unanalyzed for manual re-analysis
+            if result is None or provider == "ollama_failed":
+                story.ai_sentiment = "neutral"
+                story.ai_impact_score = 0.0
+                story.ai_summary = f"Local LLM unavailable. Click Re-analyze and choose a provider."
+                story.ai_affected_stocks = json.dumps([])
+                story.category = "general"
+                story.ai_provider = "ollama_failed"
+                story.ai_analyzed_at = datetime.utcnow()
+                db.query(NewsItem).filter(NewsItem.story_id == story.id).update({
+                    "ai_sentiment": "neutral",
+                    "ai_impact_score": 0.0,
+                    "ai_provider": "ollama_failed",
+                    "ai_analyzed_at": datetime.utcnow(),
+                })
+                db.commit()
+                count += 1
+                continue
             
             if not result or "analyses" not in result or not result["analyses"]:
                 # Mark as analyzed with neutral defaults so it doesn't retry forever
@@ -956,8 +1074,6 @@ def analyze_pending_news(db: Session) -> int:
             if impact >= alert_threshold:
                 _create_alert_from_story(db, story, analysis, alert_threshold, critical_threshold)
             
-            # Pace requests smoothly (1.2s delay) to respect API rate limits
-            time.sleep(1.2)
         except Exception as e:
             logger.error(f"Error analyzing news story {story.id}: {e}")
             db.rollback()
@@ -977,12 +1093,16 @@ def analyze_pending_news(db: Session) -> int:
 
 
 def analyze_pending_filings(db: Session) -> int:
-    """Analyze company filings that haven't been processed by AI yet."""
+    """
+    Analyze company filings via local Ollama only.
+    - quarterly_result: SKIPPED (already covered by MarketEvent financial_results tier).
+    - transcript / investor_presentation: Local Ollama, retry once.
+    """
     config = get_intel_config()
     if not config.ai.get("enabled", True):
         return 0
     
-    # Process filings one at a time (they can be large)
+    # Find unanalyzed filings
     pending = db.query(CompanyFiling).filter(
         CompanyFiling.ai_analyzed_at.is_(None)
     ).order_by(CompanyFiling.filed_at.desc()).limit(5).all()
@@ -996,7 +1116,19 @@ def analyze_pending_filings(db: Session) -> int:
     
     for filing in pending:
         try:
-            logger.info(f"🤖 [AI CALL REASON]: Analyzing unanalyzed CompanyFiling #{filing.id} [{filing.symbol}]: '{filing.title}'")
+            # Skip quarterly_results — already analyzed via MarketEvent financial_results tier
+            if filing.filing_type == "quarterly_result":
+                logger.info(f"⏭️ [FILING SKIP]: quarterly_result #{filing.id} [{filing.symbol}] — already covered by MarketEvent tier")
+                filing.ai_sentiment = "neutral"
+                filing.ai_summary = f"Covered by MarketEvent financial results analysis for {filing.symbol}."
+                filing.ai_key_metrics = json.dumps({})
+                filing.ai_provider = "auto_skip"
+                filing.ai_analyzed_at = datetime.utcnow()
+                count += 1
+                continue
+            
+            # transcript / investor_presentation → Local Ollama
+            logger.info(f"🦙 [FILING → LOCAL LLM]: CompanyFiling #{filing.id} [{filing.symbol}]: '{filing.title}'")
             filing_data = {
                 "filing_type": filing.filing_type,
                 "symbol": filing.symbol,
@@ -1006,28 +1138,47 @@ def analyze_pending_filings(db: Session) -> int:
             }
             
             prompt = _build_filing_analysis_prompt(filing_data)
-            result, provider = _call_llm_for_analysis(prompt)
+            result, provider = _call_local_llm(prompt, event_info=f"[{filing.symbol}] '{filing.title}'")
             
-            if result:
-                filing.ai_sentiment = result.get("sentiment", "neutral")
-                filing.ai_summary = result.get("summary", "")
-                filing.ai_key_metrics = json.dumps(result.get("key_metrics", {}))
+            # If local LLM failed → leave unanalyzed for manual re-analysis
+            if result is None or provider == "ollama_failed":
+                filing.ai_sentiment = "neutral"
+                filing.ai_summary = f"Local LLM unavailable. Click Re-analyze and choose a provider."
+                filing.ai_key_metrics = json.dumps({})
+                filing.ai_provider = "ollama_failed"
+                filing.ai_analyzed_at = datetime.utcnow()
+                count += 1
+                continue
+            
+            # Parse unified analyses[] response
+            if result and "analyses" in result and result["analyses"]:
+                analysis = result["analyses"][0]
+                filing.ai_sentiment = analysis.get("sentiment", "neutral")
+                filing.ai_summary = analysis.get("summary", "")
+                filing.ai_key_metrics = json.dumps({})
                 filing.ai_provider = provider
                 filing.ai_analyzed_at = datetime.utcnow()
                 count += 1
                 
-                impact = abs(result.get("impact_score", 0.0))
+                impact = abs(analysis.get("impact_score", 0.0))
                 if impact >= alert_threshold:
                     severity = "critical" if impact >= critical_threshold else "high" if impact >= alert_threshold else "medium"
                     alert = AIAlert(
                         alert_type="filing_analysis",
                         severity=severity,
                         symbol=filing.symbol,
-                        title=f"📄 {filing.symbol}: {filing.filing_type.replace('_', ' ').title()} — {result.get('sentiment', 'neutral').upper()}",
-                        description=result.get("summary", filing.title),
+                        title=f"📄 {filing.symbol}: {filing.filing_type.replace('_', ' ').title()} — {analysis.get('sentiment', 'neutral').upper()}",
+                        description=analysis.get("summary", filing.title),
                         source_filing_id=filing.id,
                     )
                     db.add(alert)
+            else:
+                filing.ai_sentiment = "neutral"
+                filing.ai_summary = filing.title
+                filing.ai_key_metrics = json.dumps({})
+                filing.ai_provider = provider
+                filing.ai_analyzed_at = datetime.utcnow()
+                count += 1
         except Exception as e:
             logger.error(f"Error analyzing filing {filing.id}: {e}")
     
@@ -1337,7 +1488,7 @@ def get_market_sentiment(db: Session, force_refresh: bool = False) -> dict:
     sentiment_data = None
     try:
         logger.info(f"🤖 [AI CALL REASON]: Synthesizing Market Sentiment (5-min cache expired / user force refresh)")
-        res, provider = _call_llm_for_analysis(prompt)
+        res, provider = _call_cloud_llm(prompt, event_info="Market Sentiment Synthesis")
         sentiment_data = res
     except Exception as e:
         logger.error(f"Error calling LLM for market sentiment: {e}")
@@ -1395,27 +1546,31 @@ def get_market_sentiment(db: Session, force_refresh: bool = False) -> dict:
     return sentiment_data
 
 
-def reanalyze_single_item(db: Session, item_type: str, item_id: int) -> Optional[dict]:
+def reanalyze_single_item(db: Session, item_type: str, item_id: int, provider_name: Optional[str] = None) -> Optional[dict]:
     """
-    Force re-analysis of a single item (event, story, news, filing) using configured LLM providers.
-    Sequence: Primary (Groq) -> Fallbacks (Gemini, OpenAI, Anthropic, Ollama local model).
+    Force re-analysis of a single item (event, story, news, filing) using configured or chosen LLM provider.
+    If provider_name is provided, attempts to execute using that specific provider.
+    Otherwise uses cloud-first routing chain.
     """
     item_type = item_type.lower()
+    
+    def execute_call(prompt: str, info: str):
+        if provider_name:
+            return _call_chosen_provider(prompt, provider_name, event_info=info)
+        return _call_cloud_llm(prompt, event_info=info)
     
     if item_type in ("event", "market_event"):
         event = db.query(MarketEvent).filter(MarketEvent.id == item_id).first()
         if not event:
             return None
         
-        # Use tier classification to determine prompt type
         tier = _classify_ai_tier(event)
-        logger.info(f"🤖 [AI CALL REASON]: Manual re-analysis of MarketEvent #{event.id} (tier={tier})")
+        logger.info(f"🤖 [MANUAL RE-ANALYSIS]: MarketEvent #{event.id} [{event.symbol}] via provider='{provider_name or 'auto'}'")
         
         if tier == "financial_results" or (
             "outcome of board meeting" in (event.title or "").lower() and 
             "finan" in (event.description or "").lower()
         ):
-            # Deep financial analysis with PDF + Screener
             pdf_text = extract_pdf_text_from_url(event.url) if event.url else ""
             screener_text = fetch_screener_financials(event.symbol) if event.symbol else ""
             
@@ -1429,7 +1584,6 @@ def reanalyze_single_item(db: Session, item_type: str, item_id: int) -> Optional
             }
             prompt = _build_financial_results_prompt(event_data, pdf_text, screener_text)
         else:
-            # Standard analysis with PDF extraction
             desc_content = event.description or ""
             if event.url and ".pdf" in (event.url or "").lower():
                 pdf_text = extract_pdf_text_from_url(event.url)
@@ -1446,7 +1600,7 @@ def reanalyze_single_item(db: Session, item_type: str, item_id: int) -> Optional
             }]
             prompt = _build_event_analysis_prompt(event_data)
         
-        result, provider = _call_llm_for_analysis(prompt)
+        result, provider = execute_call(prompt, f"Manual event #{event.id} [{event.symbol}]")
         if result and "analyses" in result and result["analyses"]:
             analysis = result["analyses"][0]
             event.ai_sentiment = analysis.get("sentiment", "neutral")
@@ -1465,6 +1619,7 @@ def reanalyze_single_item(db: Session, item_type: str, item_id: int) -> Optional
                 "impact_score": event.ai_impact_score,
                 "summary": event.ai_summary,
                 "affected_stocks": json.loads(event.ai_affected_stocks or "[]"),
+                "provider": event.ai_provider,
                 "analyzed_at": event.ai_analyzed_at.isoformat()
             }
 
@@ -1478,13 +1633,14 @@ def reanalyze_single_item(db: Session, item_type: str, item_id: int) -> Optional
             "summary": story.ai_summary or story.headline,
         }]
         prompt = _build_news_analysis_prompt(articles_data)
-        result = _call_llm_for_analysis(prompt)
+        result, provider = execute_call(prompt, f"Manual story #{story.id}")
         if result and "analyses" in result and result["analyses"]:
             analysis = result["analyses"][0]
             story.ai_sentiment = analysis.get("sentiment", "neutral")
             story.ai_impact_score = analysis.get("impact_score", 0.0)
             story.ai_summary = analysis.get("summary", "")
             story.ai_affected_stocks = json.dumps(analysis.get("affected_stocks", []))
+            story.ai_provider = provider
             story.ai_analyzed_at = datetime.utcnow()
             if analysis.get("category"):
                 story.category = analysis.get("category")
@@ -1497,6 +1653,7 @@ def reanalyze_single_item(db: Session, item_type: str, item_id: int) -> Optional
                 "summary": story.ai_summary,
                 "affected_stocks": json.loads(story.ai_affected_stocks or "[]"),
                 "category": story.category,
+                "provider": story.ai_provider,
                 "analyzed_at": story.ai_analyzed_at.isoformat()
             }
 
@@ -1510,11 +1667,12 @@ def reanalyze_single_item(db: Session, item_type: str, item_id: int) -> Optional
             "summary": item.summary or item.headline,
         }]
         prompt = _build_news_analysis_prompt(articles_data)
-        result = _call_llm_for_analysis(prompt)
+        result, provider = execute_call(prompt, f"Manual news #{item.id}")
         if result and "analyses" in result and result["analyses"]:
             analysis = result["analyses"][0]
             item.ai_sentiment = analysis.get("sentiment", "neutral")
             item.ai_impact_score = analysis.get("impact_score", 0.0)
+            item.ai_provider = provider
             item.ai_analyzed_at = datetime.utcnow()
             db.commit()
             return {
@@ -1522,6 +1680,7 @@ def reanalyze_single_item(db: Session, item_type: str, item_id: int) -> Optional
                 "type": "news",
                 "sentiment": item.ai_sentiment,
                 "impact_score": item.ai_impact_score,
+                "provider": item.ai_provider,
                 "analyzed_at": item.ai_analyzed_at.isoformat()
             }
 
@@ -1537,11 +1696,12 @@ def reanalyze_single_item(db: Session, item_type: str, item_id: int) -> Optional
             "extracted_text": filing.extracted_text,
         }
         prompt = _build_filing_analysis_prompt(filing_data)
-        result = _call_llm_for_analysis(prompt)
-        if result:
-            filing.ai_sentiment = result.get("sentiment", "neutral")
-            filing.ai_summary = result.get("summary", "")
-            filing.ai_key_metrics = json.dumps(result.get("key_metrics", {}))
+        result, provider = execute_call(prompt, f"Manual filing #{filing.id} [{filing.symbol}]")
+        if result and "analyses" in result and result["analyses"]:
+            analysis = result["analyses"][0]
+            filing.ai_sentiment = analysis.get("sentiment", "neutral")
+            filing.ai_summary = analysis.get("summary", "")
+            filing.ai_provider = provider
             filing.ai_analyzed_at = datetime.utcnow()
             db.commit()
             return {
@@ -1549,9 +1709,11 @@ def reanalyze_single_item(db: Session, item_type: str, item_id: int) -> Optional
                 "type": "filing",
                 "sentiment": filing.ai_sentiment,
                 "summary": filing.ai_summary,
-                "key_metrics": json.loads(filing.ai_key_metrics or "{}"),
+                "provider": filing.ai_provider,
                 "analyzed_at": filing.ai_analyzed_at.isoformat()
             }
+
+    return None
 
     return None
 

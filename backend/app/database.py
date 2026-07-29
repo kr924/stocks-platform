@@ -184,6 +184,7 @@ class CompanyFiling(Base):
     # JSON object with key financial metrics
     ai_key_metrics = Column(Text, nullable=True)
     ai_sentiment = Column(String(20), nullable=True)
+    ai_provider = Column(String(50), nullable=True)      # groq, gemini, ollama, openai, anthropic, etc.
     ai_analyzed_at = Column(DateTime, nullable=True)
 
     __table_args__ = (

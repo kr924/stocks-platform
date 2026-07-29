@@ -845,10 +845,16 @@ def get_active_stocks(db: Session = Depends(get_db)):
 # ─── Real-Time SSE Stream ────────────────────────────────────────────────
 
 @router.post("/reanalyze/{item_type}/{item_id}")
-def reanalyze_item_endpoint(item_type: str, item_id: str, db: Session = Depends(get_db)):
+def reanalyze_item_endpoint(
+    item_type: str, 
+    item_id: str, 
+    provider: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
     """
     Manually trigger AI re-analysis on a news story, market event, or filing.
     Accepts raw integer ID or prefixed string ID (e.g. 'event_2262', 'story_105', '2262').
+    Optional query param `provider`: 'groq', 'openrouter', 'gemini', 'openai', 'anthropic', 'ollama'.
     """
     from app.services.ai_analyzer import reanalyze_single_item
     
@@ -859,7 +865,7 @@ def reanalyze_item_endpoint(item_type: str, item_id: str, db: Session = Depends(
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid numeric item ID: '{item_id}'")
         
-    result = reanalyze_single_item(db, item_type, numeric_id)
+    result = reanalyze_single_item(db, item_type, numeric_id, provider_name=provider)
     if not result:
         raise HTTPException(status_code=404, detail=f"Item '{item_type}' with ID {item_id} not found or analysis failed.")
     return result

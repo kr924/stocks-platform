@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef } from "react";
-import { 
-  Plus, 
-  Trash2, 
-  Search, 
-  RefreshCw, 
-  Brain, 
-  Newspaper, 
-  UserCheck, 
+import {
+  Plus,
+  Trash2,
+  Search,
+  RefreshCw,
+  Brain,
+  Newspaper,
+  UserCheck,
   ExternalLink,
   X,
   Send,
@@ -128,7 +128,7 @@ export default function App() {
     const rect = e.currentTarget.getBoundingClientRect();
     const width = 380; // tooltip width
     const height = 350; // estimated tooltip height
-    
+
     let left = rect.left - 180; // try to center it
     if (left + width > window.innerWidth) {
       left = window.innerWidth - width - 16;
@@ -136,7 +136,7 @@ export default function App() {
     if (left < 16) {
       left = 16;
     }
-    
+
     let top = rect.bottom + 8;
     if (top + height > window.innerHeight) {
       top = rect.top - height - 8;
@@ -144,7 +144,7 @@ export default function App() {
         top = 16;
       }
     }
-    
+
     setHoveredAnalysisKey({
       key: item.instrument_key,
       symbol: item.symbol,
@@ -173,11 +173,11 @@ export default function App() {
     console.log("Hovered key:", item.instrument_key);
     console.log("Current sentiment history map:", sentimentHistoryRef.current);
     console.log("History for hovered key:", sentimentHistoryRef.current[item.instrument_key]);
-    
+
     const rect = e.currentTarget.getBoundingClientRect();
     const width = 360; // tooltip width
     const height = 180; // tooltip height
-    
+
     let left = rect.left - 130; // center it relative to cell
     if (left + width > window.innerWidth) {
       left = window.innerWidth - width - 16;
@@ -185,7 +185,7 @@ export default function App() {
     if (left < 16) {
       left = 16;
     }
-    
+
     let top = rect.bottom + 8;
     if (top + height > window.innerHeight) {
       top = rect.top - height - 8;
@@ -193,7 +193,7 @@ export default function App() {
         top = 16;
       }
     }
-    
+
     setHoveredSentimentKey({
       key: item.instrument_key,
       symbol: item.symbol,
@@ -333,7 +333,7 @@ export default function App() {
       )
     );
   };
-  
+
   // Watchlist filter tabs and periods
   const [watchlistTab, setWatchlistTab] = useState<"gainers" | "losers" | "holdings">("gainers");
 
@@ -344,7 +344,7 @@ export default function App() {
     change: number;
     pct_change: number;
   }
-  
+
   interface IndicesState {
     nifty: IndexData;
     sensex: IndexData;
@@ -368,12 +368,12 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
-  
+
   // Auth state
   const [authState, setAuthState] = useState({ authenticated: false, provider: "mock", updated_at: null });
   const [authUrl, setAuthUrl] = useState("");
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
-  
+
   // App-level loading states
   const [watchlistLoading, setWatchlistLoading] = useState(false);
   const [moversLoading, setMoversLoading] = useState(false);
@@ -407,7 +407,7 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     const authParam = params.get("auth");
     const messageParam = params.get("message");
-    
+
     if (authParam === "success") {
       setToast({ message: "Upstox account connected successfully!", type: "success" });
       window.history.replaceState({}, document.title, window.location.pathname);
@@ -420,7 +420,7 @@ export default function App() {
     fetchWatchlist("today");
     fetchMovers("today");
     fetchIndices();
-    
+
     // Auto-refresh quotes every 10 seconds to show dynamic ticks
     const interval = setInterval(() => {
       refreshLiveQuotes();
@@ -553,11 +553,11 @@ export default function App() {
         return;
       }
       const data = await res.json();
-      
+
       // Check price changes for flash effects and compute sentiment trend
       const newFlashes: Record<string, "up" | "down" | ""> = {};
       const newTrends: Record<string, "up" | "down" | "flat"> = {};
-      
+
       data.forEach((item: WatchlistItem) => {
         const prev = prevPricesRef.current[item.instrument_key];
         if (prev !== undefined && prev !== item.last_price) {
@@ -622,10 +622,10 @@ export default function App() {
         return;
       }
       const wlData = await wlRes.json();
-      
-       const newFlashes: Record<string, "up" | "down" | ""> = {};
+
+      const newFlashes: Record<string, "up" | "down" | ""> = {};
       const newTrends: Record<string, "up" | "down" | "flat"> = {};
-      
+
       wlData.forEach((item: WatchlistItem) => {
         const prev = prevPricesRef.current[item.instrument_key];
         if (prev !== undefined && prev !== item.last_price && item.last_price > 0) {
@@ -690,7 +690,7 @@ export default function App() {
         const data = await res.json();
         const newFlashes: Record<string, "up" | "down" | ""> = {};
         const newTrends: Record<string, "up" | "down" | "flat"> = {};
-        
+
         const allMovers = [...(data.gainers || []), ...(data.losers || [])];
         allMovers.forEach((item: any) => {
           const prev = prevPricesRef.current[item.instrument_key];
@@ -971,20 +971,20 @@ export default function App() {
   // Send message to backend stock assistant
   const handleSendChatMessage = async (key: string) => {
     if (!chatInput.trim() || chatLoading) return;
-    
+
     const message = chatInput.trim();
     setChatInput("");
-    
+
     const currentHistory = chatHistory[key] || [];
     const updatedHistory = [...currentHistory, { role: "user" as const, content: message }];
-    
+
     // Append user message to list instantly
     setChatHistory((prev) => ({
       ...prev,
       [key]: updatedHistory
     }));
     setChatLoading(true);
-    
+
     try {
       const res = await fetch(`${API_BASE}/api/market/stock/${encodeURIComponent(key)}/chat`, {
         method: "POST",
@@ -996,13 +996,13 @@ export default function App() {
           history: currentHistory
         })
       });
-      
+
       if (res.status === 401) {
         setAuthState({ authenticated: false, provider: "upstox", updated_at: null });
         setToast({ message: "Upstox disconnected. Please reconnect.", type: "error" });
         return;
       }
-      
+
       if (res.ok) {
         const data = await res.json();
         setChatHistory((prev) => ({
@@ -1056,10 +1056,10 @@ export default function App() {
         minWidth: "115px",
         transition: "all 0.15s ease"
       }}>
-        <span style={{ 
-          fontSize: "9px", 
-          fontWeight: "700", 
-          color: "#64748b", 
+        <span style={{
+          fontSize: "9px",
+          fontWeight: "700",
+          color: "#64748b",
           textTransform: "uppercase",
           letterSpacing: "0.5px"
         }}>
@@ -1144,7 +1144,7 @@ export default function App() {
                 <UserCheck size={13} />
                 Upstox Connected ({formatLastUpdated(authState.updated_at)})
               </div>
-              <button 
+              <button
                 onClick={handleDisconnect}
                 style={{
                   padding: "6px 12px",
@@ -1169,7 +1169,7 @@ export default function App() {
               </button>
             </div>
           ) : (
-            <button 
+            <button
               onClick={handleAuthorize}
               style={{
                 display: "flex",
@@ -1246,175 +1246,446 @@ export default function App() {
       ) : (
         <div className="main-scroll-area" style={{ paddingBottom: "80px" }}>
 
-        {/* Top middle bar (Search) */}
-        <div className="top-search-indices-bar">
-          {/* Search bar */}
-          <div className="search-section" style={{ maxWidth: "100%" }}>
-            <div className="search-input-wrapper">
-              <Search size={14} style={{ color: "var(--text-muted)", marginRight: "8px" }} />
-              <input
-                type="text"
-                placeholder="Search and add stock..."
-                value={searchQuery}
-                onChange={handleSearchChange}
-                style={{
-                  backgroundColor: "transparent",
-                  border: "none",
-                  outline: "none",
-                  fontSize: "12px",
-                  width: "100%",
-                  color: "white"
-                }}
-              />
-            </div>
+          {/* Top middle bar (Search) */}
+          <div className="top-search-indices-bar">
+            {/* Search bar */}
+            <div className="search-section" style={{ maxWidth: "100%" }}>
+              <div className="search-input-wrapper">
+                <Search size={14} style={{ color: "var(--text-muted)", marginRight: "8px" }} />
+                <input
+                  type="text"
+                  placeholder="Search and add stock..."
+                  value={searchQuery}
+                  onChange={handleSearchChange}
+                  style={{
+                    backgroundColor: "transparent",
+                    border: "none",
+                    outline: "none",
+                    fontSize: "12px",
+                    width: "100%",
+                    color: "white"
+                  }}
+                />
+              </div>
 
-            {/* Autocomplete Dropdown */}
-            {showSearchDropdown && searchResults.length > 0 && (
-              <div className="search-dropdown">
-                {searchResults.map((item) => (
-                  <div
-                    key={item.key}
-                    onClick={() => handleAddToWatchlist(item)}
-                    className="search-item"
+              {/* Autocomplete Dropdown */}
+              {showSearchDropdown && searchResults.length > 0 && (
+                <div className="search-dropdown">
+                  {searchResults.map((item) => (
+                    <div
+                      key={item.key}
+                      onClick={() => handleAddToWatchlist(item)}
+                      className="search-item"
+                    >
+                      <span style={{ fontSize: "12px", fontWeight: "600", color: "white" }}>{item.symbol}</span>
+                      <span style={{ fontSize: "9px", color: "var(--text-muted)" }} className="truncate">{item.name}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ===== MY WATCHLIST ===== */}
+          <section className="data-section">
+            <div className="section-toolbar">
+              <h3 className="section-title">
+                My Watchlist <span className="count">({watchlist.length})</span>
+              </h3>
+
+              <div className="toggle-group">
+                <button
+                  onClick={() => setWatchlistTab("gainers")}
+                  className={`toggle-btn ${watchlistTab === "gainers" ? "active-gain" : ""}`}
+                >
+                  Gainers
+                </button>
+                <button
+                  onClick={() => setWatchlistTab("losers")}
+                  className={`toggle-btn ${watchlistTab === "losers" ? "active-loss" : ""}`}
+                >
+                  Losers
+                </button>
+                <button
+                  onClick={() => setWatchlistTab("holdings")}
+                  className={`toggle-btn ${watchlistTab === "holdings" ? "active-gain" : ""}`}
+                >
+                  Holdings
+                </button>
+              </div>
+
+              <div className="period-bar">
+                {periods.map((p) => (
+                  <button
+                    key={p.val}
+                    onClick={() => handleWatchlistPeriodChange(p.val)}
+                    className={`period-pill ${watchlistPeriod === p.val ? "active" : ""}`}
                   >
-                    <span style={{ fontSize: "12px", fontWeight: "600", color: "white" }}>{item.symbol}</span>
-                    <span style={{ fontSize: "9px", color: "var(--text-muted)" }} className="truncate">{item.name}</span>
-                  </div>
+                    {p.label}
+                  </button>
                 ))}
               </div>
+            </div>
+
+            {watchlistLoading ? (
+              <div className="loading-state">
+                <RefreshCw className="animate-spin" size={16} style={{ color: "var(--accent-color)" }} />
+              </div>
+            ) : filteredWatchlist.length === 0 ? (
+              <div className="empty-state">
+                No stocks match this filter in watchlist.
+              </div>
+            ) : (
+              <div className="table-scroll-container">
+                <table className="stock-data-table">
+                  <thead>
+                    <tr>
+                      <th className="col-symbol">Symbol</th>
+                      <th className="col-name">Company</th>
+                      <th className="col-ltp" style={{ textAlign: "right" }}>LTP</th>
+                      <th className="col-change" style={{ textAlign: "right" }}>Change</th>
+                      <th className="col-close" style={{ textAlign: "right" }}>Prev Close</th>
+                      <th className="col-high" style={{ textAlign: "right" }}>Day High</th>
+                      <th className="col-interest" style={{ textAlign: "center", width: "110px" }}>Sentiment (B/S)</th>
+                      <th className="col-qty" style={{ textAlign: "center", width: "120px" }}>Buy/Sell Qty</th>
+                      <th className="col-trend-signal" style={{ textAlign: "center", width: "115px" }}>
+                        2m Signal
+                        <span
+                          title="Short-term (2 min) trend calculated from order book depth sentiment and quantity dynamics. Hover for details and reliability notice."
+                          style={{ cursor: "help", fontSize: "10px", color: "var(--text-muted)", marginLeft: "4px" }}
+                        >
+                          ⓘ
+                        </span>
+                      </th>
+                      <th className="col-ai">AI</th>
+                      <th className="col-sector">Sector</th>
+                      <th className="col-res">Resistance</th>
+                      <th className="col-actions"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredWatchlist.map((item) => {
+                      const isActive = selectedKey === item.instrument_key && isModalOpen;
+                      const isUp = item.change >= 0;
+                      const flash = priceFlash[item.instrument_key];
+
+                      return (
+                        <tr
+                          key={item.id}
+                          onClick={() => {
+                            setSelectedKey(item.instrument_key);
+                            setIsModalOpen(true);
+                          }}
+                          className={`${isActive ? "active" : ""} ${flash === "up" ? "tick-up" : flash === "down" ? "tick-down" : ""
+                            }`}
+                        >
+                          <td>
+                            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                              <span style={{ fontWeight: 700, color: "white", fontSize: "12px" }}>
+                                {item.symbol}
+                              </span>
+                              <button
+                                onClick={(e) => handleToggleHolding(item.id, e)}
+                                style={{
+                                  background: "none",
+                                  border: "none",
+                                  padding: 2,
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  color: item.is_holding ? "#f59e0b" : "rgba(255,255,255,0.15)",
+                                  cursor: "pointer",
+                                  transition: "all 0.2s"
+                                }}
+                                className={`action-btn-holdings ${item.is_holding ? "active" : ""}`}
+                                title={item.is_holding ? "Remove from holdings" : "Add to holdings"}
+                              >
+                                <Briefcase size={12} fill={item.is_holding ? "#f59e0b" : "none"} />
+                              </button>
+                            </div>
+                          </td>
+                          <td>
+                            <span className="truncate" style={{ color: "var(--text-secondary)", fontSize: "11px", display: "block" }}>
+                              {item.name}
+                            </span>
+                          </td>
+                          <td style={{ textAlign: "right", fontWeight: 700, color: "white" }}>
+                            {item.last_price > 0 ? `₹${item.last_price.toFixed(2)}` : "—"}
+                          </td>
+                          <td style={{ textAlign: "right" }}>
+                            {item.last_price > 0 && (
+                              <span style={{
+                                fontWeight: 700,
+                                fontSize: "11px",
+                                color: isUp ? "var(--success-color)" : "var(--danger-color)"
+                              }}>
+                                {isUp ? "+" : ""}{item.change.toFixed(2)}%
+                              </span>
+                            )}
+                          </td>
+                          <td style={{ textAlign: "right", color: "var(--text-secondary)", fontSize: "11px" }}>
+                            ₹{(item.close || 0).toFixed(2)}
+                          </td>
+                          <td style={{ textAlign: "right", color: "#34d399", fontWeight: 600, fontSize: "11px" }}>
+                            ₹{(item.high || 0).toFixed(2)}
+                          </td>
+                          <td
+                            style={{ verticalAlign: "middle", padding: "8px 12px" }}
+                            onMouseEnter={(e) => handleSentimentMouseEnter(e, item)}
+                            onMouseLeave={handleSentimentMouseLeave}
+                          >
+                            {(() => {
+                              const high = item.high || 0;
+                              const low = item.low || 0;
+                              const range = high - low;
+                              const priceBuyPct = range > 0 ? ((item.last_price - low) / range) * 100 : 50;
+                              const depthBuyPct = item.depth_buy_pct !== undefined ? item.depth_buy_pct : 50;
+                              const compositeBuyPct = Math.round((priceBuyPct * 0.15) + (depthBuyPct * 0.85));
+                              const compositeSellPct = 100 - compositeBuyPct;
+                              const trend = sentimentTrend[item.instrument_key] || "flat";
+                              return (
+                                <div
+                                  style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2px", width: "90px", margin: "0 auto", cursor: "help" }}
+                                >
+                                  <div style={{ display: "flex", justifyContent: "space-between", width: "100%", fontSize: "9px", fontWeight: "800" }}>
+                                    <span style={{ color: "#10b981", display: "flex", alignItems: "center", gap: "2px" }}>
+                                      {compositeBuyPct}% B
+                                      {trend === "up" && <span style={{ fontSize: "8px", color: "#34d399", fontWeight: "900" }}>▲</span>}
+                                      {trend === "down" && <span style={{ fontSize: "8px", color: "#f87171", fontWeight: "900" }}>▼</span>}
+                                    </span>
+                                    <span style={{ color: "#ef4444" }}>{compositeSellPct}% S</span>
+                                  </div>
+                                  <div style={{ width: "100%", height: "5px", backgroundColor: "#ef4444", borderRadius: "3px", overflow: "hidden", display: "flex" }}>
+                                    <div style={{ width: `${compositeBuyPct}%`, height: "100%", backgroundColor: "#10b981" }} />
+                                  </div>
+                                </div>
+                              );
+                            })()}
+                          </td>
+                          <td style={{ textAlign: "center", padding: "8px 6px" }}>
+                            {(() => {
+                              const buyQty = item.total_buy_qty || 0;
+                              const sellQty = item.total_sell_qty || 0;
+                              const totalQty = buyQty + sellQty;
+                              if (totalQty === 0) return <span style={{ color: "var(--text-muted)", fontSize: "10px" }}>—</span>;
+                              return (
+                                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2px", width: "110px", margin: "0 auto" }}>
+                                  <div style={{ display: "flex", justifyContent: "space-between", width: "100%", fontSize: "9px", fontWeight: "700" }}>
+                                    <span style={{ color: "#10b981" }}>{formatQty(buyQty)}</span>
+                                    <span style={{ color: "#ef4444" }}>{formatQty(sellQty)}</span>
+                                  </div>
+                                  <div style={{ width: "100%", height: "4px", backgroundColor: "#ef4444", borderRadius: "2px", overflow: "hidden", display: "flex" }}>
+                                    <div style={{ width: `${(buyQty / totalQty) * 100}%`, height: "100%", backgroundColor: "#10b981" }} />
+                                  </div>
+                                  <div style={{ fontSize: "8px", color: "var(--text-muted)", fontWeight: "600" }}>
+                                    Σ {formatQty(totalQty)}
+                                  </div>
+                                </div>
+                              );
+                            })()}
+                          </td>
+                          <td style={{ textAlign: "center", padding: "8px 6px" }}>
+                            {(() => {
+                              const sig = get2MinRecommendation(item);
+                              return (
+                                <span
+                                  className={`trend-badge ${sig.badgeClass}`}
+                                  title={`${sig.explanation}\n\nReliability Warning:\nThis micro-trend is based on high-frequency order-book data. Useful for near-term momentum, but vulnerable to spoofing. Use as helper, not standalone decision.`}
+                                >
+                                  {sig.recommendation}
+                                  <span style={{ fontSize: "7px", opacity: 0.8, marginTop: "1px", fontWeight: "normal", display: "block" }}>
+                                    Conf: {sig.confidence}
+                                  </span>
+                                </span>
+                              );
+                            })()}
+                          </td>
+                          <td>
+                            {item.analysis?.recommendation ? (
+                              <span className={`ai-badge ${item.analysis.recommendation.toLowerCase()}`}>
+                                {item.analysis.recommendation}
+                              </span>
+                            ) : (
+                              <span style={{ color: "var(--text-muted)", fontSize: "10px" }}>—</span>
+                            )}
+                          </td>
+                          <td style={{ color: "var(--text-muted)", fontSize: "11px" }}>
+                            {item.analysis?.sector || "—"}
+                          </td>
+                          <td
+                            style={{
+                              color: "var(--text-secondary)",
+                              fontSize: "11px",
+                              cursor: "help"
+                            }}
+                            onMouseEnter={(e) => handleMouseEnter(e, item)}
+                            onMouseLeave={handleMouseLeave}
+                          >
+                            <span style={{ borderBottom: "1px dashed rgba(255, 255, 255, 0.3)" }}>
+                              {item.analysis?.resistance_levels
+                                ? item.analysis.resistance_levels.split(",")[0]
+                                : "—"}
+                            </span>
+                          </td>
+                          <td>
+                            <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end", alignItems: "center" }}>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleFetchNewsAndAI(item.instrument_key);
+                                }}
+                                className="action-btn-refresh"
+                                disabled={detailsLoading[item.instrument_key]}
+                                title="Refresh news & AI"
+                              >
+                                <RefreshCw size={12} className={detailsLoading[item.instrument_key] ? "animate-spin" : ""} />
+                              </button>
+                              <button
+                                onClick={(e) => handleDeleteFromWatchlist(item.id, e)}
+                                className="action-btn-danger"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             )}
-          </div>
-        </div>
+          </section>
 
-        {/* ===== MY WATCHLIST ===== */}
-        <section className="data-section">
-          <div className="section-toolbar">
-            <h3 className="section-title">
-              My Watchlist <span className="count">({watchlist.length})</span>
-            </h3>
+          {/* ===== TOP 50 MOVERS ===== */}
+          <section className="data-section">
+            <div className="section-toolbar">
+              <h3 className="section-title">Top 50 Movers</h3>
 
-            <div className="toggle-group">
-              <button
-                onClick={() => setWatchlistTab("gainers")}
-                className={`toggle-btn ${watchlistTab === "gainers" ? "active-gain" : ""}`}
-              >
-                Gainers
-              </button>
-              <button
-                onClick={() => setWatchlistTab("losers")}
-                className={`toggle-btn ${watchlistTab === "losers" ? "active-loss" : ""}`}
-              >
-                Losers
-              </button>
-              <button
-                onClick={() => setWatchlistTab("holdings")}
-                className={`toggle-btn ${watchlistTab === "holdings" ? "active-gain" : ""}`}
-              >
-                Holdings
-              </button>
-            </div>
-
-            <div className="period-bar">
-              {periods.map((p) => (
+              <div className="toggle-group">
                 <button
-                  key={p.val}
-                  onClick={() => handleWatchlistPeriodChange(p.val)}
-                  className={`period-pill ${watchlistPeriod === p.val ? "active" : ""}`}
+                  onClick={() => setMoversTab("gainers")}
+                  className={`toggle-btn ${moversTab === "gainers" ? "active-gain" : ""}`}
                 >
-                  {p.label}
+                  Gainers
                 </button>
-              ))}
-            </div>
-          </div>
+                <button
+                  onClick={() => setMoversTab("losers")}
+                  className={`toggle-btn ${moversTab === "losers" ? "active-loss" : ""}`}
+                >
+                  Losers
+                </button>
+              </div>
 
-          {watchlistLoading ? (
-            <div className="loading-state">
-              <RefreshCw className="animate-spin" size={16} style={{ color: "var(--accent-color)" }} />
+              <div className="period-bar">
+                {periods.map((p) => (
+                  <button
+                    key={p.val}
+                    onClick={() => handleMoversPeriodChange(p.val)}
+                    className={`period-pill ${moversPeriod === p.val ? "active" : ""}`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
             </div>
-          ) : filteredWatchlist.length === 0 ? (
-            <div className="empty-state">
-              No stocks match this filter in watchlist.
-            </div>
-          ) : (
-            <div className="table-scroll-container">
-              <table className="stock-data-table">
-                <thead>
-                  <tr>
-                    <th className="col-symbol">Symbol</th>
-                    <th className="col-name">Company</th>
-                    <th className="col-ltp" style={{ textAlign: "right" }}>LTP</th>
-                    <th className="col-change" style={{ textAlign: "right" }}>Change</th>
-                    <th className="col-close" style={{ textAlign: "right" }}>Prev Close</th>
-                    <th className="col-high" style={{ textAlign: "right" }}>Day High</th>
-                    <th className="col-interest" style={{ textAlign: "center", width: "110px" }}>Sentiment (B/S)</th>
-                    <th className="col-qty" style={{ textAlign: "center", width: "120px" }}>Buy/Sell Qty</th>
-                    <th className="col-trend-signal" style={{ textAlign: "center", width: "115px" }}>
-                      2m Signal
-                      <span 
-                        title="Short-term (2 min) trend calculated from order book depth sentiment and quantity dynamics. Hover for details and reliability notice." 
-                        style={{ cursor: "help", fontSize: "10px", color: "var(--text-muted)", marginLeft: "4px" }}
-                      >
-                        ⓘ
-                      </span>
-                    </th>
-                    <th className="col-ai">AI</th>
-                    <th className="col-sector">Sector</th>
-                    <th className="col-res">Resistance</th>
-                    <th className="col-actions"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredWatchlist.map((item) => {
-                    const isActive = selectedKey === item.instrument_key && isModalOpen;
-                    const isUp = item.change >= 0;
-                    const flash = priceFlash[item.instrument_key];
 
-                    return (
-                      <tr
-                        key={item.id}
-                        onClick={() => {
-                          setSelectedKey(item.instrument_key);
-                          setIsModalOpen(true);
-                        }}
-                        className={`${isActive ? "active" : ""} ${
-                          flash === "up" ? "tick-up" : flash === "down" ? "tick-down" : ""
-                        }`}
-                      >
-                        <td>
-                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            {moversLoading ? (
+              <div className="loading-state">
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px", width: "100%", padding: "0 16px" }}>
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <div key={n} style={{ height: "36px", borderRadius: "6px", backgroundColor: "rgba(255,255,255,0.02)" }} className="shimmer" />
+                  ))}
+                </div>
+              </div>
+            ) : (moversTab === "gainers" ? gainers : losers).length === 0 ? (
+              <div className="empty-state">
+                {authState.provider === "upstox" && !authState.authenticated ? (
+                  <span>
+                    Please{" "}
+                    <button
+                      onClick={handleAuthorize}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "#3b82f6",
+                        textDecoration: "underline",
+                        cursor: "pointer",
+                        padding: 0,
+                        font: "inherit",
+                        fontWeight: "600",
+                        transition: "color 0.2s"
+                      }}
+                      onMouseOver={(e) => e.currentTarget.style.color = "#60a5fa"}
+                      onMouseOut={(e) => e.currentTarget.style.color = "#3b82f6"}
+                    >
+                      Authorize Upstox
+                    </button>{" "}
+                    to load top market movers.
+                  </span>
+                ) : (
+                  "No movers data available."
+                )}
+              </div>
+            ) : (
+              <div className="table-scroll-container">
+                <table className="stock-data-table">
+                  <thead>
+                    <tr>
+                      <th className="col-symbol">Symbol</th>
+                      <th className="col-name">Company</th>
+                      <th className="col-ltp" style={{ textAlign: "right" }}>LTP</th>
+                      <th className="col-change" style={{ textAlign: "right" }}>Change</th>
+                      <th className="col-close" style={{ textAlign: "right" }}>Prev Close</th>
+                      <th className="col-high" style={{ textAlign: "right" }}>Day High</th>
+                      <th className="col-interest" style={{ textAlign: "center", width: "110px" }}>Sentiment (B/S)</th>
+                      <th className="col-qty" style={{ textAlign: "center", width: "120px" }}>Buy/Sell Qty</th>
+                      <th className="col-trend-signal" style={{ textAlign: "center", width: "115px" }}>
+                        2m Signal
+                        <span
+                          title="Short-term (2 min) trend calculated from order book depth sentiment and quantity dynamics. Hover for details and reliability notice."
+                          style={{ cursor: "help", fontSize: "10px", color: "var(--text-muted)", marginLeft: "4px" }}
+                        >
+                          ⓘ
+                        </span>
+                      </th>
+                      <th className="col-ai">AI</th>
+                      <th className="col-sector">Sector</th>
+                      <th className="col-res">Resistance</th>
+                      <th className="col-actions"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(moversTab === "gainers" ? gainers : losers).map((item) => {
+                      const isActive = selectedKey === item.instrument_key && isModalOpen;
+                      const isUp = item.change >= 0;
+                      const inWatchlist = watchlist.some((w) => w.instrument_key === item.instrument_key);
+                      const flash = priceFlash[item.instrument_key];
+
+                      return (
+                        <tr
+                          key={item.instrument_key}
+                          onClick={() => {
+                            setSelectedKey(item.instrument_key);
+                            setIsModalOpen(true);
+                          }}
+                          className={`${isActive ? "active" : ""} ${flash === "up" ? "tick-up" : flash === "down" ? "tick-down" : ""
+                            }`}
+                        >
+                          <td>
                             <span style={{ fontWeight: 700, color: "white", fontSize: "12px" }}>
                               {item.symbol}
                             </span>
-                            <button
-                              onClick={(e) => handleToggleHolding(item.id, e)}
-                              style={{
-                                background: "none",
-                                border: "none",
-                                padding: 2,
-                                display: "inline-flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                color: item.is_holding ? "#f59e0b" : "rgba(255,255,255,0.15)",
-                                cursor: "pointer",
-                                transition: "all 0.2s"
-                              }}
-                              className={`action-btn-holdings ${item.is_holding ? "active" : ""}`}
-                              title={item.is_holding ? "Remove from holdings" : "Add to holdings"}
-                            >
-                              <Briefcase size={12} fill={item.is_holding ? "#f59e0b" : "none"} />
-                            </button>
-                          </div>
-                        </td>
-                        <td>
-                          <span className="truncate" style={{ color: "var(--text-secondary)", fontSize: "11px", display: "block" }}>
-                            {item.name}
-                          </span>
-                        </td>
-                        <td style={{ textAlign: "right", fontWeight: 700, color: "white" }}>
-                          {item.last_price > 0 ? `₹${item.last_price.toFixed(2)}` : "—"}
-                        </td>
-                        <td style={{ textAlign: "right" }}>
-                          {item.last_price > 0 && (
+                          </td>
+                          <td>
+                            <span className="truncate" style={{ color: "var(--text-secondary)", fontSize: "11px", display: "block" }}>
+                              {item.name}
+                            </span>
+                          </td>
+                          <td style={{ textAlign: "right", fontWeight: 700, color: "white" }}>
+                            ₹{item.last_price.toFixed(2)}
+                          </td>
+                          <td style={{ textAlign: "right" }}>
                             <span style={{
                               fontWeight: 700,
                               fontSize: "11px",
@@ -1422,425 +1693,152 @@ export default function App() {
                             }}>
                               {isUp ? "+" : ""}{item.change.toFixed(2)}%
                             </span>
-                          )}
-                        </td>
-                        <td style={{ textAlign: "right", color: "var(--text-secondary)", fontSize: "11px" }}>
-                          ₹{(item.close || 0).toFixed(2)}
-                        </td>
-                        <td style={{ textAlign: "right", color: "#34d399", fontWeight: 600, fontSize: "11px" }}>
-                          ₹{(item.high || 0).toFixed(2)}
-                        </td>
-                        <td 
-                          style={{ verticalAlign: "middle", padding: "8px 12px" }}
-                          onMouseEnter={(e) => handleSentimentMouseEnter(e, item)}
-                          onMouseLeave={handleSentimentMouseLeave}
-                        >
-                          {(() => {
-                            const high = item.high || 0;
-                            const low = item.low || 0;
-                            const range = high - low;
-                            const priceBuyPct = range > 0 ? ((item.last_price - low) / range) * 100 : 50;
-                            const depthBuyPct = item.depth_buy_pct !== undefined ? item.depth_buy_pct : 50;
-                            const compositeBuyPct = Math.round((priceBuyPct * 0.15) + (depthBuyPct * 0.85));
-                            const compositeSellPct = 100 - compositeBuyPct;
-                            const trend = sentimentTrend[item.instrument_key] || "flat";
-                            return (
-                              <div 
-                                style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2px", width: "90px", margin: "0 auto", cursor: "help" }}
-                              >
-                                <div style={{ display: "flex", justifyContent: "space-between", width: "100%", fontSize: "9px", fontWeight: "800" }}>
-                                  <span style={{ color: "#10b981", display: "flex", alignItems: "center", gap: "2px" }}>
-                                    {compositeBuyPct}% B
-                                    {trend === "up" && <span style={{ fontSize: "8px", color: "#34d399", fontWeight: "900" }}>▲</span>}
-                                    {trend === "down" && <span style={{ fontSize: "8px", color: "#f87171", fontWeight: "900" }}>▼</span>}
+                          </td>
+                          <td style={{ textAlign: "right", color: "var(--text-secondary)", fontSize: "11px" }}>
+                            ₹{(item.close || 0).toFixed(2)}
+                          </td>
+                          <td style={{ textAlign: "right", color: "#34d399", fontWeight: 600, fontSize: "11px" }}>
+                            ₹{(item.high || 0).toFixed(2)}
+                          </td>
+                          <td
+                            style={{ verticalAlign: "middle", padding: "8px 12px" }}
+                            onMouseEnter={(e) => handleSentimentMouseEnter(e, item)}
+                            onMouseLeave={handleSentimentMouseLeave}
+                          >
+                            {(() => {
+                              const high = item.high || 0;
+                              const low = item.low || 0;
+                              const range = high - low;
+                              const priceBuyPct = range > 0 ? ((item.last_price - low) / range) * 100 : 50;
+                              const depthBuyPct = item.depth_buy_pct !== undefined ? item.depth_buy_pct : 50;
+                              const compositeBuyPct = Math.round((priceBuyPct * 0.15) + (depthBuyPct * 0.85));
+                              const compositeSellPct = 100 - compositeBuyPct;
+                              const trend = sentimentTrend[item.instrument_key] || "flat";
+                              return (
+                                <div
+                                  style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2px", width: "90px", margin: "0 auto", cursor: "help" }}
+                                >
+                                  <div style={{ display: "flex", justifyContent: "space-between", width: "100%", fontSize: "9px", fontWeight: "800" }}>
+                                    <span style={{ color: "#10b981", display: "flex", alignItems: "center", gap: "2px" }}>
+                                      {compositeBuyPct}% B
+                                      {trend === "up" && <span style={{ fontSize: "8px", color: "#34d399", fontWeight: "900" }}>▲</span>}
+                                      {trend === "down" && <span style={{ fontSize: "8px", color: "#f87171", fontWeight: "900" }}>▼</span>}
+                                    </span>
+                                    <span style={{ color: "#ef4444" }}>{compositeSellPct}% S</span>
+                                  </div>
+                                  <div style={{ width: "100%", height: "5px", backgroundColor: "#ef4444", borderRadius: "3px", overflow: "hidden", display: "flex" }}>
+                                    <div style={{ width: `${compositeBuyPct}%`, height: "100%", backgroundColor: "#10b981" }} />
+                                  </div>
+                                </div>
+                              );
+                            })()}
+                          </td>
+                          <td style={{ textAlign: "center", padding: "8px 6px" }}>
+                            {(() => {
+                              const buyQty = item.total_buy_qty || 0;
+                              const sellQty = item.total_sell_qty || 0;
+                              const totalQty = buyQty + sellQty;
+                              if (totalQty === 0) return <span style={{ color: "var(--text-muted)", fontSize: "10px" }}>—</span>;
+                              return (
+                                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2px", width: "110px", margin: "0 auto" }}>
+                                  <div style={{ display: "flex", justifyContent: "space-between", width: "100%", fontSize: "9px", fontWeight: "700" }}>
+                                    <span style={{ color: "#10b981" }}>{formatQty(buyQty)}</span>
+                                    <span style={{ color: "#ef4444" }}>{formatQty(sellQty)}</span>
+                                  </div>
+                                  <div style={{ width: "100%", height: "4px", backgroundColor: "#ef4444", borderRadius: "2px", overflow: "hidden", display: "flex" }}>
+                                    <div style={{ width: `${(buyQty / totalQty) * 100}%`, height: "100%", backgroundColor: "#10b981" }} />
+                                  </div>
+                                  <div style={{ fontSize: "8px", color: "var(--text-muted)", fontWeight: "600" }}>
+                                    Σ {formatQty(totalQty)}
+                                  </div>
+                                </div>
+                              );
+                            })()}
+                          </td>
+                          <td style={{ textAlign: "center", padding: "8px 6px" }}>
+                            {(() => {
+                              const sig = get2MinRecommendation(item);
+                              return (
+                                <span
+                                  className={`trend-badge ${sig.badgeClass}`}
+                                  title={`${sig.explanation}\n\nReliability Warning:\nThis micro-trend is based on high-frequency order-book data. Useful for near-term momentum, but vulnerable to spoofing. Use as helper, not standalone decision.`}
+                                >
+                                  {sig.recommendation}
+                                  <span style={{ fontSize: "7px", opacity: 0.8, marginTop: "1px", fontWeight: "normal", display: "block" }}>
+                                    Conf: {sig.confidence}
                                   </span>
-                                  <span style={{ color: "#ef4444" }}>{compositeSellPct}% S</span>
-                                </div>
-                                <div style={{ width: "100%", height: "5px", backgroundColor: "#ef4444", borderRadius: "3px", overflow: "hidden", display: "flex" }}>
-                                  <div style={{ width: `${compositeBuyPct}%`, height: "100%", backgroundColor: "#10b981" }} />
-                                </div>
-                              </div>
-                            );
-                          })()}
-                        </td>
-                        <td style={{ textAlign: "center", padding: "8px 6px" }}>
-                          {(() => {
-                            const buyQty = item.total_buy_qty || 0;
-                            const sellQty = item.total_sell_qty || 0;
-                            const totalQty = buyQty + sellQty;
-                            if (totalQty === 0) return <span style={{ color: "var(--text-muted)", fontSize: "10px" }}>—</span>;
-                            return (
-                              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2px", width: "110px", margin: "0 auto" }}>
-                                <div style={{ display: "flex", justifyContent: "space-between", width: "100%", fontSize: "9px", fontWeight: "700" }}>
-                                  <span style={{ color: "#10b981" }}>{formatQty(buyQty)}</span>
-                                  <span style={{ color: "#ef4444" }}>{formatQty(sellQty)}</span>
-                                </div>
-                                <div style={{ width: "100%", height: "4px", backgroundColor: "#ef4444", borderRadius: "2px", overflow: "hidden", display: "flex" }}>
-                                  <div style={{ width: `${(buyQty / totalQty) * 100}%`, height: "100%", backgroundColor: "#10b981" }} />
-                                </div>
-                                <div style={{ fontSize: "8px", color: "var(--text-muted)", fontWeight: "600" }}>
-                                  Σ {formatQty(totalQty)}
-                                </div>
-                              </div>
-                            );
-                          })()}
-                        </td>
-                        <td style={{ textAlign: "center", padding: "8px 6px" }}>
-                          {(() => {
-                            const sig = get2MinRecommendation(item);
-                            return (
-                              <span 
-                                className={`trend-badge ${sig.badgeClass}`}
-                                title={`${sig.explanation}\n\nReliability Warning:\nThis micro-trend is based on high-frequency order-book data. Useful for near-term momentum, but vulnerable to spoofing. Use as helper, not standalone decision.`}
-                              >
-                                {sig.recommendation}
-                                <span style={{ fontSize: "7px", opacity: 0.8, marginTop: "1px", fontWeight: "normal", display: "block" }}>
-                                  Conf: {sig.confidence}
                                 </span>
+                              );
+                            })()}
+                          </td>
+                          <td>
+                            {item.analysis?.recommendation ? (
+                              <span className={`ai-badge ${item.analysis.recommendation.toLowerCase()}`}>
+                                {item.analysis.recommendation}
                               </span>
-                            );
-                          })()}
-                        </td>
-                        <td>
-                          {item.analysis?.recommendation ? (
-                            <span className={`ai-badge ${item.analysis.recommendation.toLowerCase()}`}>
-                              {item.analysis.recommendation}
+                            ) : (
+                              <span style={{ color: "var(--text-muted)", fontSize: "10px" }}>—</span>
+                            )}
+                          </td>
+                          <td style={{ color: "var(--text-muted)", fontSize: "11px" }}>
+                            {item.analysis?.sector || "—"}
+                          </td>
+                          <td
+                            style={{
+                              color: "var(--text-secondary)",
+                              fontSize: "11px",
+                              cursor: "help"
+                            }}
+                            onMouseEnter={(e) => handleMouseEnter(e, item)}
+                            onMouseLeave={handleMouseLeave}
+                          >
+                            <span style={{ borderBottom: "1px dashed rgba(255, 255, 255, 0.3)" }}>
+                              {item.analysis?.resistance_levels
+                                ? item.analysis.resistance_levels.split(",")[0]
+                                : "—"}
                             </span>
-                          ) : (
-                            <span style={{ color: "var(--text-muted)", fontSize: "10px" }}>—</span>
-                          )}
-                        </td>
-                        <td style={{ color: "var(--text-muted)", fontSize: "11px" }}>
-                          {item.analysis?.sector || "—"}
-                        </td>
-                        <td 
-                          style={{ 
-                            color: "var(--text-secondary)", 
-                            fontSize: "11px",
-                            cursor: "help"
-                          }}
-                          onMouseEnter={(e) => handleMouseEnter(e, item)}
-                          onMouseLeave={handleMouseLeave}
-                        >
-                          <span style={{ borderBottom: "1px dashed rgba(255, 255, 255, 0.3)" }}>
-                            {item.analysis?.resistance_levels
-                              ? item.analysis.resistance_levels.split(",")[0]
-                              : "—"}
-                          </span>
-                        </td>
-                        <td>
-                          <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end", alignItems: "center" }}>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleFetchNewsAndAI(item.instrument_key);
-                              }}
-                              className="action-btn-refresh"
-                              disabled={detailsLoading[item.instrument_key]}
-                              title="Refresh news & AI"
-                            >
-                              <RefreshCw size={12} className={detailsLoading[item.instrument_key] ? "animate-spin" : ""} />
-                            </button>
-                            <button
-                              onClick={(e) => handleDeleteFromWatchlist(item.id, e)}
-                              className="action-btn-danger"
-                            >
-                              <Trash2 size={12} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
-
-        {/* ===== TOP 50 MOVERS ===== */}
-        <section className="data-section">
-          <div className="section-toolbar">
-            <h3 className="section-title">Top 50 Movers</h3>
-
-            <div className="toggle-group">
-              <button
-                onClick={() => setMoversTab("gainers")}
-                className={`toggle-btn ${moversTab === "gainers" ? "active-gain" : ""}`}
-              >
-                Gainers
-              </button>
-              <button
-                onClick={() => setMoversTab("losers")}
-                className={`toggle-btn ${moversTab === "losers" ? "active-loss" : ""}`}
-              >
-                Losers
-              </button>
-            </div>
-
-            <div className="period-bar">
-              {periods.map((p) => (
-                <button
-                  key={p.val}
-                  onClick={() => handleMoversPeriodChange(p.val)}
-                  className={`period-pill ${moversPeriod === p.val ? "active" : ""}`}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {moversLoading ? (
-            <div className="loading-state">
-              <div style={{ display: "flex", flexDirection: "column", gap: "6px", width: "100%", padding: "0 16px" }}>
-                {[1, 2, 3, 4, 5].map((n) => (
-                  <div key={n} style={{ height: "36px", borderRadius: "6px", backgroundColor: "rgba(255,255,255,0.02)" }} className="shimmer" />
-                ))}
+                          </td>
+                          <td>
+                            <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end", alignItems: "center" }}>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleFetchNewsAndAI(item.instrument_key);
+                                }}
+                                className="action-btn-refresh"
+                                disabled={detailsLoading[item.instrument_key]}
+                                title="Refresh news & AI"
+                              >
+                                <RefreshCw size={12} className={detailsLoading[item.instrument_key] ? "animate-spin" : ""} />
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (!inWatchlist) {
+                                    handleAddToWatchlist({
+                                      symbol: item.symbol,
+                                      name: item.name,
+                                      key: item.instrument_key
+                                    });
+                                  }
+                                }}
+                                className={`action-btn-add ${inWatchlist ? "in-watchlist" : ""}`}
+                                disabled={inWatchlist}
+                              >
+                                {inWatchlist ? "✓" : <Plus size={12} />}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
-            </div>
-          ) : (moversTab === "gainers" ? gainers : losers).length === 0 ? (
-            <div className="empty-state">
-              {authState.provider === "upstox" && !authState.authenticated ? (
-                <span>
-                  Please{" "}
-                  <button
-                    onClick={handleAuthorize}
-                    style={{
-                      background: "none",
-                      border: "none",
-                      color: "#3b82f6",
-                      textDecoration: "underline",
-                      cursor: "pointer",
-                      padding: 0,
-                      font: "inherit",
-                      fontWeight: "600",
-                      transition: "color 0.2s"
-                    }}
-                    onMouseOver={(e) => e.currentTarget.style.color = "#60a5fa"}
-                    onMouseOut={(e) => e.currentTarget.style.color = "#3b82f6"}
-                  >
-                    Authorize Upstox
-                  </button>{" "}
-                  to load top market movers.
-                </span>
-              ) : (
-                "No movers data available."
-              )}
-            </div>
-          ) : (
-            <div className="table-scroll-container">
-              <table className="stock-data-table">
-                <thead>
-                  <tr>
-                    <th className="col-symbol">Symbol</th>
-                    <th className="col-name">Company</th>
-                    <th className="col-ltp" style={{ textAlign: "right" }}>LTP</th>
-                    <th className="col-change" style={{ textAlign: "right" }}>Change</th>
-                    <th className="col-close" style={{ textAlign: "right" }}>Prev Close</th>
-                    <th className="col-high" style={{ textAlign: "right" }}>Day High</th>
-                    <th className="col-interest" style={{ textAlign: "center", width: "110px" }}>Sentiment (B/S)</th>
-                    <th className="col-qty" style={{ textAlign: "center", width: "120px" }}>Buy/Sell Qty</th>
-                    <th className="col-trend-signal" style={{ textAlign: "center", width: "115px" }}>
-                      2m Signal
-                      <span 
-                        title="Short-term (2 min) trend calculated from order book depth sentiment and quantity dynamics. Hover for details and reliability notice." 
-                        style={{ cursor: "help", fontSize: "10px", color: "var(--text-muted)", marginLeft: "4px" }}
-                      >
-                        ⓘ
-                      </span>
-                    </th>
-                    <th className="col-ai">AI</th>
-                    <th className="col-sector">Sector</th>
-                    <th className="col-res">Resistance</th>
-                    <th className="col-actions"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(moversTab === "gainers" ? gainers : losers).map((item) => {
-                    const isActive = selectedKey === item.instrument_key && isModalOpen;
-                    const isUp = item.change >= 0;
-                    const inWatchlist = watchlist.some((w) => w.instrument_key === item.instrument_key);
-                    const flash = priceFlash[item.instrument_key];
+            )}
+          </section>
 
-                    return (
-                      <tr
-                        key={item.instrument_key}
-                        onClick={() => {
-                          setSelectedKey(item.instrument_key);
-                          setIsModalOpen(true);
-                        }}
-                        className={`${isActive ? "active" : ""} ${
-                          flash === "up" ? "tick-up" : flash === "down" ? "tick-down" : ""
-                        }`}
-                      >
-                        <td>
-                          <span style={{ fontWeight: 700, color: "white", fontSize: "12px" }}>
-                            {item.symbol}
-                          </span>
-                        </td>
-                        <td>
-                          <span className="truncate" style={{ color: "var(--text-secondary)", fontSize: "11px", display: "block" }}>
-                            {item.name}
-                          </span>
-                        </td>
-                        <td style={{ textAlign: "right", fontWeight: 700, color: "white" }}>
-                          ₹{item.last_price.toFixed(2)}
-                        </td>
-                        <td style={{ textAlign: "right" }}>
-                          <span style={{
-                            fontWeight: 700,
-                            fontSize: "11px",
-                            color: isUp ? "var(--success-color)" : "var(--danger-color)"
-                          }}>
-                            {isUp ? "+" : ""}{item.change.toFixed(2)}%
-                          </span>
-                        </td>
-                        <td style={{ textAlign: "right", color: "var(--text-secondary)", fontSize: "11px" }}>
-                          ₹{(item.close || 0).toFixed(2)}
-                        </td>
-                        <td style={{ textAlign: "right", color: "#34d399", fontWeight: 600, fontSize: "11px" }}>
-                          ₹{(item.high || 0).toFixed(2)}
-                        </td>
-                        <td 
-                          style={{ verticalAlign: "middle", padding: "8px 12px" }}
-                          onMouseEnter={(e) => handleSentimentMouseEnter(e, item)}
-                          onMouseLeave={handleSentimentMouseLeave}
-                        >
-                          {(() => {
-                            const high = item.high || 0;
-                            const low = item.low || 0;
-                            const range = high - low;
-                            const priceBuyPct = range > 0 ? ((item.last_price - low) / range) * 100 : 50;
-                            const depthBuyPct = item.depth_buy_pct !== undefined ? item.depth_buy_pct : 50;
-                            const compositeBuyPct = Math.round((priceBuyPct * 0.15) + (depthBuyPct * 0.85));
-                            const compositeSellPct = 100 - compositeBuyPct;
-                            const trend = sentimentTrend[item.instrument_key] || "flat";
-                            return (
-                              <div 
-                                style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2px", width: "90px", margin: "0 auto", cursor: "help" }}
-                              >
-                                <div style={{ display: "flex", justifyContent: "space-between", width: "100%", fontSize: "9px", fontWeight: "800" }}>
-                                  <span style={{ color: "#10b981", display: "flex", alignItems: "center", gap: "2px" }}>
-                                    {compositeBuyPct}% B
-                                    {trend === "up" && <span style={{ fontSize: "8px", color: "#34d399", fontWeight: "900" }}>▲</span>}
-                                    {trend === "down" && <span style={{ fontSize: "8px", color: "#f87171", fontWeight: "900" }}>▼</span>}
-                                  </span>
-                                  <span style={{ color: "#ef4444" }}>{compositeSellPct}% S</span>
-                                </div>
-                                <div style={{ width: "100%", height: "5px", backgroundColor: "#ef4444", borderRadius: "3px", overflow: "hidden", display: "flex" }}>
-                                  <div style={{ width: `${compositeBuyPct}%`, height: "100%", backgroundColor: "#10b981" }} />
-                                </div>
-                              </div>
-                            );
-                          })()}
-                        </td>
-                        <td style={{ textAlign: "center", padding: "8px 6px" }}>
-                          {(() => {
-                            const buyQty = item.total_buy_qty || 0;
-                            const sellQty = item.total_sell_qty || 0;
-                            const totalQty = buyQty + sellQty;
-                            if (totalQty === 0) return <span style={{ color: "var(--text-muted)", fontSize: "10px" }}>—</span>;
-                            return (
-                              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2px", width: "110px", margin: "0 auto" }}>
-                                <div style={{ display: "flex", justifyContent: "space-between", width: "100%", fontSize: "9px", fontWeight: "700" }}>
-                                  <span style={{ color: "#10b981" }}>{formatQty(buyQty)}</span>
-                                  <span style={{ color: "#ef4444" }}>{formatQty(sellQty)}</span>
-                                </div>
-                                <div style={{ width: "100%", height: "4px", backgroundColor: "#ef4444", borderRadius: "2px", overflow: "hidden", display: "flex" }}>
-                                  <div style={{ width: `${(buyQty / totalQty) * 100}%`, height: "100%", backgroundColor: "#10b981" }} />
-                                </div>
-                                <div style={{ fontSize: "8px", color: "var(--text-muted)", fontWeight: "600" }}>
-                                  Σ {formatQty(totalQty)}
-                                </div>
-                              </div>
-                            );
-                          })()}
-                        </td>
-                        <td style={{ textAlign: "center", padding: "8px 6px" }}>
-                          {(() => {
-                            const sig = get2MinRecommendation(item);
-                            return (
-                              <span 
-                                className={`trend-badge ${sig.badgeClass}`}
-                                title={`${sig.explanation}\n\nReliability Warning:\nThis micro-trend is based on high-frequency order-book data. Useful for near-term momentum, but vulnerable to spoofing. Use as helper, not standalone decision.`}
-                              >
-                                {sig.recommendation}
-                                <span style={{ fontSize: "7px", opacity: 0.8, marginTop: "1px", fontWeight: "normal", display: "block" }}>
-                                  Conf: {sig.confidence}
-                                </span>
-                              </span>
-                            );
-                          })()}
-                        </td>
-                        <td>
-                          {item.analysis?.recommendation ? (
-                            <span className={`ai-badge ${item.analysis.recommendation.toLowerCase()}`}>
-                              {item.analysis.recommendation}
-                            </span>
-                          ) : (
-                            <span style={{ color: "var(--text-muted)", fontSize: "10px" }}>—</span>
-                          )}
-                        </td>
-                        <td style={{ color: "var(--text-muted)", fontSize: "11px" }}>
-                          {item.analysis?.sector || "—"}
-                        </td>
-                        <td 
-                          style={{ 
-                            color: "var(--text-secondary)", 
-                            fontSize: "11px",
-                            cursor: "help"
-                          }}
-                          onMouseEnter={(e) => handleMouseEnter(e, item)}
-                          onMouseLeave={handleMouseLeave}
-                        >
-                          <span style={{ borderBottom: "1px dashed rgba(255, 255, 255, 0.3)" }}>
-                            {item.analysis?.resistance_levels
-                              ? item.analysis.resistance_levels.split(",")[0]
-                              : "—"}
-                          </span>
-                        </td>
-                        <td>
-                          <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end", alignItems: "center" }}>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleFetchNewsAndAI(item.instrument_key);
-                              }}
-                              className="action-btn-refresh"
-                              disabled={detailsLoading[item.instrument_key]}
-                              title="Refresh news & AI"
-                            >
-                              <RefreshCw size={12} className={detailsLoading[item.instrument_key] ? "animate-spin" : ""} />
-                            </button>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (!inWatchlist) {
-                                  handleAddToWatchlist({
-                                    symbol: item.symbol,
-                                    name: item.name,
-                                    key: item.instrument_key
-                                  });
-                                }
-                              }}
-                              className={`action-btn-add ${inWatchlist ? "in-watchlist" : ""}`}
-                              disabled={inWatchlist}
-                            >
-                              {inWatchlist ? "✓" : <Plus size={12} />}
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
-
-      </div>
+        </div>
       )}
 
       {/* Detail Popup Modal */}
@@ -1895,7 +1893,7 @@ export default function App() {
             justifyContent: "center",
             padding: "24px"
           }}
-          onClick={() => setIsModalOpen(false)}
+            onClick={() => setIsModalOpen(false)}
           >
             <div style={{
               width: "100%",
@@ -1909,7 +1907,7 @@ export default function App() {
               flexDirection: "column",
               overflow: "hidden"
             }}
-            onClick={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
             >
               {/* Modal Header */}
               <div style={{
@@ -2095,7 +2093,7 @@ export default function App() {
                           ))}
                         </div>
                       </div>
-                      
+
                       {chartLoading ? (
                         <div style={{ height: "380px", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", gap: "10px" }}>
                           <RefreshCw className="animate-spin" style={{ color: "var(--accent-color)" }} size={20} />
@@ -2227,13 +2225,12 @@ export default function App() {
                                         : detail.analysis.recommendation === "SELL"
                                           ? "var(--danger-color)"
                                           : "#f59e0b",
-                                      border: `1px solid ${
-                                        detail.analysis.recommendation === "BUY"
+                                      border: `1px solid ${detail.analysis.recommendation === "BUY"
                                           ? "rgba(16, 185, 129, 0.3)"
                                           : detail.analysis.recommendation === "SELL"
                                             ? "rgba(239, 68, 68, 0.3)"
                                             : "rgba(245, 158, 11, 0.3)"
-                                      }`
+                                        }`
                                     }}>
                                       {detail.analysis.recommendation}
                                     </span>
@@ -2291,13 +2288,12 @@ export default function App() {
                                               : rec.recommendation === "SELL"
                                                 ? "var(--danger-color)"
                                                 : "#f59e0b",
-                                            border: `1px solid ${
-                                              rec.recommendation === "BUY"
+                                            border: `1px solid ${rec.recommendation === "BUY"
                                                 ? "rgba(16, 185, 129, 0.2)"
                                                 : rec.recommendation === "SELL"
                                                   ? "rgba(239, 68, 68, 0.2)"
                                                   : "rgba(245, 158, 11, 0.2)"
-                                            }`
+                                              }`
                                           }}>
                                             {rec.recommendation}
                                           </span>
@@ -2446,20 +2442,20 @@ export default function App() {
                               </div>
                               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "4px" }}>
                                 <span style={{ fontSize: "18px", fontWeight: "800", color: "#10b981" }}>
-                                  {detail?.quote?.depth_buy_pct !== undefined ? detail.quote.depth_buy_pct : 50}% 
+                                  {detail?.quote?.depth_buy_pct !== undefined ? detail.quote.depth_buy_pct : 50}%
                                   <span style={{ fontSize: "10px", fontWeight: "700", color: "var(--text-muted)", marginLeft: "4px" }}>BIDS</span>
                                 </span>
                                 <span style={{ fontSize: "18px", fontWeight: "800", color: "#ef4444" }}>
-                                  {detail?.quote?.depth_sell_pct !== undefined ? detail.quote.depth_sell_pct : 50}% 
+                                  {detail?.quote?.depth_sell_pct !== undefined ? detail.quote.depth_sell_pct : 50}%
                                   <span style={{ fontSize: "10px", fontWeight: "700", color: "var(--text-muted)", marginRight: "4px" }}>ASKS</span>
                                 </span>
                               </div>
                               <div style={{ width: "100%", height: "8px", backgroundColor: "rgba(239, 68, 68, 0.3)", borderRadius: "4px", overflow: "hidden", display: "flex" }}>
-                                <div style={{ 
-                                  width: `${detail?.quote?.depth_buy_pct !== undefined ? detail.quote.depth_buy_pct : 50}%`, 
-                                  height: "100%", 
-                                  backgroundColor: "#10b981", 
-                                  boxShadow: "0 0 8px #10b981" 
+                                <div style={{
+                                  width: `${detail?.quote?.depth_buy_pct !== undefined ? detail.quote.depth_buy_pct : 50}%`,
+                                  height: "100%",
+                                  backgroundColor: "#10b981",
+                                  boxShadow: "0 0 8px #10b981"
                                 }} />
                               </div>
                             </div>
@@ -2522,13 +2518,13 @@ export default function App() {
                                           buyLevels.map((bid, idx) => {
                                             const pct = Math.min(100, Math.round(((bid.quantity || 0) / maxQty) * 100));
                                             return (
-                                              <div 
-                                                key={idx} 
-                                                style={{ 
-                                                  display: "grid", 
-                                                  gridTemplateColumns: "1fr 1.2fr 0.6fr", 
-                                                  padding: "5px 6px", 
-                                                  fontSize: "10.5px", 
+                                              <div
+                                                key={idx}
+                                                style={{
+                                                  display: "grid",
+                                                  gridTemplateColumns: "1fr 1.2fr 0.6fr",
+                                                  padding: "5px 6px",
+                                                  fontSize: "10.5px",
                                                   borderRadius: "4px",
                                                   background: `linear-gradient(to right, rgba(16, 185, 129, 0.08) ${pct}%, transparent ${pct}%)`,
                                                   border: "1px solid rgba(255,255,255,0.01)"
@@ -2560,13 +2556,13 @@ export default function App() {
                                           sellLevels.map((ask, idx) => {
                                             const pct = Math.min(100, Math.round(((ask.quantity || 0) / maxQty) * 100));
                                             return (
-                                              <div 
-                                                key={idx} 
-                                                style={{ 
-                                                  display: "grid", 
-                                                  gridTemplateColumns: "1fr 1.2fr 0.6fr", 
-                                                  padding: "5px 6px", 
-                                                  fontSize: "10.5px", 
+                                              <div
+                                                key={idx}
+                                                style={{
+                                                  display: "grid",
+                                                  gridTemplateColumns: "1fr 1.2fr 0.6fr",
+                                                  padding: "5px 6px",
+                                                  fontSize: "10.5px",
                                                   borderRadius: "4px",
                                                   background: `linear-gradient(to left, rgba(239, 68, 68, 0.08) ${pct}%, transparent ${pct}%)`,
                                                   border: "1px solid rgba(255,255,255,0.01)"
@@ -2585,7 +2581,7 @@ export default function App() {
                                 </>
                               );
                             })()}
-                            
+
                             <p style={{ margin: 0, fontSize: "9px", color: "var(--text-muted)", textAlign: "center", fontStyle: "italic" }}>
                               * Real-time bid/ask snapshots weighted by proximity to Last Traded Price (LTP).
                             </p>
@@ -2770,13 +2766,12 @@ export default function App() {
                           : activeAnalysis.recommendation === "SELL"
                             ? "var(--danger-color)"
                             : "#f59e0b",
-                        border: `1px solid ${
-                          activeAnalysis.recommendation === "BUY"
+                        border: `1px solid ${activeAnalysis.recommendation === "BUY"
                             ? "rgba(16, 185, 129, 0.3)"
                             : activeAnalysis.recommendation === "SELL"
                               ? "rgba(239, 68, 68, 0.3)"
                               : "rgba(245, 158, 11, 0.3)"
-                        }`
+                          }`
                       }}>
                         {activeAnalysis.recommendation}
                       </span>
@@ -2835,13 +2830,12 @@ export default function App() {
                                 : rec.recommendation === "SELL"
                                   ? "var(--danger-color)"
                                   : "#f59e0b",
-                              border: `1px solid ${
-                                rec.recommendation === "BUY"
+                              border: `1px solid ${rec.recommendation === "BUY"
                                   ? "rgba(16, 185, 129, 0.2)"
                                   : rec.recommendation === "SELL"
                                     ? "rgba(239, 68, 68, 0.2)"
                                     : "rgba(245, 158, 11, 0.2)"
-                              }`
+                                }`
                             }}>
                               {rec.recommendation}
                             </span>
@@ -2862,7 +2856,7 @@ export default function App() {
       {hoveredSentimentKey && (() => {
         const activeHoverItem = watchlist.find(w => w.instrument_key === hoveredSentimentKey.key)
           || [...gainers, ...losers].find(m => m.instrument_key === hoveredSentimentKey.key);
-        
+
         if (!activeHoverItem) return null;
 
         const high = activeHoverItem.high || 0;
@@ -2883,7 +2877,7 @@ export default function App() {
               </div>
             );
           }
-          
+
           const displayHist = hist.length === 1 ? [hist[0], hist[0]] : hist;
           const width = 328;
           const height = 40;
@@ -2892,7 +2886,7 @@ export default function App() {
           const maxX = displayHist.length - 1;
           const minY = 0;
           const maxY = 100;
-          
+
           const points = displayHist.map((val, index) => {
             const x = padding + (index / maxX) * (width - 2 * padding);
             const y = height - (padding + (val / maxY) * (height - 2 * padding));
@@ -2901,16 +2895,16 @@ export default function App() {
 
           const isUp = displayHist[displayHist.length - 1] >= displayHist[0];
           const strokeColor = isUp ? "#10b981" : "#ef4444";
-          
+
           return (
             <svg width={width} height={height} style={{ overflow: "visible" }}>
-              <line 
-                x1={0} 
-                y1={height / 2} 
-                x2={width} 
-                y2={height / 2} 
-                stroke="rgba(255,255,255,0.06)" 
-                strokeDasharray="3,3" 
+              <line
+                x1={0}
+                y1={height / 2}
+                x2={width}
+                y2={height / 2}
+                stroke="rgba(255,255,255,0.06)"
+                strokeDasharray="3,3"
               />
               <polyline
                 fill="none"
