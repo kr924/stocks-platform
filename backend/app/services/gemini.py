@@ -52,10 +52,11 @@ def call_ollama(prompt: str, base_url: str = "http://localhost:11434", model_nam
         }
     }
     
-    # Try specified base_url first, then Docker host gateway candidate URLs if localhost is refused
+    # Try specified base_url first, then Docker host gateway candidate URLs
     candidate_urls = [base_url]
-    if "localhost" in base_url or "127.0.0.1" in base_url:
-        candidate_urls.extend(["http://172.17.0.1:11434", "http://host.docker.internal:11434"])
+    for alt in ["http://172.17.0.1:11434", "http://host.docker.internal:11434", "http://127.0.0.1:11434"]:
+        if alt not in candidate_urls:
+            candidate_urls.append(alt)
         
     last_err = None
     for b_url in candidate_urls:
