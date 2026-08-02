@@ -68,8 +68,8 @@ curl -fsSL https://ollama.com/install.sh | sh
 # 2. Enable Ollama service auto-restart on boot
 sudo systemctl enable --now ollama
 
-# 3. Pull/Run the Qwen 2.5 7B financial model
-ollama run qwen2.5:7b
+# 3. Pull/Run the Qwen model
+ollama run qwen3-vl:4b
 ```
 
 ---
@@ -94,7 +94,7 @@ GEMINI_API_KEY=YOUR_GEMINI_API_KEY
 GROQ_API_KEY=YOUR_GROQ_API_KEY
 GROQ_MODEL=llama-3.3-70b-versatile
 OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=qwen2.5:3b
+OLLAMA_MODEL=qwen3-vl:4b
 
 FRONTEND_URL=https://mesh-deferred-legendary-ellis.trycloudflare.com
 DATABASE_URL=sqlite:////app/backend/market_tracker.db
