@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_, func, desc, case
 
 from app.database import (
-    get_db, MarketEvent, NewsItem, NewsStory, CompanyFiling, AIAlert
+    get_db, MarketEvent, NewsItem, NewsStory, CompanyFiling, AIAlert, SystemSetting
 )
 from app.services.deduplication import to_iso_utc
 
@@ -746,7 +746,35 @@ def reload_config():
 
 _1Y_RETURNS_CACHE = {}
 _1Y_RETURNS_CACHE_TIME = 0.0
-_1Y_RETURNS_CACHE_TTL = 3600.0  # 1-hour cache TTL
+_1Y_RETURNS_CACHE_TTL = 86400.0  # 24-hour TTL (runs strictly ONCE PER DAY)
+
+
+def _load_1y_returns_cache_from_db(db: Session):
+    global _1Y_RETURNS_CACHE, _1Y_RETURNS_CACHE_TIME
+    try:
+        setting = db.query(SystemSetting).filter(SystemSetting.key == "1y_returns_cache_24h").first()
+        if setting and setting.value:
+            data = json.loads(setting.value)
+            _1Y_RETURNS_CACHE = data.get("cache", {})
+            _1Y_RETURNS_CACHE_TIME = data.get("timestamp", 0.0)
+    except Exception:
+        pass
+
+
+def _save_1y_returns_cache_to_db(db: Session):
+    global _1Y_RETURNS_CACHE, _1Y_RETURNS_CACHE_TIME
+    try:
+        val_str = json.dumps({"cache": _1Y_RETURNS_CACHE, "timestamp": _1Y_RETURNS_CACHE_TIME})
+        setting = db.query(SystemSetting).filter(SystemSetting.key == "1y_returns_cache_24h").first()
+        if not setting:
+            setting = SystemSetting(key="1y_returns_cache_24h", value=val_str)
+            db.add(setting)
+        else:
+            setting.value = val_str
+        db.commit()
+    except Exception:
+        db.rollback()
+
 
 @router.get("/upcoming-earnings")
 def get_upcoming_earnings(db: Session = Depends(get_db)):
@@ -828,14 +856,17 @@ def get_upcoming_earnings(db: Session = Depends(get_db)):
 
     upcoming.sort(key=lambda x: x["date"])
 
-    # Calculate / Attach 1-year returns % using Real Market Chart API with 1-hour cache
+    # Calculate / Attach 1-year returns % using Real Market Chart API (ONCE A DAY 24-HOUR CACHE)
     global _1Y_RETURNS_CACHE, _1Y_RETURNS_CACHE_TIME
     now_ts = time.time()
+
+    if not _1Y_RETURNS_CACHE:
+        _load_1y_returns_cache_from_db(db)
 
     unique_symbols = list({item["symbol"] for item in upcoming})
     missing_symbols = [s for s in unique_symbols if s not in _1Y_RETURNS_CACHE]
 
-    # Refresh cache if expired (1 hour) or missing symbols exist
+    # Refresh cache strictly if 24 hours have elapsed or new symbols exist
     if (now_ts - _1Y_RETURNS_CACHE_TIME) > _1Y_RETURNS_CACHE_TTL or missing_symbols:
         from concurrent.futures import ThreadPoolExecutor, as_completed
         import requests
@@ -872,11 +903,20 @@ def get_upcoming_earnings(db: Session = Depends(get_db)):
                     except Exception:
                         pass
         _1Y_RETURNS_CACHE_TIME = now_ts
+        _save_1y_returns_cache_to_db(db)
 
     for item in upcoming:
         ret_val = _1Y_RETURNS_CACHE.get(item["symbol"], "N/A")
         item["return_1y"] = ret_val
         item["returns_1y"] = ret_val
+        try:
+            if ret_val != "N/A":
+                num_str = ret_val.replace("%", "").replace("+", "").strip()
+                item["return_1y_val"] = float(num_str)
+            else:
+                item["return_1y_val"] = -999.0
+        except Exception:
+            item["return_1y_val"] = -999.0
 
     return upcoming
 

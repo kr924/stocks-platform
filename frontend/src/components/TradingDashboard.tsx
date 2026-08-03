@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   Zap,
   ShieldAlert,
@@ -159,6 +159,43 @@ export function TradingDashboard() {
   // Stock search state for form
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searching, setSearching] = useState(false);
+
+  // Upcoming Earnings Sorting, Search, and Filtering state
+  const [earningsSortBy, setEarningsSortBy] = useState<"date" | "return_desc" | "return_asc">("date");
+  const [earningsFilter, setEarningsFilter] = useState<"all" | "positive" | "top">("all");
+  const [earningsSearch, setEarningsSearch] = useState<string>("");
+
+  const processedUpcomingEarnings = useMemo(() => {
+    let list = [...upcomingEarnings];
+
+    // Symbol / Text Search
+    if (earningsSearch.trim()) {
+      const q = earningsSearch.toLowerCase().trim();
+      list = list.filter(item =>
+        item.symbol.toLowerCase().includes(q) ||
+        (item.purpose && item.purpose.toLowerCase().includes(q))
+      );
+    }
+
+    // Quick Pill Filter
+    if (earningsFilter === "positive") {
+      list = list.filter(item => (item.return_1y_val !== undefined && item.return_1y_val > -900 ? item.return_1y_val > 0 : (item.return_1y || "").startsWith("+")));
+    } else if (earningsFilter === "top") {
+      list = list.filter(item => (item.return_1y_val !== undefined ? item.return_1y_val >= 20.0 : false));
+    }
+
+    // Sort
+    if (earningsSortBy === "return_desc") {
+      list.sort((a, b) => (b.return_1y_val ?? -999) - (a.return_1y_val ?? -999));
+    } else if (earningsSortBy === "return_asc") {
+      list.sort((a, b) => (a.return_1y_val ?? 999) - (b.return_1y_val ?? 999));
+    } else {
+      // Date ascending (nearest meeting first)
+      list.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    }
+
+    return list;
+  }, [upcomingEarnings, earningsSortBy, earningsFilter, earningsSearch]);
 
   // Fetch initial & fast status data
   const fetchData = async () => {
@@ -635,32 +672,131 @@ export function TradingDashboard() {
         padding: "18px",
         marginBottom: "20px"
       }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "14px" }}>
-          <h3 style={{ fontSize: "15px", fontWeight: "700", color: "#60a5fa", display: "flex", alignItems: "center", gap: "8px" }}>
-            <Calendar size={18} /> 📅 Upcoming Board Meetings & Earnings Calendar
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "14px" }}>
+          <h3 style={{ fontSize: "15px", fontWeight: "700", color: "#60a5fa", display: "flex", alignItems: "center", gap: "8px", margin: 0 }}>
+            <Calendar size={18} /> 📅 Upcoming Board Meetings & Earnings Calendar ({processedUpcomingEarnings.length})
           </h3>
           <span style={{ fontSize: "11px", color: "#94a3b8", background: "rgba(59,130,246,0.1)", padding: "4px 10px", borderRadius: "20px" }}>
             Click stock to configure auto-trade
           </span>
         </div>
 
+        {/* Toolbar: Search, Filter, & Sort Controls */}
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "14px", backgroundColor: "rgba(15, 23, 42, 0.5)", padding: "10px 12px", borderRadius: "10px", border: "1px solid rgba(255, 255, 255, 0.05)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+            {/* Search Input */}
+            <input
+              type="text"
+              placeholder="Search symbol..."
+              value={earningsSearch}
+              onChange={(e) => setEarningsSearch(e.target.value)}
+              style={{
+                backgroundColor: "rgba(15, 23, 42, 0.9)",
+                border: "1px solid rgba(59, 130, 246, 0.3)",
+                borderRadius: "8px",
+                color: "#f8fafc",
+                fontSize: "12px",
+                padding: "6px 12px",
+                width: "140px",
+                outline: "none"
+              }}
+            />
+
+            {/* Quick Filter Pills */}
+            <button
+              onClick={() => setEarningsFilter("all")}
+              style={{
+                backgroundColor: earningsFilter === "all" ? "rgba(59, 130, 246, 0.25)" : "rgba(15, 23, 42, 0.6)",
+                border: earningsFilter === "all" ? "1px solid #3b82f6" : "1px solid rgba(255, 255, 255, 0.1)",
+                color: earningsFilter === "all" ? "#60a5fa" : "#94a3b8",
+                fontSize: "11px",
+                fontWeight: "700",
+                padding: "5px 10px",
+                borderRadius: "6px",
+                cursor: "pointer",
+                transition: "all 0.15s"
+              }}
+            >
+              All ({upcomingEarnings.length})
+            </button>
+
+            <button
+              onClick={() => setEarningsFilter("positive")}
+              style={{
+                backgroundColor: earningsFilter === "positive" ? "rgba(52, 211, 153, 0.2)" : "rgba(15, 23, 42, 0.6)",
+                border: earningsFilter === "positive" ? "1px solid #34d399" : "1px solid rgba(255, 255, 255, 0.1)",
+                color: earningsFilter === "positive" ? "#34d399" : "#94a3b8",
+                fontSize: "11px",
+                fontWeight: "700",
+                padding: "5px 10px",
+                borderRadius: "6px",
+                cursor: "pointer",
+                transition: "all 0.15s"
+              }}
+            >
+              📈 Positive 1Y
+            </button>
+
+            <button
+              onClick={() => setEarningsFilter("top")}
+              style={{
+                backgroundColor: earningsFilter === "top" ? "rgba(168, 85, 247, 0.2)" : "rgba(15, 23, 42, 0.6)",
+                border: earningsFilter === "top" ? "1px solid #c084fc" : "1px solid rgba(255, 255, 255, 0.1)",
+                color: earningsFilter === "top" ? "#c084fc" : "#94a3b8",
+                fontSize: "11px",
+                fontWeight: "700",
+                padding: "5px 10px",
+                borderRadius: "6px",
+                cursor: "pointer",
+                transition: "all 0.15s"
+              }}
+            >
+              🚀 Gainers &gt;20%
+            </button>
+          </div>
+
+          {/* Sort By Dropdown */}
+          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <span style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "600" }}>Sort By:</span>
+            <select
+              value={earningsSortBy}
+              onChange={(e: any) => setEarningsSortBy(e.target.value)}
+              style={{
+                backgroundColor: "#0f172a",
+                border: "1px solid rgba(59, 130, 246, 0.3)",
+                color: "#f8fafc",
+                fontSize: "11px",
+                fontWeight: "700",
+                padding: "5px 10px",
+                borderRadius: "8px",
+                cursor: "pointer",
+                outline: "none"
+              }}
+            >
+              <option value="date">📅 Meeting Date (Earliest First)</option>
+              <option value="return_desc">📈 1Y Return % (Highest Gainers First)</option>
+              <option value="return_asc">📉 1Y Return % (Lowest / Worst First)</option>
+            </select>
+          </div>
+        </div>
+
         {loading && upcomingEarnings.length === 0 ? (
           <div style={{ color: "#60a5fa", fontSize: "12px", textAlign: "center", padding: "20px", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
             <RefreshCw size={14} className="animate-spin" /> Loading upcoming board meetings calendar...
           </div>
-        ) : upcomingEarnings.length === 0 ? (
+        ) : processedUpcomingEarnings.length === 0 ? (
           <div style={{ color: "#64748b", fontSize: "12px", textAlign: "center", padding: "16px" }}>
-            No upcoming board meetings detected in system feed. Run scrapers or manual poll to discover.
+            No board meetings match the selected filter/search.
           </div>
         ) : (
           <div style={{
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+            gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))",
             gap: "12px",
-            maxHeight: "220px",
+            maxHeight: "260px",
             overflowY: "auto"
           }}>
-            {upcomingEarnings.map((item) => {
+            {processedUpcomingEarnings.map((item) => {
               const ret1y = item.return_1y || item.returns_1y || "N/A";
               const isPos = ret1y.startsWith("+");
               const isNeg = ret1y.startsWith("-");
