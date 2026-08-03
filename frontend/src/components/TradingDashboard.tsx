@@ -252,6 +252,18 @@ export function TradingDashboard() {
     }
   };
 
+  const handleClearAiLogs = async () => {
+    if (!window.confirm("Are you sure you want to clear AI analysis logs and reset to latest?")) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/trading/ai-logs/clear`, { method: "DELETE" });
+      if (res.ok) {
+        setAiLogs([]);
+      }
+    } catch (err) {
+      console.error("Failed to clear AI logs:", err);
+    }
+  };
+
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     setSavingSettings(true);
@@ -1495,30 +1507,68 @@ export function TradingDashboard() {
                 No broker orders executed yet.
               </div>
             ) : (
-              orders.map((o) => (
-                <div key={o.id} style={{
-                  padding: "10px 12px",
-                  borderRadius: "8px",
-                  backgroundColor: "#0d131f",
-                  border: "1px solid rgba(255, 255, 255, 0.05)",
-                  marginBottom: "8px",
-                  fontSize: "12px"
-                }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "700", color: "#f8fafc" }}>
-                    <span>{o.side === "BUY" ? "🟢 BUY" : "🔴 SELL"} {o.quantity}x {o.symbol}</span>
-                    <span style={{ color: o.status === "filled" || o.status === "placed" ? "#34d399" : "#f87171" }}>
-                      {o.status.toUpperCase()}
-                    </span>
+              orders.map((o) => {
+                const logText = o.error_message 
+                  ? `[EXECUTION LOG]: ${o.error_message}` 
+                  : `[EXECUTION LOG]: Order ${o.status.toUpperCase()} (${o.side} ${o.quantity}x @ ${o.price || 'Market'}) via ${o.broker.toUpperCase()} at ${o.created_at ? new Date(o.created_at).toLocaleTimeString() : ''}`;
+
+                return (
+                  <div
+                    key={o.id}
+                    title={logText}
+                    onClick={() => {
+                      const el = document.getElementById(`ai-card-${o.symbol.toUpperCase()}`);
+                      if (el) {
+                        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        el.style.border = "1px solid #c084fc";
+                        el.style.boxShadow = "0 0 20px rgba(168, 85, 247, 0.8)";
+                        setTimeout(() => {
+                          el.style.border = "1px solid rgba(255, 255, 255, 0.08)";
+                          el.style.boxShadow = "";
+                        }, 2500);
+                      }
+                    }}
+                    style={{
+                      padding: "10px 12px",
+                      borderRadius: "8px",
+                      backgroundColor: "#0d131f",
+                      border: "1px solid rgba(255, 255, 255, 0.08)",
+                      marginBottom: "8px",
+                      fontSize: "12px",
+                      cursor: "pointer",
+                      transition: "all 0.2s"
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.borderColor = "rgba(59, 130, 246, 0.5)")}
+                    onMouseLeave={(e) => (e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.08)")}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span style={{ fontSize: "14px", fontWeight: "800", color: "#f8fafc" }}>#{o.symbol}</span>
+                      <span style={{
+                        fontSize: "10px",
+                        fontWeight: "700",
+                        padding: "2px 8px",
+                        borderRadius: "4px",
+                        backgroundColor: o.status === "filled" || o.status === "placed" ? "rgba(52, 211, 153, 0.15)" : "rgba(248, 113, 113, 0.15)",
+                        color: o.status === "filled" || o.status === "placed" ? "#34d399" : "#f87171",
+                        border: o.status === "filled" || o.status === "placed" ? "1px solid rgba(52, 211, 153, 0.3)" : "1px solid rgba(248, 113, 113, 0.3)"
+                      }}>
+                        {o.status.toUpperCase()}
+                      </span>
+                    </div>
+
+                    <div style={{ fontSize: "11px", color: "#94a3b8", marginTop: "4px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span>{o.side} {o.quantity}x @ {o.price ? `₹${o.price}` : "Market"} ({o.broker.toUpperCase()})</span>
+                      <span style={{ color: "#64748b", fontSize: "10px" }}>
+                        {o.created_at ? new Date(o.created_at).toLocaleTimeString() : ""}
+                      </span>
+                    </div>
+
+                    <div style={{ fontSize: "10px", color: "#60a5fa", marginTop: "4px", display: "flex", alignItems: "center", gap: "4px", fontWeight: "600" }}>
+                      <ChevronRight size={12} /> Hover for execution log | Click to view AI analysis
+                    </div>
                   </div>
-                  <div style={{ fontSize: "11px", color: "#94a3b8", marginTop: "4px", display: "flex", justifyContent: "space-between" }}>
-                    <span>Price: ₹{o.price || "Market"} | Broker: {o.broker.toUpperCase()}</span>
-                    <span>{o.created_at ? new Date(o.created_at).toLocaleTimeString() : ""}</span>
-                  </div>
-                  {o.broker_order_id && (
-                    <div style={{ fontSize: "10px", color: "#64748b", marginTop: "2px" }}>Order ID: {o.broker_order_id}</div>
-                  )}
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>
@@ -1534,9 +1584,26 @@ export function TradingDashboard() {
             <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <Cpu size={16} className="text-purple-400" /> 2-Step AI Earnings Analysis ({aiLogs.length})
             </span>
-            <span style={{ fontSize: "10px", color: "#c084fc", background: "rgba(168,85,247,0.1)", padding: "2px 8px", borderRadius: "12px" }}>
-              Auto-Triggered Post BUY Order
-            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <button
+                onClick={handleClearAiLogs}
+                style={{
+                  fontSize: "11px",
+                  color: "#f87171",
+                  background: "rgba(239, 68, 68, 0.12)",
+                  border: "1px solid rgba(239, 68, 68, 0.25)",
+                  padding: "3px 8px",
+                  borderRadius: "6px",
+                  cursor: "pointer",
+                  fontWeight: "700"
+                }}
+              >
+                🧹 Clear / Reset Logs
+              </button>
+              <span style={{ fontSize: "10px", color: "#c084fc", background: "rgba(168,85,247,0.1)", padding: "2px 8px", borderRadius: "12px" }}>
+                Auto-Triggered
+              </span>
+            </div>
           </h3>
           <div style={{ maxHeight: "420px", overflowY: "auto" }}>
             {aiLogs.length === 0 ? (
@@ -1558,7 +1625,7 @@ export function TradingDashboard() {
                 const isMiss = suggestion.includes("MISS") || suggestion.includes("SELL") || log.ai_sentiment === "negative";
 
                 return (
-                  <div key={log.id} style={{
+                  <div key={log.id} id={`ai-card-${(log.symbol || "").toUpperCase()}`} style={{
                     padding: "14px",
                     borderRadius: "10px",
                     backgroundColor: "#0d131f",

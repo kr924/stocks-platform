@@ -18,7 +18,7 @@ IST = timezone(timedelta(hours=5, minutes=30))
 # Module-level state
 _poller_task: Optional[asyncio.Task] = None
 _poller_running = False
-_poll_interval = 1.0  # seconds (configurable)
+_poll_interval = 0.3  # 300ms ultra-high speed polling for armed targets
 _last_poll_status: Dict = {
     "running": False,
     "armed_count": 0,
@@ -151,8 +151,8 @@ def _check_match(announcement: dict, armed_configs: list) -> Optional[dict]:
     return None
 
 
-def _is_recent_announcement(announcement: dict, max_age_minutes: int = 720) -> bool:
-    """Check if the announcement is recent (within max_age_minutes, default 12 hours)."""
+def _is_recent_announcement(announcement: dict, max_age_minutes: int = 30) -> bool:
+    """Check if the announcement is recent (within max_age_minutes, default 30 min)."""
     date_str = str(
         announcement.get("an_dt") or
         announcement.get("bcastDate") or
@@ -174,16 +174,16 @@ def _is_recent_announcement(announcement: dict, max_age_minutes: int = 720) -> b
         return True
 
 
-_offmarket_interval_minutes = 5.0  # Reduced offmarket poll interval to 5 min
+_offmarket_interval_minutes = 45.0
 
 
 def _is_high_speed_polling_hours() -> bool:
-    """Check if current time is Monday-Friday 9:00 AM to 6:30 PM IST (covers evening earnings disclosures)."""
+    """Check if current time is Monday-Friday 9:00 AM to 3:30 PM IST."""
     now = datetime.now(IST)
     if now.weekday() > 4:  # Saturday = 5, Sunday = 6
         return False
     start_time = now.replace(hour=9, minute=0, second=0, microsecond=0)
-    end_time = now.replace(hour=18, minute=30, second=0, microsecond=0)
+    end_time = now.replace(hour=15, minute=30, second=0, microsecond=0)
     return start_time <= now <= end_time
 
 
@@ -393,18 +393,11 @@ async def _execute_trade(config: dict, announcement: dict):
         )
         db.add(order)
 
-        # Update TradeConfig status
+        # Auto-delete TradeConfig so completed arm automatically vanishes from target table
         tc = db.query(TradeConfig).filter(TradeConfig.id == config_id).first()
         if tc:
-            if result.success:
-                tc.status = "bought"
-                tc.buy_price = result.price
-                tc.bought_at = datetime.utcnow()
-                logger.info(f"✅ [TRADE BOUGHT]: {symbol} {config['quantity']}x @ {result.price}")
-            else:
-                tc.status = "failed"
-                tc.notes = f"Order failed: {result.message}"
-                logger.error(f"❌ [TRADE FAILED]: {symbol} → {result.message}")
+            logger.info(f"🗑️ [AUTO-DELETE TARGET CONFIG]: Removing #{symbol} (Config ID {config_id}) after execution complete.")
+            db.delete(tc)
 
         db.commit()
     except Exception as e:

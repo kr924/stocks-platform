@@ -462,6 +462,18 @@ def list_ai_logs(
     }
 
 
+@router.delete("/ai-logs/clear")
+def clear_ai_logs(db: Session = Depends(get_db)):
+    """Clear all AI analysis logs to reset the 2-Step AI Earnings Analysis dashboard."""
+    try:
+        num_deleted = db.query(TradeAILog).delete()
+        db.commit()
+        return {"message": "AI analysis logs cleared successfully", "deleted_count": num_deleted}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ─── Poller & Monitor Status ────────────────────────────────────────────────
 
 @router.get("/poller/status")
