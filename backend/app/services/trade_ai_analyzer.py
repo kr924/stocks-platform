@@ -173,11 +173,19 @@ Respond STRICTLY in JSON format with the following keys:
     # --- FLOW 1: Custom REST API ---
     try:
         logger.info(f"🔬 [AUTO AI FLOW 1]: Posting to Custom REST API: {custom_url} for #{symbol}")
+        print(f"🔬 [AUTO AI FLOW 1]: Posting to Custom REST API: {custom_url} for #{symbol}")
+        
+        payload = {"prompt": prompt}
+        if "11434" in custom_url or "ollama" in custom_url.lower():
+            ollama_model = os.getenv("OLLAMA_MODEL", "qwen3-vl:4b")
+            payload["model"] = ollama_model
+            payload["stream"] = False
+
         resp = requests.post(
             custom_url,
-            json={"prompt": prompt},
+            json=payload,
             headers={"Content-Type": "application/json"},
-            timeout=20
+            timeout=25
         )
         if resp.status_code == 200:
             resp_data = resp.json()
@@ -188,11 +196,14 @@ Respond STRICTLY in JSON format with the following keys:
             used_flow = "custom_rest_api"
             used_provider = f"Custom REST API ({custom_url})"
             logger.info(f"✅ [AUTO AI FLOW 1 SUCCESS]: Custom REST API responded for #{symbol}")
+            print(f"✅ [AUTO AI FLOW 1 SUCCESS]: Custom REST API responded for #{symbol}")
         else:
-            logger.warning(f"⚠️ [AUTO AI FLOW 1 FAILED]: Status {resp.status_code}. Triggering OpenRouter fallback.")
+            logger.warning(f"⚠️ [AUTO AI FLOW 1 FAILED]: Status {resp.status_code} ({resp.text[:100]}). Triggering OpenRouter fallback.")
+            print(f"⚠️ [AUTO AI FLOW 1 FAILED]: Status {resp.status_code}. Triggering OpenRouter fallback.")
             result_raw = None
     except Exception as e:
         logger.warning(f"⚠️ [AUTO AI FLOW 1 ERROR]: {e}. Falling back to OpenRouter Premium.")
+        print(f"⚠️ [AUTO AI FLOW 1 ERROR]: {e}. Falling back to OpenRouter Premium.")
         result_raw = None
 
     # --- FLOW 2: OpenRouter Premium Fallback ---
@@ -201,8 +212,10 @@ Respond STRICTLY in JSON format with the following keys:
         used_provider = f"OpenRouter Premium ({openrouter_model})"
         try:
             logger.info(f"🔬 [AUTO AI FLOW 2]: Calling Premium OpenRouter ({openrouter_model}) for #{symbol}")
+            print(f"🔬 [AUTO AI FLOW 2]: Calling Premium OpenRouter ({openrouter_model}) for #{symbol}")
             if not openrouter_key:
                 logger.error("❌ [AUTO AI FLOW 2]: OpenRouter API Key is missing.")
+                print("❌ [AUTO AI FLOW 2]: OpenRouter API Key is missing.")
             else:
                 or_res = call_openrouter(prompt, openrouter_key, model=openrouter_model)
                 if or_res and "analyses" in or_res and or_res["analyses"]:
@@ -210,8 +223,10 @@ Respond STRICTLY in JSON format with the following keys:
                 elif or_res:
                     result_raw = json.dumps(or_res)
                 logger.info(f"✅ [AUTO AI FLOW 2 SUCCESS]: OpenRouter ({openrouter_model}) responded for #{symbol}")
+                print(f"✅ [AUTO AI FLOW 2 SUCCESS]: OpenRouter ({openrouter_model}) responded for #{symbol}")
         except Exception as e:
             logger.error(f"❌ [AUTO AI FLOW 2 ERROR]: OpenRouter call failed: {e}")
+            print(f"❌ [AUTO AI FLOW 2 ERROR]: OpenRouter call failed: {e}")
 
     # --- Parse Result ---
     parsed_json = {}
