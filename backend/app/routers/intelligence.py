@@ -146,8 +146,12 @@ def get_intelligence_feed(
         # Category 4: NSE/BSE Auto-Skipped
         events_q = events_q.filter(auto_skip_cond)
     elif category in ("finance_ai", "all", None):
-        # Category 1: Finance News (Default View)
-        events_q = events_q.filter(~auto_skip_cond, finance_news_cond)
+        # Category 1: Finance News (Default View) — Strictly NSE & BSE exchange announcements
+        events_q = events_q.filter(
+            MarketEvent.source.in_(["nse", "bse"]),
+            ~auto_skip_cond,
+            finance_news_cond
+        )
     elif category in ("nse_bse_general", "nse_bse_active"):
         # Category 2: NSE/BSE General Updates
         events_q = events_q.filter(
@@ -197,8 +201,8 @@ def get_intelligence_feed(
             "category": e.category,
         })
     
-    # 2. News Stories (deduplicated)
-    if (not event_type or event_type == "news") and category not in ("auto_skip", "nse_bse_general", "nse_bse_active"):
+    # 2. News Stories (deduplicated) - ONLY include under "other_news" or explicit "news" event_type
+    if (not event_type or event_type == "news") and category in ("other_news", "news"):
         stories_q = db.query(NewsStory).filter(NewsStory.last_published >= since)
         if sentiment:
             stories_q = stories_q.filter(NewsStory.ai_sentiment == sentiment)
