@@ -33,11 +33,11 @@ def reload_env_vars():
         "groq_key": groq_raw,
         "groq_model": "llama-3.3-70b-versatile",
         "ollama_url": os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434"),
-        "ollama_model": os.getenv("OLLAMA_MODEL", "qwen3-vl:4b")
+        "ollama_model": os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
     }
 
 
-def call_ollama(prompt: str, base_url: str = "http://host.docker.internal:11434", model_name: str = "qwen3-vl:4b", timeout: int = 70) -> dict:
+def call_ollama(prompt: str, base_url: str = "http://host.docker.internal:11434", model_name: str = "qwen2.5:3b", timeout: int = 70) -> dict:
     payload = {
         "model": model_name,
         "messages": [
