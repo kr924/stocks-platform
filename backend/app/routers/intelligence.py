@@ -793,33 +793,47 @@ def get_upcoming_earnings(db: Session = Depends(get_db)):
     # Sort chronologically by meeting date ascending
     upcoming.sort(key=lambda x: x["date"])
 
-    # Calculate / Attach 1-year returns %
-    from app.services.mock_feed import MockMarketFeed
-    feed = MockMarketFeed()
-    from_1y_str = (today - timedelta(days=365)).strftime("%Y-%m-%d")
-    today_str = today.strftime("%Y-%m-%d")
+    # Calculate / Attach 1-year returns % using Real Market Chart API
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import requests
+
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+
+    def fetch_real_1y_return(sym):
+        try:
+            ticker = f"{sym}.NS"
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range=1y&interval=1d"
+            r = requests.get(url, headers=headers, timeout=4)
+            if r.status_code == 200:
+                data = r.json()
+                result = data["chart"]["result"][0]
+                closes = [c for c in result["indicators"]["quote"][0]["close"] if c is not None]
+                if len(closes) > 1:
+                    p_start = closes[0]
+                    p_end = closes[-1]
+                    if p_start > 0:
+                        ret_1y = ((p_end - p_start) / p_start) * 100
+                        return sym, f"{ret_1y:+.1f}%"
+        except Exception:
+            pass
+        return sym, "N/A"
+
+    unique_symbols = list({item["symbol"] for item in upcoming})
+    returns_map = {}
+
+    with ThreadPoolExecutor(max_workers=15) as executor:
+        futures = {executor.submit(fetch_real_1y_return, s): s for s in unique_symbols}
+        for future in as_completed(futures):
+            try:
+                sym, ret_val = future.result()
+                returns_map[sym] = ret_val
+            except Exception:
+                pass
 
     for item in upcoming:
-        sym = item["symbol"]
-        try:
-            ikey = f"NSE_EQ|{sym}"
-            candles = feed.get_historical_candles(ikey, "day", today_str, from_1y_str)
-            if candles and len(candles) > 1:
-                p_start = candles[0][4]
-                p_end = candles[-1][4]
-                if p_start > 0:
-                    ret_1y = ((p_end - p_start) / p_start) * 100
-                    item["return_1y"] = f"{ret_1y:+.1f}%"
-                    item["returns_1y"] = f"{ret_1y:+.1f}%"
-                else:
-                    item["return_1y"] = "N/A"
-                    item["returns_1y"] = "N/A"
-            else:
-                item["return_1y"] = "N/A"
-                item["returns_1y"] = "N/A"
-        except Exception:
-            item["return_1y"] = "N/A"
-            item["returns_1y"] = "N/A"
+        ret_val = returns_map.get(item["symbol"], "N/A")
+        item["return_1y"] = ret_val
+        item["returns_1y"] = ret_val
 
     return upcoming
 
