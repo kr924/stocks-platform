@@ -374,6 +374,48 @@ class IntelConfig:
 
 
     @property
+    def local_llm_enabled(self) -> bool:
+        """Check whether local CPU Ollama LLM is enabled."""
+        import json
+        val = self._config.get("local_llm_enabled", True)
+        try:
+            from app.database import SessionLocal, SystemSetting
+            db = SessionLocal()
+            try:
+                setting = db.query(SystemSetting).filter(SystemSetting.key == "local_llm_enabled").first()
+                if setting and setting.value is not None:
+                    val = json.loads(setting.value)
+            finally:
+                db.close()
+        except Exception:
+            pass
+        return bool(val)
+
+    def set_local_llm_enabled(self, enabled: bool):
+        """Set local_llm_enabled state in memory and SQLite database."""
+        import json
+        self._config["local_llm_enabled"] = bool(enabled)
+        try:
+            from app.database import SessionLocal, SystemSetting
+            db = SessionLocal()
+            try:
+                setting = db.query(SystemSetting).filter(SystemSetting.key == "local_llm_enabled").first()
+                if not setting:
+                    setting = SystemSetting(key="local_llm_enabled", value=json.dumps(bool(enabled)))
+                    db.add(setting)
+                else:
+                    setting.value = json.dumps(bool(enabled))
+                db.commit()
+                logger.info(f"Updated local_llm_enabled to {enabled}")
+            except Exception as e:
+                db.rollback()
+                logger.error(f"Error saving local_llm_enabled to DB: {e}")
+            finally:
+                db.close()
+        except Exception:
+            pass
+
+    @property
     def raw(self) -> dict:
         """Access the raw config dict."""
         return self._config

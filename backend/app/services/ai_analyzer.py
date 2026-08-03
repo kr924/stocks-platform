@@ -103,7 +103,10 @@ def _call_cloud_llm(prompt: str, event_info: str = ""):
                     pass
 
     # ── Phase 2: Ollama fallback ──
-    if env.get("ollama_url"):
+    from app.services.intel_config import get_intel_config
+    local_enabled = get_intel_config().local_llm_enabled
+
+    if local_enabled and env.get("ollama_url"):
         try:
             logger.info("🦙 [CLOUD→OLLAMA FALLBACK]: Routing to Ollama (15s timeout)...")
             res = call_ollama(prompt, env["ollama_url"], env.get("ollama_model", "qwen2.5:3b"), timeout=15)
@@ -115,6 +118,8 @@ def _call_cloud_llm(prompt: str, event_info: str = ""):
             return res, "ollama"
         except Exception as ollama_err:
             logger.warning(f"Ollama fallback skipped/failed ({ollama_err}). Using Rule Engine.")
+    elif not local_enabled:
+        logger.info("⏸️ [LOCAL LLM DISABLED]: Local Ollama is turned OFF from UI. Skipping to Rule Engine.")
 
     # ── Phase 3: Rule Engine fallback ──
     logger.info("⚡ [RULE ENGINE]: Using fast keyword rule engine...")
@@ -130,9 +135,15 @@ def _call_cloud_llm(prompt: str, event_info: str = ""):
 def _call_local_llm(prompt: str, event_info: str = ""):
     """
     Local-only LLM routing for STANDARD tier items.
-    1. Calls local Ollama with 15s timeout.
-    2. If fails or busy, falls back immediately to Rule Engine.
+    1. Calls local Ollama if enabled in UI.
+    2. If disabled, fails, or busy, falls back immediately to Rule Engine.
     """
+    from app.services.intel_config import get_intel_config
+    if not get_intel_config().local_llm_enabled:
+        logger.info("⏸️ [LOCAL LLM DISABLED]: Local Ollama is turned OFF from UI. Using Rule Engine.")
+        res = _smart_rule_analysis(prompt)
+        return res, "rule_engine"
+
     from app.services.gemini import reload_env_vars, call_ollama
     
     env = reload_env_vars()

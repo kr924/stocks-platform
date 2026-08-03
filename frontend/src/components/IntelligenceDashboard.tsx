@@ -192,7 +192,34 @@ function IntelligenceDashboardContent() {
   const [sseClients, setSseClients] = useState(0);
   const [lastStreamEvent, setLastStreamEvent] = useState<string | null>(null);
   const [streamEventCount, setStreamEventCount] = useState(0);
-  const eventSourceRef = useRef<EventSource | null>(null);
+  // Local LLM (Ollama) Start/Stop switch state
+  const [localLlmEnabled, setLocalLlmEnabled] = useState<boolean>(true);
+
+  // Fetch Local LLM status from settings endpoint
+  useEffect(() => {
+    fetch(`${API_BASE}/api/intelligence/settings`)
+      .then(res => res.json())
+      .then(data => {
+        if (data && typeof data.local_llm_enabled === "boolean") {
+          setLocalLlmEnabled(data.local_llm_enabled);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const toggleLocalLlm = async () => {
+    const nextState = !localLlmEnabled;
+    setLocalLlmEnabled(nextState);
+    try {
+      await fetch(`${API_BASE}/api/intelligence/settings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ local_llm_enabled: nextState })
+      });
+    } catch (err) {
+      console.error("Error toggling local LLM:", err);
+    }
+  };
 
   // Search debounce effect
   useEffect(() => {
@@ -1022,6 +1049,29 @@ function IntelligenceDashboardContent() {
                   ? "CONNECTING"
                   : "OFFLINE"}
             </div>
+
+            {/* Start / Stop Local LLM (Ollama) Button */}
+            <button
+              onClick={toggleLocalLlm}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                backgroundColor: localLlmEnabled ? "rgba(16, 185, 129, 0.12)" : "rgba(239, 68, 68, 0.15)",
+                border: localLlmEnabled ? "1px solid rgba(16, 185, 129, 0.3)" : "1px solid rgba(239, 68, 68, 0.4)",
+                color: localLlmEnabled ? "#34d399" : "#f87171",
+                borderRadius: "8px",
+                padding: "8px 14px",
+                fontSize: "12px",
+                fontWeight: "700",
+                cursor: "pointer",
+                transition: "all 0.2s"
+              }}
+              title={localLlmEnabled ? "Local Ollama LLM is RUNNING. Click to STOP Local LLM (Reduces CPU to 0%)." : "Local Ollama LLM is STOPPED (0% CPU). Click to START Local LLM."}
+            >
+              <Cpu size={14} />
+              <span>🦙 Local LLM: {localLlmEnabled ? "ON" : "OFF (0% CPU)"}</span>
+            </button>
 
             <button
               onClick={forceTriggerReload}

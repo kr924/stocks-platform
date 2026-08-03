@@ -26,9 +26,38 @@ from app.database import (
 )
 from app.services.deduplication import to_iso_utc
 
+from pydantic import BaseModel
+
 logger = logging.getLogger("app.intelligence_router")
 
 router = APIRouter(prefix="/api/intelligence", tags=["intelligence"])
+
+
+class IntelligenceSettingsUpdate(BaseModel):
+    local_llm_enabled: bool
+
+
+@router.get("/settings")
+def get_intelligence_settings():
+    """Get AI Intelligence configuration including local LLM status."""
+    from app.services.intel_config import get_intel_config
+    cfg = get_intel_config()
+    return {
+        "local_llm_enabled": cfg.local_llm_enabled
+    }
+
+
+@router.post("/settings")
+def update_intelligence_settings(body: IntelligenceSettingsUpdate):
+    """Enable or disable Local Ollama LLM to manage CPU load."""
+    from app.services.intel_config import get_intel_config
+    cfg = get_intel_config()
+    cfg.set_local_llm_enabled(body.local_llm_enabled)
+    return {
+        "status": "success",
+        "local_llm_enabled": cfg.local_llm_enabled,
+        "message": f"Local LLM is now {'ENABLED' if cfg.local_llm_enabled else 'DISABLED (0% CPU)'}"
+    }
 
 
 # ─── Live Intelligence Feed ──────────────────────────────────────────────
