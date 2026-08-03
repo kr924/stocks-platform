@@ -123,6 +123,41 @@ def analyze_trade_event(
     return analysis
 
 
+import re
+
+def _extract_json_from_llm(text: str) -> dict:
+    """Robustly extract JSON dictionary from LLM output, handling conversational intros and code blocks."""
+    if not text:
+        return {}
+    if isinstance(text, dict):
+        return text
+    text_str = str(text)
+
+    # 1. Look for ```json { ... } ``` fenced code blocks
+    match_code = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text_str, re.DOTALL | re.IGNORECASE)
+    if match_code:
+        try:
+            return json.loads(match_code.group(1).strip())
+        except Exception:
+            pass
+
+    # 2. Look for outer curly braces { ... }
+    match_braces = re.search(r"(\{.*\})", text_str, re.DOTALL)
+    if match_braces:
+        try:
+            return json.loads(match_braces.group(1).strip())
+        except Exception:
+            pass
+
+    # 3. Direct parse
+    try:
+        return json.loads(text_str.strip())
+    except Exception:
+        pass
+
+    return {}
+
+
 def analyze_earnings_disclosure_2step(
     symbol: str,
     title: str,
@@ -150,19 +185,22 @@ def analyze_earnings_disclosure_2step(
     prompt = f"""stock symbol {symbol}   you are indian stock market research analyst. i have companies earnings document in url {attachment_url or 'N/A'}, please analyse this document for earnings and compare results with old earnings (for earnings refer to screener.in) and provide me info in json format of revenue, expenses, Operating Profit, Other Income,Interest,Depreciation,PBT, pat (yoy % , last quarter%, last year same quarter% ) and as per the document analyse how company is projecting future growth and also check how much is expected returns by brokers for this stock in websites and compare with actual and finally provide suggestion like beats estimates, misses estimates(if estimate exists) else give buy , sell, hold
 
 Document Extract / Content snippet:
-{pdf_text[:3000] if pdf_text else 'Refer to attachment document URL'}
+{pdf_text[:3500] if pdf_text else 'Refer to attachment document URL'}
 
-Respond STRICTLY in JSON format with the following keys:
+CRITICAL REQUIREMENT: Output ONLY valid, raw JSON with NO surrounding text, NO introductory conversational phrases like 'Here is the JSON:' or 'Gemini said:', and NO markdown formatting.
+
+Format the JSON response precisely as follows:
 {{
-  "revenue": "Revenue details with YoY / QoQ %",
-  "expenses": "Total Expenses details",
-  "operating_profit": "Operating Profit & OPM %",
-  "pbt": "Profit Before Tax (PBT)",
-  "pat_yoy": "PAT details (YoY %, last quarter %, last year same quarter %)",
-  "growth_projection": "Future growth projections by management",
-  "broker_estimates": "Broker expected returns/estimates vs actual performance",
-  "ai_suggestion": "BEATS ESTIMATES",
-  "summary": "Concise executive summary of earnings report",
+  "revenue": "₹132.35 Cr (Consolidated). YoY: +115.8% vs Q1 FY26 (₹61.32 Cr), QoQ: -57.0% vs Q4 FY26 (₹307.50 Cr)",
+  "expenses": "₹111.05 Cr (Consolidated). Driven primarily by cost of construction and development (₹133.48 Cr) adjusted by changes in inventories.",
+  "operating_profit": "₹35.81 Cr (Estimated EBITDA). Operating Profit Margin (OPM): ~27.1%",
+  "pbt": "₹34.94 Cr (Consolidated)",
+  "other_income": "₹...",
+  "pat_yoy": "PAT at ₹25.79 Cr. YoY: +170.1%, Last quarter: -24.1%, Last year same quarter: ₹9.55 Cr",
+  "growth_projection": "Future growth projections by management or note if not provided",
+  "broker_estimates": "Broker expected returns/estimates vs actual performance or note if external",
+  "ai_suggestion": "buy",
+  "summary": "2-3 sentence executive summary of earnings report comparing YoY and QoQ changes",
   "sentiment": "positive"
 }}"""
 
@@ -205,7 +243,6 @@ Respond STRICTLY in JSON format with the following keys:
             print(f"⚠️ [AUTO AI FLOW 1 ERROR]: {e}. Falling back to OpenRouter Premium.")
             result_raw = None
 
-
     # --- FLOW 2: OpenRouter Premium Fallback ---
     if not result_raw:
         used_flow = "openrouter_premium"
@@ -228,32 +265,27 @@ Respond STRICTLY in JSON format with the following keys:
             logger.error(f"❌ [AUTO AI FLOW 2 ERROR]: OpenRouter call failed: {e}")
             print(f"❌ [AUTO AI FLOW 2 ERROR]: OpenRouter call failed: {e}")
 
-    # --- Parse Result ---
-    parsed_json = {}
-    if result_raw:
-        try:
-            cleaned = clean_json_response(result_raw)
-            if isinstance(cleaned, dict):
-                parsed_json = cleaned
-            elif isinstance(cleaned, str):
-                parsed_json = json.loads(cleaned)
-        except Exception:
-            try:
-                parsed_json = json.loads(result_raw)
-            except Exception:
-                parsed_json = {"summary": str(result_raw)[:500], "ai_suggestion": "HOLD"}
+    # --- Robust JSON Parsing ---
+    parsed_json = _extract_json_from_llm(result_raw)
 
     # Extract structured fields
     revenue = parsed_json.get("revenue", "N/A")
     expenses = parsed_json.get("expenses", "N/A")
     operating_profit = parsed_json.get("operating_profit", "N/A")
     pbt = parsed_json.get("pbt", "N/A")
+    other_income = parsed_json.get("other_income", "N/A")
     pat_yoy = parsed_json.get("pat_yoy", "N/A")
     growth_projection = parsed_json.get("growth_projection", "N/A")
     broker_estimates = parsed_json.get("broker_estimates", "N/A")
-    ai_suggestion = str(parsed_json.get("ai_suggestion", "HOLD")).upper().strip()
-    ai_summary = parsed_json.get("summary", f"Earnings analysis for {symbol}")
-    ai_sentiment = str(parsed_json.get("sentiment", "positive" if "BEAT" in ai_suggestion or "BUY" in ai_suggestion else "negative" if "MISS" in ai_suggestion or "SELL" in ai_suggestion else "neutral"))
+    
+    raw_suggestion = parsed_json.get("ai_suggestion")
+    if raw_suggestion and str(raw_suggestion).strip().upper() not in ("N/A", "NONE", "NULL", ""):
+        ai_suggestion = str(raw_suggestion).upper().strip()
+    else:
+        ai_suggestion = None  # DO NOT provide suggestion until values from AI are updated!
+
+    ai_summary = parsed_json.get("summary", str(result_raw)[:500] if result_raw else f"AI analysis pending for {symbol}")
+    ai_sentiment = str(parsed_json.get("sentiment", "neutral")).lower().strip()
 
     # --- Save to TradeAILog ---
     try:
@@ -266,15 +298,16 @@ Respond STRICTLY in JSON format with the following keys:
                 provider=used_provider,
                 prompt_summary=f"2-Step Earnings Analysis for {symbol}",
                 ai_sentiment=ai_sentiment,
-                ai_impact_score=0.9 if "BEAT" in ai_suggestion else 0.2 if "MISS" in ai_suggestion else 0.5,
+                ai_impact_score=0.9 if ai_suggestion and "BEAT" in ai_suggestion else 0.2 if ai_suggestion and "MISS" in ai_suggestion else 0.5,
                 ai_summary=ai_summary,
-                raw_response=json.dumps(parsed_json),
+                raw_response=json.dumps(parsed_json) if parsed_json else str(result_raw),
                 nse_event_title=title,
                 created_at=datetime.utcnow(),
                 revenue=str(revenue),
                 expenses=str(expenses),
                 operating_profit=str(operating_profit),
                 pbt=str(pbt),
+                other_income=str(other_income),
                 pat_yoy=str(pat_yoy),
                 growth_projection=str(growth_projection),
                 broker_estimates=str(broker_estimates),

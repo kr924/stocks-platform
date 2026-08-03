@@ -131,6 +131,7 @@ def _serialize_ai_log(a: TradeAILog) -> dict:
         "expenses": a.expenses,
         "operating_profit": a.operating_profit,
         "pbt": a.pbt,
+        "other_income": a.other_income,
         "pat_yoy": a.pat_yoy,
         "growth_projection": a.growth_projection,
         "broker_estimates": a.broker_estimates,
