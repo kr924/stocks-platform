@@ -433,16 +433,29 @@ def list_ai_logs(
     page_size: int = 50,
     db: Session = Depends(get_db),
 ):
-    """List premium AI analysis logs."""
+    """List premium AI analysis logs (deduplicated by symbol + nse_event_title)."""
     q = db.query(TradeAILog).order_by(TradeAILog.created_at.desc())
     if config_id:
         q = q.filter(TradeAILog.config_id == config_id)
     if symbol:
         q = q.filter(TradeAILog.symbol == symbol.upper())
-    total = q.count()
-    logs = q.offset((page - 1) * page_size).limit(page_size).all()
+    raw_logs = q.all()
+
+    # Deduplicate by (symbol, nse_event_title) to avoid duplicate UI cards
+    seen = set()
+    unique_logs = []
+    for l in raw_logs:
+        sym_key = (l.symbol or "").upper().strip()
+        title_key = (l.nse_event_title or "").strip()
+        key = (sym_key, title_key)
+        if key not in seen:
+            seen.add(key)
+            unique_logs.append(l)
+
+    total = len(unique_logs)
+    paginated = unique_logs[(page - 1) * page_size : page * page_size]
     return {
-        "logs": [_serialize_ai_log(a) for a in logs],
+        "logs": [_serialize_ai_log(a) for a in paginated],
         "total": total,
         "page": page,
         "page_size": page_size,

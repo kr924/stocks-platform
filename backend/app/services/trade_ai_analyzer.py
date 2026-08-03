@@ -5,6 +5,7 @@ Separate from the standard intelligence AI pipeline.
 import json
 import logging
 import os
+import threading
 from datetime import datetime
 from typing import Optional, Tuple
 
@@ -158,6 +159,10 @@ def _extract_json_from_llm(text: str) -> dict:
     return {}
 
 
+_in_progress_analyses = set()
+_in_progress_lock = threading.Lock()
+
+
 def analyze_earnings_disclosure_2step(
     symbol: str,
     title: str,
@@ -172,6 +177,55 @@ def analyze_earnings_disclosure_2step(
     Saves results to TradeAILog and dispatches Telegram alerts.
     """
     import requests
+    from datetime import datetime, timedelta
+    from app.services.intel_config import get_intel_config
+    from app.services.gemini import clean_json_response, call_openrouter
+
+    # --- Concurrency & Deduplication Lock: Prevent duplicate simultaneous calls (within 15 seconds) ---
+    dedup_key = f"{symbol.upper().strip()}:{title.strip()}"
+    with _in_progress_lock:
+        if dedup_key in _in_progress_analyses:
+            logger.info(f"⏭️ [AUTO AI SKIPPED]: Simultaneous analysis currently running for #{symbol}. Skipping duplicate call.")
+            print(f"⏭️ [AUTO AI SKIPPED]: Simultaneous analysis currently running for #{symbol}. Skipping duplicate call.")
+            return {}
+        
+        try:
+            from app.database import SessionLocal, TradeAILog
+            db_check = SessionLocal()
+            try:
+                cutoff = datetime.utcnow() - timedelta(seconds=15)
+                existing_log = db_check.query(TradeAILog).filter(
+                    TradeAILog.symbol == symbol.upper().strip(),
+                    TradeAILog.nse_event_title == title,
+                    TradeAILog.created_at >= cutoff
+                ).first()
+                if existing_log:
+                    logger.info(f"⏭️ [AUTO AI SKIPPED]: Duplicate simultaneous call detected for #{symbol}. Skipping REST API call.")
+                    print(f"⏭️ [AUTO AI SKIPPED]: Duplicate simultaneous call detected for #{symbol}. Skipping REST API call.")
+                    return json.loads(existing_log.raw_response) if existing_log.raw_response and existing_log.raw_response.startswith('{') else {}
+            finally:
+                db_check.close()
+        except Exception:
+            pass
+
+        _in_progress_analyses.add(dedup_key)
+
+    try:
+        return _do_analyze_earnings_disclosure_2step(symbol, title, attachment_url, pdf_text, config_id)
+    finally:
+        with _in_progress_lock:
+            _in_progress_analyses.discard(dedup_key)
+
+
+def _do_analyze_earnings_disclosure_2step(
+    symbol: str,
+    title: str,
+    attachment_url: str = "",
+    pdf_text: str = "",
+    config_id: Optional[int] = None
+) -> Optional[dict]:
+    import requests
+    from datetime import datetime
     from app.services.intel_config import get_intel_config
     from app.services.gemini import clean_json_response, call_openrouter
 
