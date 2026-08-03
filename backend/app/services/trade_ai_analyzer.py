@@ -123,6 +123,190 @@ def analyze_trade_event(
     return analysis
 
 
+def analyze_earnings_disclosure_2step(
+    symbol: str,
+    title: str,
+    attachment_url: str = "",
+    pdf_text: str = "",
+    config_id: Optional[int] = None
+) -> Optional[dict]:
+    """
+    Two-Step AI Analysis Pipeline:
+    Step 1: POST to custom REST API (url/api/generate) with dynamic prompt.
+    Step 2 (Fallback): If Step 1 fails, request OpenRouter Premium with selected model.
+    Saves results to TradeAILog and dispatches Telegram alerts.
+    """
+    import requests
+    from app.services.intel_config import get_intel_config
+    from app.services.gemini import clean_json_response, call_openrouter
+
+    cfg = get_intel_config()
+    auto_ai_cfg = cfg.auto_trading_ai
+    
+    custom_url = auto_ai_cfg.get("custom_api_url", "http://localhost:11434/api/generate").strip()
+    openrouter_key = auto_ai_cfg.get("premium_openrouter_api_key", "").strip() or os.getenv("OPENROUTER_PREMIUM_API_KEY", "").strip() or os.getenv("OPENROUTER_API_KEY", "").strip()
+    openrouter_model = auto_ai_cfg.get("premium_openrouter_model", "anthropic/claude-3.5-sonnet").strip()
+
+    prompt = f"""stock symbol {symbol}   you are indian stock market research analyst. i have companies earnings document in url {attachment_url or 'N/A'}, please analyse this document for earnings and compare results with old earnings (for earnings refer to screener.in) and provide me info in json format of revenue, expenses, Operating Profit, Other Income,Interest,Depreciation,PBT, pat (yoy % , last quarter%, last year same quarter% ) and as per the document analyse how company is projecting future growth and also check how much is expected returns by brokers for this stock in websites and compare with actual and finally provide suggestion like beats estimates, misses estimates(if estimate exists) else give buy , sell, hold
+
+Document Extract / Content snippet:
+{pdf_text[:3000] if pdf_text else 'Refer to attachment document URL'}
+
+Respond STRICTLY in JSON format with the following keys:
+{{
+  "revenue": "Revenue details with YoY / QoQ %",
+  "expenses": "Total Expenses details",
+  "operating_profit": "Operating Profit & OPM %",
+  "pbt": "Profit Before Tax (PBT)",
+  "pat_yoy": "PAT details (YoY %, last quarter %, last year same quarter %)",
+  "growth_projection": "Future growth projections by management",
+  "broker_estimates": "Broker expected returns/estimates vs actual performance",
+  "ai_suggestion": "BEATS ESTIMATES",
+  "summary": "Concise executive summary of earnings report",
+  "sentiment": "positive"
+}}"""
+
+    result_raw = None
+    used_flow = "custom_rest_api"
+    used_provider = f"custom_api ({custom_url})"
+
+    # --- FLOW 1: Custom REST API ---
+    try:
+        logger.info(f"🔬 [AUTO AI FLOW 1]: Posting to Custom REST API: {custom_url} for #{symbol}")
+        resp = requests.post(
+            custom_url,
+            json={"prompt": prompt},
+            headers={"Content-Type": "application/json"},
+            timeout=20
+        )
+        if resp.status_code == 200:
+            resp_data = resp.json()
+            if isinstance(resp_data, dict):
+                result_raw = resp_data.get("response", resp_data.get("text", resp_data.get("content", json.dumps(resp_data))))
+            else:
+                result_raw = str(resp_data)
+            used_flow = "custom_rest_api"
+            used_provider = f"Custom REST API ({custom_url})"
+            logger.info(f"✅ [AUTO AI FLOW 1 SUCCESS]: Custom REST API responded for #{symbol}")
+        else:
+            logger.warning(f"⚠️ [AUTO AI FLOW 1 FAILED]: Status {resp.status_code}. Triggering OpenRouter fallback.")
+            result_raw = None
+    except Exception as e:
+        logger.warning(f"⚠️ [AUTO AI FLOW 1 ERROR]: {e}. Falling back to OpenRouter Premium.")
+        result_raw = None
+
+    # --- FLOW 2: OpenRouter Premium Fallback ---
+    if not result_raw:
+        used_flow = "openrouter_premium"
+        used_provider = f"OpenRouter Premium ({openrouter_model})"
+        try:
+            logger.info(f"🔬 [AUTO AI FLOW 2]: Calling Premium OpenRouter ({openrouter_model}) for #{symbol}")
+            if not openrouter_key:
+                logger.error("❌ [AUTO AI FLOW 2]: OpenRouter API Key is missing.")
+            else:
+                or_res = call_openrouter(prompt, openrouter_key, model=openrouter_model)
+                if or_res and "analyses" in or_res and or_res["analyses"]:
+                    result_raw = json.dumps(or_res["analyses"][0])
+                elif or_res:
+                    result_raw = json.dumps(or_res)
+                logger.info(f"✅ [AUTO AI FLOW 2 SUCCESS]: OpenRouter ({openrouter_model}) responded for #{symbol}")
+        except Exception as e:
+            logger.error(f"❌ [AUTO AI FLOW 2 ERROR]: OpenRouter call failed: {e}")
+
+    # --- Parse Result ---
+    parsed_json = {}
+    if result_raw:
+        try:
+            cleaned = clean_json_response(result_raw)
+            if isinstance(cleaned, dict):
+                parsed_json = cleaned
+            elif isinstance(cleaned, str):
+                parsed_json = json.loads(cleaned)
+        except Exception:
+            try:
+                parsed_json = json.loads(result_raw)
+            except Exception:
+                parsed_json = {"summary": str(result_raw)[:500], "ai_suggestion": "HOLD"}
+
+    # Extract structured fields
+    revenue = parsed_json.get("revenue", "N/A")
+    expenses = parsed_json.get("expenses", "N/A")
+    operating_profit = parsed_json.get("operating_profit", "N/A")
+    pbt = parsed_json.get("pbt", "N/A")
+    pat_yoy = parsed_json.get("pat_yoy", "N/A")
+    growth_projection = parsed_json.get("growth_projection", "N/A")
+    broker_estimates = parsed_json.get("broker_estimates", "N/A")
+    ai_suggestion = str(parsed_json.get("ai_suggestion", "HOLD")).upper().strip()
+    ai_summary = parsed_json.get("summary", f"Earnings analysis for {symbol}")
+    ai_sentiment = str(parsed_json.get("sentiment", "positive" if "BEAT" in ai_suggestion or "BUY" in ai_suggestion else "negative" if "MISS" in ai_suggestion or "SELL" in ai_suggestion else "neutral"))
+
+    # --- Save to TradeAILog ---
+    try:
+        from app.database import SessionLocal, TradeAILog
+        db = SessionLocal()
+        try:
+            log_entry = TradeAILog(
+                config_id=config_id,
+                symbol=symbol,
+                provider=used_provider,
+                prompt_summary=f"2-Step Earnings Analysis for {symbol}",
+                ai_sentiment=ai_sentiment,
+                ai_impact_score=0.9 if "BEAT" in ai_suggestion else 0.2 if "MISS" in ai_suggestion else 0.5,
+                ai_summary=ai_summary,
+                raw_response=json.dumps(parsed_json),
+                nse_event_title=title,
+                created_at=datetime.utcnow(),
+                revenue=str(revenue),
+                expenses=str(expenses),
+                operating_profit=str(operating_profit),
+                pbt=str(pbt),
+                pat_yoy=str(pat_yoy),
+                growth_projection=str(growth_projection),
+                broker_estimates=str(broker_estimates),
+                ai_suggestion=ai_suggestion,
+                attachment_url=attachment_url,
+                flow_used=used_flow
+            )
+            db.add(log_entry)
+            db.commit()
+            logger.info(f"✅ [EARNINGS AI SAVED]: Log entry created for #{symbol} (Flow: {used_flow})")
+        except Exception as db_err:
+            db.rollback()
+            logger.error(f"Failed to save TradeAILog: {db_err}")
+        finally:
+            db.close()
+    except Exception:
+        pass
+
+    # --- Dispatch Telegram Alert ---
+    try:
+        from app.services.telegram_notifier import send_telegram_alert
+        alert_body = f"""Revenue: {revenue}
+Expenses: {expenses}
+Operating Profit: {operating_profit}
+PAT (YoY/QoQ): {pat_yoy}
+Future Growth: {growth_projection}
+Broker Estimates: {broker_estimates}
+Verdict Suggestion: {ai_suggestion}
+
+Summary: {ai_summary}"""
+
+        send_telegram_alert(
+            title=f"{symbol} Earnings Analysis ({ai_suggestion})",
+            symbol=symbol,
+            sentiment=ai_sentiment,
+            impact_score=0.8,
+            summary=alert_body,
+            provider=f"{used_flow.upper()}",
+            url=attachment_url,
+            alert_type=f"EARNINGS AI VERDICT: {ai_suggestion}"
+        )
+    except Exception as e:
+        logger.error(f"Telegram alert error: {e}")
+
+    return parsed_json
+
+
 def _build_trade_analysis_prompt(symbol: str, title: str, description: str, pdf_text: str = "") -> str:
     """Build a premium analysis prompt for trade-triggered events."""
     extra = ""
@@ -159,3 +343,4 @@ Respond with JSON:
     }}
   ]
 }}"""
+

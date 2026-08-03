@@ -336,7 +336,7 @@ async def _execute_trade(config: dict, announcement: dict):
     """Execute a trade: update DB → place broker order → run premium AI → send Telegram."""
     from app.database import SessionLocal, TradeConfig, TradeOrder
     from app.services.broker_gateway import get_broker
-    from app.services.trade_ai_analyzer import analyze_trade_event
+    from app.services.trade_ai_analyzer import analyze_earnings_disclosure_2step
 
     config_id = config["id"]
     symbol = config["symbol"]
@@ -433,20 +433,32 @@ async def _execute_trade(config: dict, announcement: dict):
     except Exception:
         pass
 
-    # 5. Run premium AI analysis in background
+    # 5. Run 2-Step AI Earnings Analysis (Custom REST API -> OpenRouter Fallback)
     try:
+        attachment_file = str(
+            announcement.get("attachment") or
+            announcement.get("attchmntFile") or
+            announcement.get("url") or ""
+        ).strip()
+
+        if attachment_file and not attachment_file.startswith("http"):
+            attachment_url = f"https://nsearchives.nseindia.com/corporate/{attachment_file}"
+        else:
+            attachment_url = attachment_file
+
         await asyncio.get_event_loop().run_in_executor(
             None,
-            lambda: analyze_trade_event(
+            lambda: analyze_earnings_disclosure_2step(
                 symbol=symbol,
                 title=subject,
-                description=description,
-                provider=config.get("ai_provider", "groq"),
+                attachment_url=attachment_url,
+                pdf_text=description,
                 config_id=config_id,
             )
         )
     except Exception as e:
-        logger.error(f"[TRADE AI]: Premium analysis failed for {symbol}: {e}")
+        logger.error(f"[TRADE AI]: 2-Step Earnings Analysis failed for {symbol}: {e}")
+
 
 
 # ─── Public API ──────────────────────────────────────────────────────────────

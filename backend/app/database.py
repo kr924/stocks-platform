@@ -275,7 +275,7 @@ class TradeAILog(Base):
     id = Column(Integer, primary_key=True, index=True)
     config_id = Column(Integer, nullable=True, index=True)            # FK to TradeConfig.id
     symbol = Column(String(50), nullable=False, index=True)
-    provider = Column(String(50), nullable=False)                     # "gemini", "groq", etc.
+    provider = Column(String(50), nullable=False)                     # "custom_rest_api", "openrouter_premium", etc.
     prompt_summary = Column(Text, nullable=True)                      # brief description of what was analyzed
     ai_sentiment = Column(String(20), nullable=True)
     ai_impact_score = Column(Float, nullable=True)
@@ -283,6 +283,18 @@ class TradeAILog(Base):
     raw_response = Column(Text, nullable=True)                        # full LLM response JSON
     nse_event_title = Column(String(500), nullable=True)              # the NSE announcement that triggered this
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Enhanced Earnings Analysis Fields
+    revenue = Column(Text, nullable=True)
+    expenses = Column(Text, nullable=True)
+    operating_profit = Column(Text, nullable=True)
+    pbt = Column(Text, nullable=True)
+    pat_yoy = Column(Text, nullable=True)
+    growth_projection = Column(Text, nullable=True)
+    broker_estimates = Column(Text, nullable=True)
+    ai_suggestion = Column(String(50), nullable=True)                  # "BEATS ESTIMATES", "MISSES ESTIMATES", "BUY", "SELL", "HOLD"
+    attachment_url = Column(Text, nullable=True)
+    flow_used = Column(String(50), nullable=True)                     # "custom_rest_api" or "openrouter_premium"
 
 
 # ─── Database Initialization ────────────────────────────────────────────────
@@ -302,6 +314,18 @@ def init_db():
         _safe_alter(conn, "ALTER TABLE news_stories ADD COLUMN ai_provider VARCHAR(50)")
         _safe_alter(conn, "ALTER TABLE news_items ADD COLUMN ai_provider VARCHAR(50)")
         _safe_alter(conn, "ALTER TABLE company_filings ADD COLUMN ai_provider VARCHAR(50)")
+
+        # Migrations for TradeAILog earnings metrics
+        _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN revenue TEXT")
+        _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN expenses TEXT")
+        _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN operating_profit TEXT")
+        _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN pbt TEXT")
+        _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN pat_yoy TEXT")
+        _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN growth_projection TEXT")
+        _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN broker_estimates TEXT")
+        _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN ai_suggestion VARCHAR(50)")
+        _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN attachment_url TEXT")
+        _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN flow_used VARCHAR(50)")
 
 
 def _safe_alter(conn, sql: str):

@@ -305,6 +305,33 @@ class IntelConfig:
         return source.get("enabled", True)
     
     @property
+    def auto_trading_ai(self) -> dict:
+        return self._config.get("auto_trading_ai", {
+            "custom_api_url": "http://localhost:11434/api/generate",
+            "premium_openrouter_api_key": "",
+            "premium_openrouter_model": "anthropic/claude-3.5-sonnet",
+        })
+    
+    def update_auto_trading_ai(self, custom_api_url: str = None, premium_openrouter_api_key: str = None, premium_openrouter_model: str = None):
+        """Update auto_trading_ai settings in memory and attempt YAML persistence."""
+        ai_cfg = self._config.setdefault("auto_trading_ai", {})
+        if custom_api_url is not None:
+            ai_cfg["custom_api_url"] = custom_api_url.strip()
+        if premium_openrouter_api_key is not None:
+            ai_cfg["premium_openrouter_api_key"] = premium_openrouter_api_key.strip()
+        if premium_openrouter_model is not None:
+            ai_cfg["premium_openrouter_model"] = premium_openrouter_model.strip()
+            
+        config_path = Path(__file__).parent.parent.parent / "intelligence_config.yaml"
+        if HAS_YAML:
+            try:
+                with open(config_path, "w", encoding="utf-8") as f:
+                    yaml.safe_dump(self._config, f)
+                logger.info(f"Saved auto_trading_ai config to {config_path}")
+            except Exception as e:
+                logger.error(f"Error saving config YAML: {e}")
+
+    @property
     def raw(self) -> dict:
         """Access the raw config dict."""
         return self._config

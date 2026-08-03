@@ -15,7 +15,12 @@ import {
   Cpu,
   ShoppingBag,
   DollarSign,
-  AlertTriangle
+  AlertTriangle,
+  Settings,
+  ExternalLink,
+  Calendar,
+  Sparkles,
+  ChevronRight
 } from "lucide-react";
 
 const API_BASE = import.meta.env.VITE_API_BASE || (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" ? "http://localhost:8000" : "");
@@ -75,6 +80,31 @@ interface TradeAILog {
   ai_summary: string | null;
   nse_event_title: string | null;
   created_at: string;
+  revenue?: string;
+  expenses?: string;
+  operating_profit?: string;
+  pbt?: string;
+  pat_yoy?: string;
+  growth_projection?: string;
+  broker_estimates?: string;
+  ai_suggestion?: string;
+  attachment_url?: string;
+  flow_used?: string;
+}
+
+interface UpcomingEarningsItem {
+  id: number;
+  symbol: string;
+  title: string;
+  meeting_date: string;
+  purpose: string;
+  created_at?: string;
+}
+
+interface AutoTradingSettings {
+  custom_api_url: string;
+  premium_openrouter_api_key: string;
+  premium_openrouter_model: string;
 }
 
 interface PollerStatus {
@@ -86,11 +116,21 @@ interface PollerStatus {
   last_error: string | null;
 }
 
+
 export function TradingDashboard() {
   const [configs, setConfigs] = useState<TradeConfig[]>([]);
   const [orders, setOrders] = useState<TradeOrder[]>([]);
   const [aiLogs, setAiLogs] = useState<TradeAILog[]>([]);
   const [pollerStatus, setPollerStatus] = useState<PollerStatus | null>(null);
+  const [upcomingEarnings, setUpcomingEarnings] = useState<UpcomingEarningsItem[]>([]);
+  const [aiSettings, setAiSettings] = useState<AutoTradingSettings>({
+    custom_api_url: "http://localhost:11434/api/generate",
+    premium_openrouter_api_key: "",
+    premium_openrouter_model: "anthropic/claude-3.5-sonnet",
+  });
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [savingSettings, setSavingSettings] = useState(false);
+
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
@@ -119,11 +159,13 @@ export function TradingDashboard() {
   // Fetch initial data
   const fetchData = async () => {
     try {
-      const [configsRes, ordersRes, aiLogsRes, pollerRes] = await Promise.all([
+      const [configsRes, ordersRes, aiLogsRes, pollerRes, earningsRes, settingsRes] = await Promise.all([
         fetch(`${API_BASE}/api/trading/configs`),
         fetch(`${API_BASE}/api/trading/orders`),
         fetch(`${API_BASE}/api/trading/ai-logs`),
         fetch(`${API_BASE}/api/trading/poller/status`),
+        fetch(`${API_BASE}/api/trading/upcoming-earnings`),
+        fetch(`${API_BASE}/api/trading/settings`),
       ]);
 
       if (configsRes.ok) {
@@ -142,12 +184,56 @@ export function TradingDashboard() {
         const data = await pollerRes.json();
         setPollerStatus(data);
       }
+      if (earningsRes.ok) {
+        const data = await earningsRes.json();
+        setUpcomingEarnings(data.upcoming_earnings || []);
+      }
+      if (settingsRes.ok) {
+        const data = await settingsRes.json();
+        if (data.settings) {
+          setAiSettings(prev => ({
+            ...prev,
+            ...data.settings
+          }));
+        }
+      }
     } catch (err) {
       console.error("Error loading trading dashboard data:", err);
     } finally {
       setLoading(false);
     }
   };
+
+  const handleSaveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingSettings(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/trading/settings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(aiSettings),
+      });
+      if (res.ok) {
+        setShowSettingsModal(false);
+        fetchData();
+      }
+    } catch (err) {
+      console.error("Failed to save auto-trading settings:", err);
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  const selectUpcomingStock = (item: UpcomingEarningsItem) => {
+    setFormData(prev => ({
+      ...prev,
+      symbol: item.symbol.toUpperCase(),
+      notes: `Target configured from Upcoming Earnings: ${item.purpose || item.title}`
+    }));
+    setShowAddForm(true);
+    window.scrollTo({ top: 400, behavior: "smooth" });
+  };
+
 
   useEffect(() => {
     fetchData();
@@ -525,6 +611,222 @@ export function TradingDashboard() {
         </div>
       </div>
 
+      {/* UPCOMING EARNINGS CALENDAR SECTION */}
+      <div style={{
+        background: "rgba(17, 24, 39, 0.6)",
+        border: "1px solid rgba(59, 130, 246, 0.2)",
+        borderRadius: "14px",
+        padding: "18px",
+        marginBottom: "20px"
+      }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "14px" }}>
+          <h3 style={{ fontSize: "15px", fontWeight: "700", color: "#60a5fa", display: "flex", alignItems: "center", gap: "8px" }}>
+            <Calendar size={18} /> 📅 Upcoming Board Meetings & Earnings Calendar
+          </h3>
+          <span style={{ fontSize: "11px", color: "#94a3b8", background: "rgba(59,130,246,0.1)", padding: "4px 10px", borderRadius: "20px" }}>
+            Click stock to configure auto-trade
+          </span>
+        </div>
+
+        {upcomingEarnings.length === 0 ? (
+          <div style={{ color: "#64748b", fontSize: "12px", textAlign: "center", padding: "16px" }}>
+            No upcoming board meetings detected in system feed. Run scrapers or manual poll to discover.
+          </div>
+        ) : (
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+            gap: "12px",
+            maxHeight: "220px",
+            overflowY: "auto"
+          }}>
+            {upcomingEarnings.map((item) => (
+              <div
+                key={item.id}
+                onClick={() => selectUpcomingStock(item)}
+                style={{
+                  backgroundColor: "#0d131f",
+                  border: "1px solid rgba(255, 255, 255, 0.08)",
+                  borderRadius: "10px",
+                  padding: "12px",
+                  cursor: "pointer",
+                  transition: "all 0.2s",
+                  display: "flex",
+                  flexDirection: "column",
+                  justify: "space-between"
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.borderColor = "rgba(59, 130, 246, 0.5)")}
+                onMouseLeave={(e) => (e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.08)")}
+              >
+                <div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                    <span style={{ fontSize: "14px", fontWeight: "800", color: "#f8fafc" }}>#{item.symbol}</span>
+                    <span style={{ fontSize: "10px", fontWeight: "600", color: "#38bdf8", background: "rgba(56,189,248,0.1)", padding: "2px 6px", borderRadius: "4px" }}>
+                      {item.meeting_date}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: "11px", color: "#94a3b8", lineHeight: "1.3" }}>
+                    {item.purpose.length > 55 ? item.purpose.slice(0, 55) + "..." : item.purpose}
+                  </div>
+                </div>
+                <div style={{ marginTop: "10px", display: "flex", alignItems: "center", gap: "4px", fontSize: "11px", fontWeight: "700", color: "#60a5fa" }}>
+                  <Plus size={12} /> Add to Target Stocks
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* AI SETTINGS MODAL */}
+      {showSettingsModal && (
+        <div style={{
+          position: "fixed",
+          top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: "rgba(0, 0, 0, 0.75)",
+          backdropFilter: "blur(4px)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 1000,
+          padding: "20px"
+        }}>
+          <div style={{
+            backgroundColor: "#0f172a",
+            border: "1px solid rgba(168, 85, 247, 0.3)",
+            borderRadius: "16px",
+            width: "100%",
+            maxWidth: "540px",
+            padding: "24px",
+            boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.5)"
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "18px" }}>
+              <h3 style={{ fontSize: "16px", fontWeight: "800", color: "#f8fafc", display: "flex", alignItems: "center", gap: "8px" }}>
+                <Settings size={18} className="text-purple-400" /> 2-Step AI Earnings Pipeline Settings
+              </h3>
+              <button
+                onClick={() => setShowSettingsModal(false)}
+                style={{ background: "none", border: "none", color: "#94a3b8", cursor: "pointer", fontSize: "18px" }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveSettings} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+              <div>
+                <label style={{ display: "block", fontSize: "12px", fontWeight: "700", color: "#cbd5e1", marginBottom: "6px" }}>
+                  Flow 1: Custom REST API Endpoint URL (POST /api/generate)
+                </label>
+                <input
+                  type="text"
+                  value={aiSettings.custom_api_url}
+                  onChange={(e) => setAiSettings({ ...aiSettings, custom_api_url: e.target.value })}
+                  placeholder="http://localhost:11434/api/generate"
+                  style={{
+                    width: "100%",
+                    padding: "10px 12px",
+                    borderRadius: "8px",
+                    backgroundColor: "#1e293b",
+                    border: "1px solid rgba(255, 255, 255, 0.1)",
+                    color: "#f8fafc",
+                    fontSize: "12px",
+                    fontFamily: "monospace"
+                  }}
+                />
+                <span style={{ fontSize: "11px", color: "#64748b", marginTop: "4px", display: "block" }}>
+                  Primary REST endpoint called dynamically when an announcement is detected.
+                </span>
+              </div>
+
+              <div>
+                <label style={{ display: "block", fontSize: "12px", fontWeight: "700", color: "#cbd5e1", marginBottom: "6px" }}>
+                  Flow 2 (Fallback): Premium OpenRouter API Key
+                </label>
+                <input
+                  type="password"
+                  value={aiSettings.premium_openrouter_api_key}
+                  onChange={(e) => setAiSettings({ ...aiSettings, premium_openrouter_api_key: e.target.value })}
+                  placeholder="sk-or-v1-..."
+                  style={{
+                    width: "100%",
+                    padding: "10px 12px",
+                    borderRadius: "8px",
+                    backgroundColor: "#1e293b",
+                    border: "1px solid rgba(255, 255, 255, 0.1)",
+                    color: "#f8fafc",
+                    fontSize: "12px",
+                    fontFamily: "monospace"
+                  }}
+                />
+                <span style={{ fontSize: "11px", color: "#64748b", marginTop: "4px", display: "block" }}>
+                  Dedicated key used if Custom REST API is unreachable or returns an error.
+                </span>
+              </div>
+
+              <div>
+                <label style={{ display: "block", fontSize: "12px", fontWeight: "700", color: "#cbd5e1", marginBottom: "6px" }}>
+                  Flow 2 Model Selector (Premium Models)
+                </label>
+                <select
+                  value={aiSettings.premium_openrouter_model}
+                  onChange={(e) => setAiSettings({ ...aiSettings, premium_openrouter_model: e.target.value })}
+                  style={{
+                    width: "100%",
+                    padding: "10px 12px",
+                    borderRadius: "8px",
+                    backgroundColor: "#1e293b",
+                    border: "1px solid rgba(255, 255, 255, 0.1)",
+                    color: "#f8fafc",
+                    fontSize: "12px"
+                  }}
+                >
+                  <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet (Anthropic)</option>
+                  <option value="deepseek/deepseek-r1">DeepSeek R1 (Reasoning Model)</option>
+                  <option value="openai/gpt-4o">GPT-4o (OpenAI)</option>
+                  <option value="google/gemini-2.5-flash">Gemini 2.5 Flash (Google)</option>
+                  <option value="meta-llama/llama-3.3-70b-instruct">Llama 3.3 70B (Meta)</option>
+                </select>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "10px" }}>
+                <button
+                  type="button"
+                  onClick={() => setShowSettingsModal(false)}
+                  style={{
+                    padding: "8px 16px",
+                    borderRadius: "8px",
+                    backgroundColor: "#334155",
+                    color: "#f8fafc",
+                    border: "none",
+                    cursor: "pointer",
+                    fontSize: "12px"
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingSettings}
+                  style={{
+                    padding: "8px 20px",
+                    borderRadius: "8px",
+                    backgroundColor: "#9333ea",
+                    color: "white",
+                    border: "none",
+                    cursor: "pointer",
+                    fontSize: "12px",
+                    fontWeight: "700",
+                    boxShadow: "0 2px 8px rgba(147, 51, 234, 0.4)"
+                  }}
+                >
+                  {savingSettings ? "Saving..." : "Save AI Settings"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* TOOLBAR */}
       <div style={{
         display: "flex",
@@ -541,6 +843,25 @@ export function TradingDashboard() {
         </h2>
         <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
           <button
+            onClick={() => setShowSettingsModal(true)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+              padding: "8px 14px",
+              fontSize: "12px",
+              fontWeight: "700",
+              borderRadius: "8px",
+              backgroundColor: "rgba(168, 85, 247, 0.15)",
+              color: "#c084fc",
+              border: "1px solid rgba(168, 85, 247, 0.3)",
+              cursor: "pointer"
+            }}
+          >
+            <Settings size={15} />
+            ⚙️ AI Pipeline Settings
+          </button>
+          <button
             onClick={handlePollNow}
             disabled={manualPolling}
             style={{
@@ -551,9 +872,9 @@ export function TradingDashboard() {
               fontSize: "12px",
               fontWeight: "700",
               borderRadius: "8px",
-              backgroundColor: "rgba(168, 85, 247, 0.2)",
-              color: "#c084fc",
-              border: "1px solid rgba(168, 85, 247, 0.3)",
+              backgroundColor: "rgba(59, 130, 246, 0.2)",
+              color: "#60a5fa",
+              border: "1px solid rgba(59, 130, 246, 0.3)",
               cursor: "pointer",
               transition: "all 0.2s"
             }}
@@ -596,6 +917,7 @@ export function TradingDashboard() {
           </button>
         </div>
       </div>
+
 
       {/* ADD TARGET STOCK FORM */}
       {showAddForm && (
@@ -1025,48 +1347,126 @@ export function TradingDashboard() {
           </div>
         </div>
 
-        {/* Premium AI Analysis Logs */}
+        {/* Premium 2-Step AI Earnings Analysis Logs */}
         <div style={{
           background: "rgba(17, 24, 39, 0.6)",
-          border: "1px solid rgba(255, 255, 255, 0.08)",
+          border: "1px solid rgba(168, 85, 247, 0.2)",
           borderRadius: "12px",
           padding: "16px"
         }}>
-          <h3 style={{ fontSize: "14px", fontWeight: "700", color: "#f8fafc", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
-            <Cpu size={16} className="text-purple-400" /> Premium AI Analysis ({aiLogs.length})
+          <h3 style={{ fontSize: "14px", fontWeight: "700", color: "#f8fafc", marginBottom: "14px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <Cpu size={16} className="text-purple-400" /> 2-Step AI Earnings Analysis ({aiLogs.length})
+            </span>
+            <span style={{ fontSize: "10px", color: "#c084fc", background: "rgba(168,85,247,0.1)", padding: "2px 8px", borderRadius: "12px" }}>
+              Auto-Triggered Post BUY Order
+            </span>
           </h3>
-          <div style={{ maxHeight: "350px", overflowY: "auto" }}>
+          <div style={{ maxHeight: "420px", overflowY: "auto" }}>
             {aiLogs.length === 0 ? (
               <div style={{ color: "#64748b", fontSize: "12px", textAlign: "center", padding: "20px" }}>
-                No premium trade AI logs yet.
+                No earnings AI analysis logs yet. Auto-trading poller will populate AI results as soon as announcements arrive.
               </div>
             ) : (
-              aiLogs.map((log) => (
-                <div key={log.id} style={{
-                  padding: "12px",
-                  borderRadius: "8px",
-                  backgroundColor: "#0d131f",
-                  border: "1px solid rgba(168, 85, 247, 0.2)",
-                  marginBottom: "10px",
-                  fontSize: "12px"
-                }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "700", color: "#f8fafc" }}>
-                    <span>#{log.symbol}</span>
-                    <span style={{
-                      color: log.ai_sentiment === "positive" ? "#34d399" : log.ai_sentiment === "negative" ? "#f87171" : "#94a3b8",
-                      fontSize: "11px"
-                    }}>
-                      {(log.ai_sentiment || "neutral").toUpperCase()}
-                    </span>
+              aiLogs.map((log) => {
+                const suggestion = (log.ai_suggestion || log.ai_sentiment || "HOLD").toUpperCase();
+                const isBeat = suggestion.includes("BEAT") || suggestion.includes("BUY") || log.ai_sentiment === "positive";
+                const isMiss = suggestion.includes("MISS") || suggestion.includes("SELL") || log.ai_sentiment === "negative";
+
+                return (
+                  <div key={log.id} style={{
+                    padding: "14px",
+                    borderRadius: "10px",
+                    backgroundColor: "#0d131f",
+                    border: isBeat ? "1px solid rgba(16, 185, 129, 0.3)" : isMiss ? "1px solid rgba(239, 68, 68, 0.3)" : "1px solid rgba(168, 85, 247, 0.25)",
+                    marginBottom: "14px",
+                    fontSize: "12px"
+                  }}>
+                    {/* Header bar: Symbol, Suggestion Badge, Flow Used */}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <span style={{ fontSize: "15px", fontWeight: "800", color: "#f8fafc" }}>#{log.symbol}</span>
+                        <span style={{
+                          padding: "2px 8px",
+                          borderRadius: "6px",
+                          fontSize: "11px",
+                          fontWeight: "800",
+                          backgroundColor: isBeat ? "#059669" : isMiss ? "#dc2626" : "#d97706",
+                          color: "white"
+                        }}>
+                          💡 {suggestion}
+                        </span>
+                      </div>
+                      <span style={{
+                        fontSize: "10px",
+                        fontWeight: "600",
+                        color: log.flow_used === "custom_rest_api" ? "#60a5fa" : "#c084fc",
+                        background: log.flow_used === "custom_rest_api" ? "rgba(59,130,246,0.1)" : "rgba(168,85,247,0.1)",
+                        padding: "2px 8px",
+                        borderRadius: "10px",
+                        border: log.flow_used === "custom_rest_api" ? "1px solid rgba(59,130,246,0.2)" : "1px solid rgba(168,85,247,0.2)"
+                      }}>
+                        {log.flow_used === "custom_rest_api" ? "Flow 1: Custom REST API" : `Flow 2: ${log.provider}`}
+                      </span>
+                    </div>
+
+                    {/* Announcement Headline */}
+                    <div style={{ fontSize: "12px", fontWeight: "600", color: "#e2e8f0", marginBottom: "8px" }}>
+                      📢 {log.nse_event_title || "NSE Corporate Announcement"}
+                    </div>
+
+                    {/* Structured Financial Metrics Grid */}
+                    {(log.revenue || log.pat_yoy || log.operating_profit) && (
+                      <div style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr 1fr",
+                        gap: "6px",
+                        backgroundColor: "#161e2e",
+                        padding: "10px",
+                        borderRadius: "8px",
+                        marginBottom: "8px",
+                        fontSize: "11px"
+                      }}>
+                        <div><strong style={{ color: "#94a3b8" }}>Revenue:</strong> <span style={{ color: "#f1f5f9" }}>{log.revenue || "N/A"}</span></div>
+                        <div><strong style={{ color: "#94a3b8" }}>Expenses:</strong> <span style={{ color: "#f1f5f9" }}>{log.expenses || "N/A"}</span></div>
+                        <div><strong style={{ color: "#94a3b8" }}>Op. Profit:</strong> <span style={{ color: "#f1f5f9" }}>{log.operating_profit || "N/A"}</span></div>
+                        <div><strong style={{ color: "#94a3b8" }}>PAT (YoY):</strong> <span style={{ color: "#34d399", fontWeight: "700" }}>{log.pat_yoy || "N/A"}</span></div>
+                      </div>
+                    )}
+
+                    {/* Future Growth & Broker Estimates */}
+                    {log.growth_projection && log.growth_projection !== "N/A" && (
+                      <div style={{ fontSize: "11px", color: "#cbd5e1", marginBottom: "4px" }}>
+                        <strong style={{ color: "#38bdf8" }}>🔮 Future Growth:</strong> {log.growth_projection}
+                      </div>
+                    )}
+                    {log.broker_estimates && log.broker_estimates !== "N/A" && (
+                      <div style={{ fontSize: "11px", color: "#cbd5e1", marginBottom: "6px" }}>
+                        <strong style={{ color: "#fbbf24" }}>🎯 Broker Estimates:</strong> {log.broker_estimates}
+                      </div>
+                    )}
+
+                    {/* AI Executive Summary */}
+                    <div style={{ fontSize: "11px", color: "#94a3b8", fontStyle: "italic", lineHeight: "1.4", borderTop: "1px dashed rgba(255,255,255,0.08)", paddingTop: "6px", marginTop: "6px" }}>
+                      "{log.ai_summary}"
+                    </div>
+
+                    {/* Attachment Link */}
+                    {log.attachment_url && log.attachment_url.startsWith("http") && (
+                      <div style={{ marginTop: "8px", textAlign: "right" }}>
+                        <a
+                          href={log.attachment_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ fontSize: "11px", color: "#60a5fa", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                        >
+                          View Full NSE Document <ExternalLink size={12} />
+                        </a>
+                      </div>
+                    )}
                   </div>
-                  <div style={{ fontSize: "11px", color: "#94a3b8", marginTop: "2px" }}>
-                    Engine: <strong style={{ color: "#c084fc" }}>{log.provider.toUpperCase()}</strong> | {log.nse_event_title || ""}
-                  </div>
-                  <div style={{ fontSize: "11px", color: "#cbd5e1", marginTop: "6px", fontStyle: "italic", lineHeight: "1.4" }}>
-                    "{log.ai_summary}"
-                  </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>

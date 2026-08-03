@@ -58,6 +58,13 @@ class ManualOrderRequest(BaseModel):
     limit_price: Optional[float] = None
 
 
+class AutoTradingSettingsUpdate(BaseModel):
+    custom_api_url: Optional[str] = None
+    premium_openrouter_api_key: Optional[str] = None
+    premium_openrouter_model: Optional[str] = None
+
+
+
 # ─── Serializer helpers ─────────────────────────────────────────────────────
 
 def _serialize_config(c: TradeConfig) -> dict:
@@ -120,6 +127,16 @@ def _serialize_ai_log(a: TradeAILog) -> dict:
         "ai_summary": a.ai_summary,
         "nse_event_title": a.nse_event_title,
         "created_at": a.created_at.isoformat() if a.created_at else None,
+        "revenue": a.revenue,
+        "expenses": a.expenses,
+        "operating_profit": a.operating_profit,
+        "pbt": a.pbt,
+        "pat_yoy": a.pat_yoy,
+        "growth_projection": a.growth_projection,
+        "broker_estimates": a.broker_estimates,
+        "ai_suggestion": a.ai_suggestion,
+        "attachment_url": a.attachment_url,
+        "flow_used": a.flow_used,
     }
 
 
@@ -479,3 +496,61 @@ def stoploss_status():
     """Get stoploss monitor status."""
     from app.services.stoploss_monitor import get_stoploss_status
     return get_stoploss_status()
+
+
+# ─── Upcoming Earnings Calendar & Auto Trading AI Settings ─────────────────
+
+@router.get("/upcoming-earnings")
+def get_upcoming_earnings(db: Session = Depends(get_db)):
+    """Fetch upcoming earnings / board meetings for stocks."""
+    from app.database import MarketEvent
+    
+    bms = db.query(MarketEvent).filter(
+        MarketEvent.event_type == "board_meeting"
+    ).order_by(MarketEvent.created_at.desc()).limit(100).all()
+
+    upcoming = []
+    seen = set()
+    for bm in bms:
+        if not bm.symbol or bm.symbol in seen:
+            continue
+        seen.add(bm.symbol)
+        raw = {}
+        if bm.raw_data:
+            try:
+                raw = json.loads(bm.raw_data)
+            except Exception:
+                pass
+        meeting_date = raw.get("bm_date", raw.get("meetingDate", ""))
+        purpose = raw.get("purpose", bm.title or "Consideration of Financial Results")
+        upcoming.append({
+            "id": bm.id,
+            "symbol": bm.symbol.upper(),
+            "title": bm.title,
+            "meeting_date": meeting_date or "Upcoming",
+            "purpose": purpose,
+            "created_at": bm.created_at.isoformat() if bm.created_at else None
+        })
+    return {"upcoming_earnings": upcoming}
+
+
+@router.get("/settings")
+def get_auto_trading_settings():
+    """Get auto trading AI configuration."""
+    from app.services.intel_config import get_intel_config
+    cfg = get_intel_config()
+    return {"settings": cfg.auto_trading_ai}
+
+
+@router.post("/settings")
+def update_auto_trading_settings(body: AutoTradingSettingsUpdate):
+    """Save auto trading AI configuration (Custom REST API URL, OpenRouter key, Model)."""
+    from app.services.intel_config import get_intel_config
+    cfg = get_intel_config()
+    cfg.update_auto_trading_ai(
+        custom_api_url=body.custom_api_url,
+        premium_openrouter_api_key=body.premium_openrouter_api_key,
+        premium_openrouter_model=body.premium_openrouter_model
+    )
+    return {"message": "Auto-trading AI settings updated successfully", "settings": cfg.auto_trading_ai}
+
