@@ -1,5 +1,7 @@
-from app.database import SessionLocal, TradeConfig
-from app.services.trade_nse_poller import _get_trade_nse_session, _check_match, _is_recent_announcement
+import sys, os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from database import SessionLocal, TradeConfig
+from services.trade_nse_poller import _get_trade_nse_session, _check_match, _is_recent_announcement
 import json
 
 db = SessionLocal()
