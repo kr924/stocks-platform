@@ -193,6 +193,8 @@ function IntelligenceDashboardContent() {
   const [sseClients, setSseClients] = useState(0);
   const [lastStreamEvent, setLastStreamEvent] = useState<string | null>(null);
   const [streamEventCount, setStreamEventCount] = useState(0);
+  const eventSourceRef = useRef<EventSource | null>(null);
+
   // Local LLM (Ollama) Start/Stop switch state
   const [localLlmEnabled, setLocalLlmEnabled] = useState<boolean>(true);
 
