@@ -220,7 +220,7 @@ def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url
                 last_err = str(e)
                 continue
                 
-    raise RuntimeError(f"All OpenRouter models failed: {last_err}")")
+    raise RuntimeError(f"All OpenRouter models failed: {last_err}")
 
 
 def call_groq(prompt: str, api_key: str, model_name: str = "llama-3.3-70b-versatile") -> dict:
