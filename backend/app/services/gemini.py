@@ -37,50 +37,62 @@ def reload_env_vars():
     }
 
 
-def call_ollama(prompt: str, base_url: str = "http://host.docker.internal:11434", model_name: str = "qwen2.5:3b", timeout: int = 70) -> dict:
-    payload = {
-        "model": model_name,
-        "messages": [
-            {"role": "system", "content": "Respond only with a raw, valid JSON object matching the requested schema. Do not output markdown code blocks."},
-            {"role": "user", "content": prompt}
-        ],
-        "stream": False,
-        "format": "json",
-        "options": {
-            "temperature": 0.1,
-            "num_predict": 512,
-            "num_ctx": 1024
+_ollama_lock = threading.Lock()
+
+
+def call_ollama(prompt: str, base_url: str = "http://host.docker.internal:11434", model_name: str = "qwen2.5:3b", timeout: int = 15) -> dict:
+    """
+    Calls local Ollama API with concurrency lock and 15s timeout to prevent CPU spikes.
+    """
+    # Prevent concurrent Ollama threads from hammering CPU
+    acquired = _ollama_lock.acquire(blocking=False)
+    if not acquired:
+        raise RuntimeError("Ollama CPU is busy with another request")
+
+    try:
+        payload = {
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": "Respond only with a raw, valid JSON object matching the requested schema. Do not output markdown code blocks."},
+                {"role": "user", "content": prompt}
+            ],
+            "stream": False,
+            "format": "json",
+            "options": {
+                "temperature": 0.1,
+                "num_predict": 256,
+                "num_ctx": 512
+            }
         }
-    }
-    
-    # Filter candidate URLs: when inside Docker container, ignore localhost/127.0.0.1 to avoid connection refused
-    is_docker = os.path.exists('/.dockerenv')
-    raw_list = [base_url, os.getenv("OLLAMA_BASE_URL", ""), "http://host.docker.internal:11434", "http://172.17.0.1:11434"]
-    candidate_urls = []
-    for u in raw_list:
-        if not u:
-            continue
-        if is_docker and ("localhost" in u or "127.0.0.1" in u):
-            continue
-        if u not in candidate_urls:
-            candidate_urls.append(u)
-    if not candidate_urls:
-        candidate_urls = ["http://host.docker.internal:11434" if is_docker else "http://localhost:11434"]
         
-    last_err = None
-    for b_url in candidate_urls:
-        url = b_url.rstrip("/") + "/api/chat"
-        try:
-            res = requests.post(url, json=payload, timeout=timeout)
-            res.raise_for_status()
-            raw_text = res.json()["message"]["content"]
-            cleaned = clean_json_response(raw_text)
-            return json.loads(cleaned)
-        except Exception as e:
-            last_err = e
-            continue
+        is_docker = os.path.exists('/.dockerenv')
+        raw_list = [base_url, os.getenv("OLLAMA_BASE_URL", ""), "http://172.17.0.1:11434", "http://host.docker.internal:11434"]
+        candidate_urls = []
+        for u in raw_list:
+            if not u:
+                continue
+            if is_docker and ("localhost" in u or "127.0.0.1" in u):
+                continue
+            if u not in candidate_urls:
+                candidate_urls.append(u)
+        if not candidate_urls:
+            candidate_urls = ["http://172.17.0.1:11434" if is_docker else "http://localhost:11434"]
             
-    raise last_err or RuntimeError("Failed to connect to Ollama service")
+        last_err = None
+        for b_url in candidate_urls:
+            url = b_url.rstrip("/") + "/api/chat"
+            try:
+                res = requests.post(url, json=payload, timeout=timeout)
+                res.raise_for_status()
+                raw_text = res.json()["message"]["content"]
+                cleaned = clean_json_response(raw_text)
+                return json.loads(cleaned)
+            except Exception as e:
+                last_err = e
+                break
+        raise RuntimeError(f"Ollama endpoint failed: {last_err}")
+    finally:
+        _ollama_lock.release()
 
 
 def clean_json_response(text: str) -> str:

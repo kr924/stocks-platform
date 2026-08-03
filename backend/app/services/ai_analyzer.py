@@ -105,8 +105,8 @@ def _call_cloud_llm(prompt: str, event_info: str = ""):
     # ── Phase 2: Ollama fallback ──
     if env.get("ollama_url"):
         try:
-            logger.info("🦙 [CLOUD→OLLAMA FALLBACK]: All cloud keys busy. Routing to Ollama...")
-            res = call_ollama(prompt, env["ollama_url"], env.get("ollama_model", "qwen2.5:3b"), timeout=70)
+            logger.info("🦙 [CLOUD→OLLAMA FALLBACK]: Routing to Ollama (15s timeout)...")
+            res = call_ollama(prompt, env["ollama_url"], env.get("ollama_model", "qwen2.5:3b"), timeout=15)
             try:
                 from app.services.ai_log_tracker import record_ai_log
                 record_ai_log("✅ Ollama fallback completed", provider="ollama", tier="success", level="success")
@@ -114,13 +114,13 @@ def _call_cloud_llm(prompt: str, event_info: str = ""):
                 pass
             return res, "ollama"
         except Exception as ollama_err:
-            logger.warning(f"Ollama fallback failed: {ollama_err}")
+            logger.warning(f"Ollama fallback skipped/failed ({ollama_err}). Using Rule Engine.")
 
     # ── Phase 3: Rule Engine fallback ──
-    logger.info("⚡ [RULE ENGINE]: All LLMs unavailable. Using keyword rule engine...")
+    logger.info("⚡ [RULE ENGINE]: Using fast keyword rule engine...")
     try:
         from app.services.ai_log_tracker import record_ai_log
-        record_ai_log("⚡ All LLMs unavailable. Rule Engine fallback (0 AI calls)", provider="", tier="rule_engine", level="warning")
+        record_ai_log("⚡ Rule Engine fallback (0 AI calls)", provider="", tier="rule_engine", level="warning")
     except Exception:
         pass
     res = _smart_rule_analysis(prompt)
@@ -130,10 +130,8 @@ def _call_cloud_llm(prompt: str, event_info: str = ""):
 def _call_local_llm(prompt: str, event_info: str = ""):
     """
     Local-only LLM routing for STANDARD tier items.
-    1. Calls local Ollama with 30s timeout.
-    2. If fails, retries ONCE more.
-    3. If second attempt also fails → returns (None, 'ollama_failed').
-       The caller must leave the item unanalyzed for manual re-analysis.
+    1. Calls local Ollama with 15s timeout.
+    2. If fails or busy, falls back immediately to Rule Engine.
     """
     from app.services.gemini import reload_env_vars, call_ollama
     
@@ -143,30 +141,19 @@ def _call_local_llm(prompt: str, event_info: str = ""):
     ollama_model = env.get("ollama_model", "qwen2.5:3b")
     info_suffix = f" for {event_info}" if event_info else ""
     
-    for attempt in range(1, 3):  # Try up to 2 times
+    try:
+        logger.info(f"🦙 [LOCAL LLM]: Calling Ollama (15s limit){info_suffix}...")
+        res = call_ollama(prompt, ollama_url, ollama_model, timeout=15)
+        return res, "ollama"
+    except Exception as e:
+        logger.warning(f"[OLLAMA] Skipped or timed out ({e}){info_suffix}. Falling back to Rule Engine.")
         try:
-            logger.info(f"🦙 [LOCAL LLM]: Ollama attempt {attempt}/2{info_suffix}...")
-            try:
-                from app.services.ai_log_tracker import record_ai_log
-                record_ai_log(f"Ollama attempt {attempt}/2{info_suffix}", provider="ollama", tier="execution", level="info")
-            except Exception:
-                pass
-            res = call_ollama(prompt, ollama_url, ollama_model, timeout=70)
-            try:
-                from app.services.ai_log_tracker import record_ai_log
-                record_ai_log(f"✅ Local Ollama completed (attempt {attempt}){info_suffix}", provider="ollama", tier="success", level="success")
-            except Exception:
-                pass
-            return res, "ollama"
-        except Exception as e:
-            logger.warning(f"[OLLAMA] Attempt {attempt}/2 failed: {e}")
-            try:
-                from app.services.ai_log_tracker import record_ai_log
-                record_ai_log(f"❌ Ollama attempt {attempt}/2 failed: {str(e)[:100]}{info_suffix}", provider="ollama", tier="error", level="error")
-            except Exception:
-                pass
-            if attempt < 2:
-                time.sleep(2)  # Brief pause before retry
+            from app.services.ai_log_tracker import record_ai_log
+            record_ai_log(f"⚡ Ollama skipped ({str(e)[:60]}). Rule Engine used{info_suffix}", provider="rule_engine", tier="warning", level="warning")
+        except Exception:
+            pass
+        res = _smart_rule_analysis(prompt)
+        return res, "rule_engine"
     
     # Both attempts failed — return failure signal
     logger.warning(f"🚫 [LOCAL LLM FAILED]: Ollama unavailable after 2 attempts{info_suffix}. Leaving unanalyzed for manual re-analysis.")
