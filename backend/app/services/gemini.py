@@ -139,8 +139,8 @@ def call_openai(prompt: str, api_key: str) -> dict:
     return json.loads(cleaned)
 
 
-def call_openrouter(prompt: str, api_key: str) -> dict:
-    """Call OpenRouter API with dynamic live free model discovery and dual payload attempt."""
+def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url: str = None) -> dict:
+    """Call OpenRouter API with dynamic model discovery and document URL attachment support."""
     key = api_key.strip().rstrip(">").strip('"').strip("'").strip()
     if not key or key.startswith("YOUR_"):
         raise ValueError("Invalid or placeholder OpenRouter API key")
@@ -152,8 +152,11 @@ def call_openrouter(prompt: str, api_key: str) -> dict:
         "X-Title": "Stocks Platform AI",
     }
     
+    models_to_try = []
+    if model:
+        models_to_try.append(model)
+
     # 1. Fetch live free models dynamically from OpenRouter's API
-    free_models = []
     try:
         models_res = requests.get("https://openrouter.ai/api/v1/models", timeout=5)
         if models_res.ok:
@@ -163,42 +166,49 @@ def call_openrouter(prompt: str, api_key: str) -> dict:
                 pricing = m.get("pricing", {})
                 p_prompt = str(pricing.get("prompt", "1"))
                 p_compl = str(pricing.get("completion", "1"))
-                if m_id.endswith(":free") or (p_prompt == "0" and p_compl == "0"):
-                    free_models.append(m_id)
+                if (m_id.endswith(":free") or (p_prompt == "0" and p_compl == "0")) and m_id not in models_to_try:
+                    models_to_try.append(m_id)
     except Exception as e:
         logger.warning(f"Failed to fetch live OpenRouter models list: {e}")
     
-    # Fallback model list if dynamic fetch returned 0
-    if not free_models:
-        free_models = [
+    if not models_to_try:
+        models_to_try = [
             "openrouter/auto",
             "google/gemini-2.0-flash-exp:free",
             "meta-llama/llama-3.1-8b-instruct:free",
             "qwen/qwen-2.5-coder-32b-instruct:free",
-            "mistralai/mistral-small-24b-instruct-2501:free",
-            "cognitivecomputations/dolphin3.0-r1-mistral-24b:free",
         ]
     
-    # Prepend openrouter/auto if not present
-    if "openrouter/auto" not in free_models:
-        free_models.insert(0, "openrouter/auto")
+    if "openrouter/auto" not in models_to_try and not model:
+        models_to_try.insert(0, "openrouter/auto")
         
+    user_content = prompt
+    if attachment_url and attachment_url.startswith("http"):
+        user_content = [
+            {"type": "text", "text": prompt},
+            {
+                "type": "file",
+                "file_url": {
+                    "url": attachment_url
+                }
+            }
+        ]
+
     last_err = None
-    for model_name in free_models:
-        # Attempt with and without response_format parameter
+    for model_name in models_to_try:
         for use_json_format in [True, False]:
             payload = {
                 "model": model_name,
                 "messages": [
                     {"role": "system", "content": "Respond only with a raw, valid JSON object matching the requested schema. Do not output markdown code blocks or conversational text."},
-                    {"role": "user", "content": prompt}
+                    {"role": "user", "content": user_content}
                 ]
             }
-            if use_json_format:
+            if use_json_format and isinstance(user_content, str):
                 payload["response_format"] = {"type": "json_object"}
                 
             try:
-                res = requests.post("https://openrouter.ai/api/v1/chat/completions", json=payload, headers=headers, timeout=20)
+                res = requests.post("https://openrouter.ai/api/v1/chat/completions", json=payload, headers=headers, timeout=25)
                 if res.ok:
                     raw_text = res.json()["choices"][0]["message"]["content"]
                     cleaned = clean_json_response(raw_text)
@@ -210,7 +220,7 @@ def call_openrouter(prompt: str, api_key: str) -> dict:
                 last_err = str(e)
                 continue
                 
-    raise RuntimeError(f"All OpenRouter free models failed: {last_err}")
+    raise RuntimeError(f"All OpenRouter models failed: {last_err}")")
 
 
 def call_groq(prompt: str, api_key: str, model_name: str = "llama-3.3-70b-versatile") -> dict:

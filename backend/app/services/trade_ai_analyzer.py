@@ -224,6 +224,7 @@ def _do_analyze_earnings_disclosure_2step(
     pdf_text: str = "",
     config_id: Optional[int] = None
 ) -> Optional[dict]:
+    import base64
     import requests
     from datetime import datetime
     from app.services.intel_config import get_intel_config
@@ -232,14 +233,14 @@ def _do_analyze_earnings_disclosure_2step(
     cfg = get_intel_config()
     auto_ai_cfg = cfg.auto_trading_ai
     
-    custom_url = auto_ai_cfg.get("custom_api_url", "http://localhost:11434/api/generate").strip()
+    custom_url = auto_ai_cfg.get("custom_api_url", "http://localhost:3000/api/generate").strip()
     openrouter_key = auto_ai_cfg.get("premium_openrouter_api_key", "").strip() or os.getenv("OPENROUTER_PREMIUM_API_KEY", "").strip() or os.getenv("OPENROUTER_API_KEY", "").strip()
     openrouter_model = auto_ai_cfg.get("premium_openrouter_model", "anthropic/claude-3.5-sonnet").strip()
 
-    prompt = f"""stock symbol {symbol}   you are indian stock market research analyst. i have companies earnings document in url {attachment_url or 'N/A'}, please analyse this document for earnings and compare results with old earnings (for earnings refer to screener.in) and provide me info in json format of revenue, expenses, Operating Profit, Other Income,Interest,Depreciation,PBT, pat (yoy % , last quarter%, last year same quarter% ) and as per the document analyse how company is projecting future growth and also check how much is expected returns by brokers for this stock in websites and compare with actual and finally provide suggestion like beats estimates, misses estimates(if estimate exists) else give buy , sell, hold
+    prompt = f"""stock symbol {symbol}   you are indian stock market research analyst. i have companies earnings document attached, please analyse this document for earnings and compare results with old earnings (for earnings refer to screener.in) and provide me info in json format of revenue, expenses, Operating Profit, Other Income,Interest,Depreciation,PBT, pat (yoy % , last quarter%, last year same quarter% ) and as per the document analyse how company is projecting future growth and also check how much is expected returns by brokers for this stock in websites and compare with actual and finally provide suggestion like beats estimates, misses estimates(if estimate exists) else give buy , sell, hold
 
 Document Extract / Content snippet:
-{pdf_text[:3500] if pdf_text else 'Refer to attachment document URL'}
+{pdf_text[:3500] if pdf_text else 'Refer to attachment document'}
 
 CRITICAL REQUIREMENT: Output ONLY valid, raw JSON with NO surrounding text, NO introductory conversational phrases like 'Here is the JSON:' or 'Gemini said:', and NO markdown formatting.
 
@@ -262,23 +263,49 @@ Format the JSON response precisely as follows:
     used_flow = "custom_rest_api"
     used_provider = f"custom_api ({custom_url})"
 
-    # --- FLOW 1: Custom REST API ---
+    # --- FLOW 1: gemcall / Custom REST API ---
     if custom_url:
         try:
             logger.info(f"🔬 [AUTO AI FLOW 1]: Posting to Custom REST API: {custom_url} for #{symbol}")
             print(f"🔬 [AUTO AI FLOW 1]: Posting to Custom REST API: {custom_url} for #{symbol}")
 
+            # 1. Download & Base64 Encode PDF Attachment if URL is available
+            base64_pdf = None
+            if attachment_url:
+                try:
+                    from app.services.trade_nse_poller import _get_trade_nse_session
+                    session = _get_trade_nse_session().session
+                    headers_nse = {
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                        "Accept": "application/pdf,*/*",
+                        "Referer": "https://www.nseindia.com/companies-listing/corporate-filings/announcements"
+                    }
+                    pdf_res = session.get(attachment_url, headers=headers_nse, timeout=15)
+                    if pdf_res.status_code == 200 and len(pdf_res.content) > 100:
+                        base64_pdf = base64.b64encode(pdf_res.content).decode("utf-8")
+                        logger.info(f"✅ [FLOW 1 PDF]: Downloaded & Base64 encoded PDF ({len(pdf_res.content)} bytes) for #{symbol}")
+                        print(f"✅ [FLOW 1 PDF]: Downloaded & Base64 encoded PDF ({len(pdf_res.content)} bytes) for #{symbol}")
+                except Exception as pdf_err:
+                    logger.warning(f"⚠️ [FLOW 1 PDF WARNING]: Could not download PDF for base64 encoding: {pdf_err}")
+                    print(f"⚠️ [FLOW 1 PDF WARNING]: Could not download PDF for base64 encoding: {pdf_err}")
+
+            # 2. Build Request Payload
+            payload = {"prompt": prompt}
+            if base64_pdf:
+                payload["images"] = [f"data:application/pdf;base64,{base64_pdf}"]
+
+            # 3. Post to gemcall / Custom REST API (timeout=90s)
             resp = requests.post(
                 custom_url,
-                json={"prompt": prompt},
+                json=payload,
                 headers={"Content-Type": "application/json"},
-                timeout=30
+                timeout=90
             )
             if resp.status_code == 200:
                 try:
                     resp_data = resp.json()
                     if isinstance(resp_data, dict):
-                        result_raw = resp_data.get("response", resp_data.get("text", resp_data.get("content", resp_data.get("result", json.dumps(resp_data)))))
+                        result_raw = resp_data.get("json") or resp_data.get("response") or resp_data.get("text") or resp_data.get("content") or resp_data.get("result") or json.dumps(resp_data)
                     else:
                         result_raw = str(resp_data)
                 except Exception:
@@ -308,7 +335,7 @@ Format the JSON response precisely as follows:
                 logger.error("❌ [AUTO AI FLOW 2]: OpenRouter API Key is missing.")
                 print("❌ [AUTO AI FLOW 2]: OpenRouter API Key is missing.")
             else:
-                or_res = call_openrouter(prompt, openrouter_key, model=openrouter_model)
+                or_res = call_openrouter(prompt, openrouter_key, model=openrouter_model, attachment_url=attachment_url)
                 if or_res and "analyses" in or_res and or_res["analyses"]:
                     result_raw = json.dumps(or_res["analyses"][0])
                 elif or_res:
