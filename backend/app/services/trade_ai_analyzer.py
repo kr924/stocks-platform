@@ -171,40 +171,40 @@ Respond STRICTLY in JSON format with the following keys:
     used_provider = f"custom_api ({custom_url})"
 
     # --- FLOW 1: Custom REST API ---
-    try:
-        logger.info(f"🔬 [AUTO AI FLOW 1]: Posting to Custom REST API: {custom_url} for #{symbol}")
-        print(f"🔬 [AUTO AI FLOW 1]: Posting to Custom REST API: {custom_url} for #{symbol}")
-        
-        payload = {"prompt": prompt}
-        if "11434" in custom_url or "ollama" in custom_url.lower():
-            ollama_model = os.getenv("OLLAMA_MODEL", "qwen3-vl:4b")
-            payload["model"] = ollama_model
-            payload["stream"] = False
+    if custom_url:
+        try:
+            logger.info(f"🔬 [AUTO AI FLOW 1]: Posting to Custom REST API: {custom_url} for #{symbol}")
+            print(f"🔬 [AUTO AI FLOW 1]: Posting to Custom REST API: {custom_url} for #{symbol}")
 
-        resp = requests.post(
-            custom_url,
-            json=payload,
-            headers={"Content-Type": "application/json"},
-            timeout=25
-        )
-        if resp.status_code == 200:
-            resp_data = resp.json()
-            if isinstance(resp_data, dict):
-                result_raw = resp_data.get("response", resp_data.get("text", resp_data.get("content", json.dumps(resp_data))))
+            resp = requests.post(
+                custom_url,
+                json={"prompt": prompt},
+                headers={"Content-Type": "application/json"},
+                timeout=30
+            )
+            if resp.status_code == 200:
+                try:
+                    resp_data = resp.json()
+                    if isinstance(resp_data, dict):
+                        result_raw = resp_data.get("response", resp_data.get("text", resp_data.get("content", resp_data.get("result", json.dumps(resp_data)))))
+                    else:
+                        result_raw = str(resp_data)
+                except Exception:
+                    result_raw = resp.text
+
+                used_flow = "custom_rest_api"
+                used_provider = f"Custom REST API ({custom_url})"
+                logger.info(f"✅ [AUTO AI FLOW 1 SUCCESS]: Custom REST API responded for #{symbol}")
+                print(f"✅ [AUTO AI FLOW 1 SUCCESS]: Custom REST API responded for #{symbol}")
             else:
-                result_raw = str(resp_data)
-            used_flow = "custom_rest_api"
-            used_provider = f"Custom REST API ({custom_url})"
-            logger.info(f"✅ [AUTO AI FLOW 1 SUCCESS]: Custom REST API responded for #{symbol}")
-            print(f"✅ [AUTO AI FLOW 1 SUCCESS]: Custom REST API responded for #{symbol}")
-        else:
-            logger.warning(f"⚠️ [AUTO AI FLOW 1 FAILED]: Status {resp.status_code} ({resp.text[:100]}). Triggering OpenRouter fallback.")
-            print(f"⚠️ [AUTO AI FLOW 1 FAILED]: Status {resp.status_code}. Triggering OpenRouter fallback.")
+                logger.warning(f"⚠️ [AUTO AI FLOW 1 FAILED]: Status {resp.status_code} ({resp.text[:100]}). Triggering OpenRouter fallback.")
+                print(f"⚠️ [AUTO AI FLOW 1 FAILED]: Status {resp.status_code} ({resp.text[:100]}). Triggering OpenRouter fallback.")
+                result_raw = None
+        except Exception as e:
+            logger.warning(f"⚠️ [AUTO AI FLOW 1 ERROR]: {e}. Falling back to OpenRouter Premium.")
+            print(f"⚠️ [AUTO AI FLOW 1 ERROR]: {e}. Falling back to OpenRouter Premium.")
             result_raw = None
-    except Exception as e:
-        logger.warning(f"⚠️ [AUTO AI FLOW 1 ERROR]: {e}. Falling back to OpenRouter Premium.")
-        print(f"⚠️ [AUTO AI FLOW 1 ERROR]: {e}. Falling back to OpenRouter Premium.")
-        result_raw = None
+
 
     # --- FLOW 2: OpenRouter Premium Fallback ---
     if not result_raw:
