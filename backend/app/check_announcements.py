@@ -27,3 +27,6 @@ for symbol in ["STOVEKRAFT", "KANSAINER"]:
         is_rec = _is_recent_announcement(a, max_age_minutes=30)
         print(f"Symbol: {symbol} | Date: {dt} | Recent (<30m): {is_rec}")
         print(f"Subject/Desc: {desc}")
+        print(f"Full RAW dict: {json.dumps(a)}")
+        matched = _check_match(a, [c for c in configs if c.symbol == symbol and c.status == 'armed'])
+        print(f"Matched config: {matched}")
