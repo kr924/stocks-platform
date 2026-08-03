@@ -306,15 +306,32 @@ class IntelConfig:
     
     @property
     def auto_trading_ai(self) -> dict:
-        return self._config.get("auto_trading_ai", {
+        import json
+        ai_cfg = self._config.get("auto_trading_ai", {
             "custom_api_url": "http://localhost:11434/api/generate",
             "premium_openrouter_api_key": "",
             "premium_openrouter_model": "anthropic/claude-3.5-sonnet",
         })
+        try:
+            from app.database import SessionLocal, SystemSetting
+            db = SessionLocal()
+            try:
+                setting = db.query(SystemSetting).filter(SystemSetting.key == "auto_trading_ai").first()
+                if setting and setting.value:
+                    db_cfg = json.loads(setting.value)
+                    if isinstance(db_cfg, dict):
+                        ai_cfg.update(db_cfg)
+                        self._config["auto_trading_ai"] = ai_cfg
+            finally:
+                db.close()
+        except Exception:
+            pass
+        return ai_cfg
     
     def update_auto_trading_ai(self, custom_api_url: str = None, premium_openrouter_api_key: str = None, premium_openrouter_model: str = None):
-        """Update auto_trading_ai settings in memory and attempt YAML persistence."""
-        ai_cfg = self._config.setdefault("auto_trading_ai", {})
+        """Update auto_trading_ai settings in memory, YAML, and persistent database."""
+        import json
+        ai_cfg = dict(self.auto_trading_ai)
         if custom_api_url is not None:
             ai_cfg["custom_api_url"] = custom_api_url.strip()
         if premium_openrouter_api_key is not None:
@@ -322,6 +339,30 @@ class IntelConfig:
         if premium_openrouter_model is not None:
             ai_cfg["premium_openrouter_model"] = premium_openrouter_model.strip()
             
+        self._config["auto_trading_ai"] = ai_cfg
+
+        # 1. Save to SQLite database
+        try:
+            from app.database import SessionLocal, SystemSetting
+            db = SessionLocal()
+            try:
+                setting = db.query(SystemSetting).filter(SystemSetting.key == "auto_trading_ai").first()
+                if not setting:
+                    setting = SystemSetting(key="auto_trading_ai", value=json.dumps(ai_cfg))
+                    db.add(setting)
+                else:
+                    setting.value = json.dumps(ai_cfg)
+                db.commit()
+                logger.info("Saved auto_trading_ai config to database")
+            except Exception as db_err:
+                db.rollback()
+                logger.error(f"Failed to save auto_trading_ai to DB: {db_err}")
+            finally:
+                db.close()
+        except Exception:
+            pass
+
+        # 2. Attempt YAML persistence
         config_path = Path(__file__).parent.parent.parent / "intelligence_config.yaml"
         if HAS_YAML:
             try:
@@ -330,6 +371,7 @@ class IntelConfig:
                 logger.info(f"Saved auto_trading_ai config to {config_path}")
             except Exception as e:
                 logger.error(f"Error saving config YAML: {e}")
+
 
     @property
     def raw(self) -> dict:

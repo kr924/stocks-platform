@@ -190,7 +190,7 @@ export function TradingDashboard() {
       }
       if (settingsRes.ok) {
         const data = await settingsRes.json();
-        if (data.settings) {
+        if (data.settings && !showSettingsModal) {
           setAiSettings(prev => ({
             ...prev,
             ...data.settings

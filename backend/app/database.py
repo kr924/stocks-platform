@@ -192,6 +192,14 @@ class CompanyFiling(Base):
     )
 
 
+class SystemSetting(Base):
+    """Persistent key-value system settings stored in market_tracker.db."""
+    __tablename__ = "system_settings"
+    key = Column(String(100), primary_key=True, index=True)
+    value = Column(Text, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class AIAlert(Base):
     """AI-generated alerts for high-impact market events."""
     __tablename__ = "ai_alerts"
