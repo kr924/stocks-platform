@@ -503,36 +503,10 @@ def stoploss_status():
 
 @router.get("/upcoming-earnings")
 def get_upcoming_earnings(db: Session = Depends(get_db)):
-    """Fetch upcoming earnings / board meetings for stocks."""
-    from app.database import MarketEvent
-    
-    bms = db.query(MarketEvent).filter(
-        MarketEvent.event_type == "board_meeting"
-    ).order_by(MarketEvent.created_at.desc()).limit(100).all()
-
-    upcoming = []
-    seen = set()
-    for bm in bms:
-        if not bm.symbol or bm.symbol in seen:
-            continue
-        seen.add(bm.symbol)
-        raw = {}
-        if bm.raw_data:
-            try:
-                raw = json.loads(bm.raw_data)
-            except Exception:
-                pass
-        meeting_date = raw.get("bm_date", raw.get("meetingDate", ""))
-        purpose = raw.get("purpose", bm.title or "Consideration of Financial Results")
-        upcoming.append({
-            "id": bm.id,
-            "symbol": bm.symbol.upper(),
-            "title": bm.title,
-            "meeting_date": meeting_date or "Upcoming",
-            "purpose": purpose,
-            "created_at": bm.created_at.isoformat() if bm.created_at else None
-        })
-    return {"upcoming_earnings": upcoming}
+    """Fetch upcoming earnings / board meetings for stocks with date sorting and 1y returns."""
+    from app.routers.intelligence import get_upcoming_earnings as get_intel_earnings
+    items = get_intel_earnings(db)
+    return {"upcoming_earnings": items}
 
 
 @router.get("/settings")

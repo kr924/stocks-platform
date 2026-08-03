@@ -96,10 +96,13 @@ interface TradeAILog {
 interface UpcomingEarningsItem {
   id: number;
   symbol: string;
-  title: string;
+  title?: string;
   meeting_date: string;
+  display_date?: string;
   purpose: string;
   created_at?: string;
+  return_1y?: string;
+  returns_1y?: string;
 }
 
 interface AutoTradingSettings {
@@ -641,40 +644,60 @@ export function TradingDashboard() {
             maxHeight: "220px",
             overflowY: "auto"
           }}>
-            {upcomingEarnings.map((item) => (
-              <div
-                key={item.id}
-                onClick={() => selectUpcomingStock(item)}
-                style={{
-                  backgroundColor: "#0d131f",
-                  border: "1px solid rgba(255, 255, 255, 0.08)",
-                  borderRadius: "10px",
-                  padding: "12px",
-                  cursor: "pointer",
-                  transition: "all 0.2s",
-                  display: "flex",
-                  flexDirection: "column",
-                  justify: "space-between"
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.borderColor = "rgba(59, 130, 246, 0.5)")}
-                onMouseLeave={(e) => (e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.08)")}
-              >
-                <div>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
-                    <span style={{ fontSize: "14px", fontWeight: "800", color: "#f8fafc" }}>#{item.symbol}</span>
-                    <span style={{ fontSize: "10px", fontWeight: "600", color: "#38bdf8", background: "rgba(56,189,248,0.1)", padding: "2px 6px", borderRadius: "4px" }}>
-                      {item.meeting_date}
-                    </span>
+            {upcomingEarnings.map((item) => {
+              const ret1y = item.return_1y || item.returns_1y || "N/A";
+              const isPos = ret1y.startsWith("+");
+              const isNeg = ret1y.startsWith("-");
+
+              return (
+                <div
+                  key={item.id || item.symbol}
+                  onClick={() => selectUpcomingStock(item)}
+                  style={{
+                    backgroundColor: "#0d131f",
+                    border: "1px solid rgba(255, 255, 255, 0.08)",
+                    borderRadius: "10px",
+                    padding: "12px",
+                    cursor: "pointer",
+                    transition: "all 0.2s",
+                    display: "flex",
+                    flexDirection: "column",
+                    justifyContent: "space-between"
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = "rgba(59, 130, 246, 0.5)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.08)")}
+                >
+                  <div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                      <span style={{ fontSize: "14px", fontWeight: "800", color: "#f8fafc" }}>#{item.symbol}</span>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                        {ret1y !== "N/A" && (
+                          <span style={{
+                            fontSize: "10px",
+                            fontWeight: "700",
+                            color: isPos ? "#34d399" : isNeg ? "#f87171" : "#94a3b8",
+                            background: isPos ? "rgba(52,211,153,0.12)" : isNeg ? "rgba(248,113,113,0.12)" : "rgba(148,163,184,0.12)",
+                            padding: "2px 6px",
+                            borderRadius: "4px"
+                          }}>
+                            📈 1Y: {ret1y}
+                          </span>
+                        )}
+                        <span style={{ fontSize: "10px", fontWeight: "600", color: "#38bdf8", background: "rgba(56,189,248,0.1)", padding: "2px 6px", borderRadius: "4px" }}>
+                          {item.display_date || item.meeting_date}
+                        </span>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: "11px", color: "#94a3b8", lineHeight: "1.3" }}>
+                      {item.purpose.length > 55 ? item.purpose.slice(0, 55) + "..." : item.purpose}
+                    </div>
                   </div>
-                  <div style={{ fontSize: "11px", color: "#94a3b8", lineHeight: "1.3" }}>
-                    {item.purpose.length > 55 ? item.purpose.slice(0, 55) + "..." : item.purpose}
+                  <div style={{ marginTop: "10px", display: "flex", alignItems: "center", gap: "4px", fontSize: "11px", fontWeight: "700", color: "#60a5fa" }}>
+                    <Plus size={12} /> Add to Target Stocks
                   </div>
                 </div>
-                <div style={{ marginTop: "10px", display: "flex", alignItems: "center", gap: "4px", fontSize: "11px", fontWeight: "700", color: "#60a5fa" }}>
-                  <Plus size={12} /> Add to Target Stocks
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

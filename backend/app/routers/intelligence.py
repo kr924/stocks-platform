@@ -717,62 +717,110 @@ def reload_config():
 
 @router.get("/upcoming-earnings")
 def get_upcoming_earnings(db: Session = Depends(get_db)):
-    """Get stocks with upcoming earnings in the next 7 days."""
-    try:
-        import dateutil.parser
-    except ImportError:
-        dateutil = None
-
+    """Get stocks with upcoming earnings sorted chronologically by meeting date with 1-year returns."""
+    import json, re
     from datetime import datetime, timedelta
+
+    today = datetime.utcnow().date()
+    end_date = today + timedelta(days=30)
     
     bms = db.query(MarketEvent).filter(
-        MarketEvent.event_type == "board_meeting",
-        MarketEvent.category == "earnings"
+        (MarketEvent.event_type == "board_meeting") |
+        (MarketEvent.category == "earnings") |
+        (MarketEvent.category == "board_meeting")
     ).all()
     
-    today = datetime.utcnow().date()
-    end_date = today + timedelta(days=7)
-    
+    def parse_date(date_str):
+        if not date_str:
+            return None
+        date_str = str(date_str).strip()
+        for fmt in ('%d-%b-%Y', '%d-%m-%Y', '%Y-%m-%d', '%d/%m/%Y', '%b %d, %Y'):
+            try:
+                return datetime.strptime(date_str, fmt).date()
+            except ValueError:
+                pass
+        m = re.search(r'(\d{1,2})[-/\s]+([A-Za-z]{3})[-/\s]+(\d{2,4})', date_str)
+        if m:
+            try:
+                day, month_str, year = m.groups()
+                if len(year) == 2:
+                    year = '20' + year
+                return datetime.strptime(f'{day}-{month_str}-{year}', '%d-%b-%Y').date()
+            except Exception:
+                pass
+        return None
+
     upcoming = []
     seen = set()
+
     for bm in bms:
-        try:
-            raw = json.loads(bm.raw_data) if bm.raw_data else {}
-            meeting_date_str = raw.get("bm_date", raw.get("meetingDate", ""))
-            if not meeting_date_str:
-                continue
-                
-            # Parse the meeting date (usually in %d-%b-%Y format)
-            try:
-                meeting_date = datetime.strptime(meeting_date_str.strip(), "%d-%b-%Y").date()
-            except ValueError:
-                # Fallback parser
-                try:
-                    if dateutil:
-                        meeting_date = dateutil.parser.parse(meeting_date_str).date()
-                    else:
-                        meeting_date = datetime.fromisoformat(meeting_date_str.replace("Z", "")).date()
-                except Exception:
-                    continue
-                
-            # Check if it falls within the 7-day window
-            if today <= meeting_date <= end_date:
-                # Deduplicate by symbol
-                key = (bm.symbol, meeting_date)
-                if key not in seen:
-                    seen.add(key)
-                    upcoming.append({
-                        "symbol": bm.symbol,
-                        "date": meeting_date.isoformat(),
-                        "purpose": raw.get("bm_purpose", raw.get("purpose", "Financial Results")),
-                        "description": bm.description,
-                    })
-        except Exception as e:
-            logger.debug(f"Error parsing upcoming earning date: {e}")
+        symbol = bm.symbol
+        if not symbol:
             continue
-            
-    # Sort by date ascending
+        symbol = symbol.strip().upper()
+        raw = {}
+        if bm.raw_data:
+            try:
+                raw = json.loads(bm.raw_data)
+            except Exception:
+                pass
+
+        m_date_str = raw.get("bm_date", raw.get("meetingDate", raw.get("bm_dt", "")))
+        m_date = parse_date(m_date_str)
+        if not m_date:
+            if bm.event_time and bm.event_time.date() >= (today - timedelta(days=1)):
+                m_date = bm.event_time.date()
+            else:
+                continue
+
+        if (today - timedelta(days=1)) <= m_date <= end_date:
+            key = (symbol, m_date)
+            if key not in seen:
+                seen.add(key)
+                purpose = raw.get("bm_purpose", raw.get("purpose", bm.title or "Financial Results"))
+                upcoming.append({
+                    "id": bm.id,
+                    "symbol": symbol,
+                    "date": m_date.isoformat(),
+                    "meeting_date": m_date.isoformat(),
+                    "display_date": m_date.strftime("%d %b %Y"),
+                    "purpose": purpose,
+                    "title": bm.title or f"{symbol}: Board Meeting",
+                    "description": bm.description or purpose,
+                    "created_at": bm.created_at.isoformat() if bm.created_at else None
+                })
+
+    # Sort chronologically by meeting date ascending
     upcoming.sort(key=lambda x: x["date"])
+
+    # Calculate / Attach 1-year returns %
+    from app.services.mock_feed import MockMarketFeed
+    feed = MockMarketFeed()
+    from_1y_str = (today - timedelta(days=365)).strftime("%Y-%m-%d")
+    today_str = today.strftime("%Y-%m-%d")
+
+    for item in upcoming:
+        sym = item["symbol"]
+        try:
+            ikey = f"NSE_EQ|{sym}"
+            candles = feed.get_historical_candles(ikey, "day", today_str, from_1y_str)
+            if candles and len(candles) > 1:
+                p_start = candles[0][4]
+                p_end = candles[-1][4]
+                if p_start > 0:
+                    ret_1y = ((p_end - p_start) / p_start) * 100
+                    item["return_1y"] = f"{ret_1y:+.1f}%"
+                    item["returns_1y"] = f"{ret_1y:+.1f}%"
+                else:
+                    item["return_1y"] = "N/A"
+                    item["returns_1y"] = "N/A"
+            else:
+                item["return_1y"] = "N/A"
+                item["returns_1y"] = "N/A"
+        except Exception:
+            item["return_1y"] = "N/A"
+            item["returns_1y"] = "N/A"
+
     return upcoming
 
 

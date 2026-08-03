@@ -2467,7 +2467,7 @@ function IntelligenceDashboardContent() {
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <FileText size={18} className="text-blue-500" />
               <h2 style={{ fontSize: "14px", fontWeight: "700", color: "#f8fafc", margin: 0 }}>
-                Upcoming Earnings (7 Days)
+                Upcoming Earnings Calendar
               </h2>
             </div>
 
@@ -2481,57 +2481,77 @@ function IntelligenceDashboardContent() {
             }}>
               {upcomingEarnings.length === 0 ? (
                 <div style={{ fontSize: "12px", color: "#64748b", padding: "30px 10px", textAlign: "center" }}>
-                  No earnings scheduled in the next 7 days...
+                  No upcoming earnings scheduled...
                 </div>
               ) : (
-                upcomingEarnings.map((earn, i) => (
-                  <div
-                    key={i}
-                    onClick={() => {
-                      setSearchQuery(earn.symbol);
-                      setPage(1);
-                    }}
-                    style={{
-                      backgroundColor: "rgba(13, 19, 31, 0.6)",
-                      border: "1px solid rgba(255,255,255,0.03)",
-                      borderRadius: "10px",
-                      padding: "10px 12px",
-                      cursor: "pointer",
-                      transition: "all 0.15s"
-                    }}
-                    onMouseOver={(e) => {
-                      e.currentTarget.style.backgroundColor = "rgba(13, 19, 31, 0.8)";
-                    }}
-                    onMouseOut={(e) => {
-                      e.currentTarget.style.backgroundColor = "rgba(13, 19, 31, 0.6)";
-                    }}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                      <span style={{ fontWeight: "700", color: "#f1f5f9", fontSize: "13px" }}>
-                        {earn.symbol}
-                      </span>
-                      <span style={{
-                        fontSize: "10px",
-                        fontWeight: "700",
-                        color: "#60a5fa",
-                        backgroundColor: "rgba(96, 165, 250, 0.12)",
-                        padding: "2px 6px",
-                        borderRadius: "4px"
-                      }}>
-                        {new Date(earn.date).toLocaleDateString("en-IN", { month: "short", day: "numeric" })}
-                      </span>
-                    </div>
+                upcomingEarnings.map((earn: any, i: number) => {
+                  const ret1y = earn.return_1y || earn.returns_1y || "N/A";
+                  const isPos = ret1y.startsWith("+");
+                  const isNeg = ret1y.startsWith("-");
 
-                    <div style={{
-                      fontSize: "11px",
-                      color: "#94a3b8",
-                      marginTop: "6px",
-                      lineHeight: "1.4"
-                    }}>
-                      {earn.purpose}
+                  return (
+                    <div
+                      key={i}
+                      onClick={() => {
+                        setSearchQuery(earn.symbol);
+                        setPage(1);
+                      }}
+                      style={{
+                        backgroundColor: "rgba(13, 19, 31, 0.6)",
+                        border: "1px solid rgba(255,255,255,0.03)",
+                        borderRadius: "10px",
+                        padding: "10px 12px",
+                        cursor: "pointer",
+                        transition: "all 0.15s"
+                      }}
+                      onMouseOver={(e) => {
+                        e.currentTarget.style.backgroundColor = "rgba(13, 19, 31, 0.8)";
+                      }}
+                      onMouseOut={(e) => {
+                        e.currentTarget.style.backgroundColor = "rgba(13, 19, 31, 0.6)";
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                          <span style={{ fontWeight: "700", color: "#f1f5f9", fontSize: "13px" }}>
+                            {earn.symbol}
+                          </span>
+                          {ret1y !== "N/A" && (
+                            <span style={{
+                              fontSize: "10px",
+                              fontWeight: "700",
+                              color: isPos ? "#34d399" : isNeg ? "#f87171" : "#94a3b8",
+                              backgroundColor: isPos ? "rgba(52, 211, 153, 0.12)" : isNeg ? "rgba(248, 113, 113, 0.12)" : "rgba(148, 163, 184, 0.12)",
+                              padding: "2px 5px",
+                              borderRadius: "4px"
+                            }}>
+                              📈 {ret1y}
+                            </span>
+                          )}
+                        </div>
+                        <span style={{
+                          fontSize: "10px",
+                          fontWeight: "700",
+                          color: "#60a5fa",
+                          backgroundColor: "rgba(96, 165, 250, 0.12)",
+                          padding: "2px 6px",
+                          borderRadius: "4px"
+                        }}>
+                          {earn.display_date || (earn.date ? new Date(earn.date).toLocaleDateString("en-IN", { month: "short", day: "numeric" }) : "Upcoming")}
+                        </span>
+                      </div>
+
+                      <div style={{
+                        fontSize: "11px",
+                        color: "#94a3b8",
+                        marginTop: "6px",
+                        lineHeight: "1.4"
+                      }}>
+                        {earn.purpose}
+                      </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>
