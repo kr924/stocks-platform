@@ -103,7 +103,6 @@ def _call_cloud_llm(prompt: str, event_info: str = ""):
                     pass
 
     # ── Phase 2: Ollama fallback ──
-    from app.services.intel_config import get_intel_config
     local_enabled = get_intel_config().local_llm_enabled
 
     if local_enabled and env.get("ollama_url"):
@@ -138,7 +137,6 @@ def _call_local_llm(prompt: str, event_info: str = ""):
     1. Calls local Ollama if enabled in UI.
     2. If disabled, fails, or busy, falls back immediately to Rule Engine.
     """
-    from app.services.intel_config import get_intel_config
     if not get_intel_config().local_llm_enabled:
         logger.info("⏸️ [LOCAL LLM DISABLED]: Local Ollama is turned OFF from UI. Using Rule Engine.")
         res = _smart_rule_analysis(prompt)
