@@ -11,7 +11,8 @@ import {
   RefreshCw,
   Info,
   Clock,
-  Bot
+  Bot,
+  Cpu
 } from "lucide-react";
 
 function parseUtcDate(isoString: string | null | undefined): Date | null {
