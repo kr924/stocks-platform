@@ -151,8 +151,8 @@ def _check_match(announcement: dict, armed_configs: list) -> Optional[dict]:
     return None
 
 
-def _is_recent_announcement(announcement: dict, max_age_minutes: int = 30) -> bool:
-    """Check if the announcement is recent (within max_age_minutes)."""
+def _is_recent_announcement(announcement: dict, max_age_minutes: int = 720) -> bool:
+    """Check if the announcement is recent (within max_age_minutes, default 12 hours)."""
     date_str = str(
         announcement.get("an_dt") or
         announcement.get("bcastDate") or
@@ -174,16 +174,16 @@ def _is_recent_announcement(announcement: dict, max_age_minutes: int = 30) -> bo
         return True
 
 
-_offmarket_interval_minutes = 45.0
+_offmarket_interval_minutes = 5.0  # Reduced offmarket poll interval to 5 min
 
 
 def _is_high_speed_polling_hours() -> bool:
-    """Check if current time is Monday-Friday 9:00 AM to 3:30 PM IST."""
+    """Check if current time is Monday-Friday 9:00 AM to 6:30 PM IST (covers evening earnings disclosures)."""
     now = datetime.now(IST)
     if now.weekday() > 4:  # Saturday = 5, Sunday = 6
         return False
     start_time = now.replace(hour=9, minute=0, second=0, microsecond=0)
-    end_time = now.replace(hour=15, minute=30, second=0, microsecond=0)
+    end_time = now.replace(hour=18, minute=30, second=0, microsecond=0)
     return start_time <= now <= end_time
 
 
