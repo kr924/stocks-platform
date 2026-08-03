@@ -28,5 +28,10 @@ for symbol in ["STOVEKRAFT", "KANSAINER"]:
         print(f"Symbol: {symbol} | Date: {dt} | Recent (<30m): {is_rec}")
         print(f"Subject/Desc: {desc}")
         print(f"Full RAW dict: {json.dumps(a)}")
-        matched = _check_match(a, [c for c in configs if c.symbol == symbol and c.status == 'armed'])
+        armed_dicts = [{
+            "id": c.id,
+            "symbol": c.symbol.upper().strip(),
+            "trigger_subject": c.trigger_subject or "Outcome of Board Meeting",
+        } for c in configs if c.symbol == symbol and c.status == 'armed']
+        matched = _check_match(a, armed_dicts)
         print(f"Matched config: {matched}")
