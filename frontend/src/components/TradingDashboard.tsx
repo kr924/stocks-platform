@@ -160,15 +160,14 @@ export function TradingDashboard() {
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searching, setSearching] = useState(false);
 
-  // Fetch initial data
+  // Fetch initial & fast status data
   const fetchData = async () => {
     try {
-      const [configsRes, ordersRes, aiLogsRes, pollerRes, earningsRes, settingsRes] = await Promise.all([
+      const [configsRes, ordersRes, aiLogsRes, pollerRes, settingsRes] = await Promise.all([
         fetch(`${API_BASE}/api/trading/configs`),
         fetch(`${API_BASE}/api/trading/orders`),
         fetch(`${API_BASE}/api/trading/ai-logs`),
         fetch(`${API_BASE}/api/trading/poller/status`),
-        fetch(`${API_BASE}/api/trading/upcoming-earnings`),
         fetch(`${API_BASE}/api/trading/settings`),
       ]);
 
@@ -188,10 +187,6 @@ export function TradingDashboard() {
         const data = await pollerRes.json();
         setPollerStatus(data);
       }
-      if (earningsRes.ok) {
-        const data = await earningsRes.json();
-        setUpcomingEarnings(data.upcoming_earnings || []);
-      }
       if (settingsRes.ok) {
         const data = await settingsRes.json();
         if (data.settings && !showSettingsModal) {
@@ -205,6 +200,18 @@ export function TradingDashboard() {
       console.error("Error loading trading dashboard data:", err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchUpcomingEarnings = async () => {
+    try {
+      const earningsRes = await fetch(`${API_BASE}/api/trading/upcoming-earnings`);
+      if (earningsRes.ok) {
+        const data = await earningsRes.json();
+        setUpcomingEarnings(data.upcoming_earnings || []);
+      }
+    } catch (err) {
+      console.error("Error loading upcoming earnings:", err);
     }
   };
 
@@ -241,8 +248,13 @@ export function TradingDashboard() {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 5000); // Refresh every 5s
-    return () => clearInterval(interval);
+    fetchUpcomingEarnings();
+    const intervalFast = setInterval(fetchData, 5000); // Poller/status every 5s
+    const intervalEarnings = setInterval(fetchUpcomingEarnings, 60000); // Upcoming earnings every 60s
+    return () => {
+      clearInterval(intervalFast);
+      clearInterval(intervalEarnings);
+    };
   }, []);
 
   // Symbol Search Autocomplete
@@ -632,7 +644,11 @@ export function TradingDashboard() {
           </span>
         </div>
 
-        {upcomingEarnings.length === 0 ? (
+        {loading && upcomingEarnings.length === 0 ? (
+          <div style={{ color: "#60a5fa", fontSize: "12px", textAlign: "center", padding: "20px", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+            <RefreshCw size={14} className="animate-spin" /> Loading upcoming board meetings calendar...
+          </div>
+        ) : upcomingEarnings.length === 0 ? (
           <div style={{ color: "#64748b", fontSize: "12px", textAlign: "center", padding: "16px" }}>
             No upcoming board meetings detected in system feed. Run scrapers or manual poll to discover.
           </div>

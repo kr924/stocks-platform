@@ -744,19 +744,26 @@ def reload_config():
 
 # ─── New Active Stocks & Upcoming Earnings Endpoints ─────────────────────
 
+_1Y_RETURNS_CACHE = {}
+_1Y_RETURNS_CACHE_TIME = 0.0
+_1Y_RETURNS_CACHE_TTL = 3600.0  # 1-hour cache TTL
+
 @router.get("/upcoming-earnings")
 def get_upcoming_earnings(db: Session = Depends(get_db)):
     """Get stocks with upcoming earnings sorted chronologically by meeting date with 1-year returns."""
-    import json, re
+    import json, re, time
     from datetime import datetime, timedelta
+    from sqlalchemy import or_, desc
 
     today = datetime.utcnow().date()
     end_date = today + timedelta(days=30)
     
     bms = db.query(MarketEvent).filter(
-        (MarketEvent.event_type == "board_meeting") |
-        (MarketEvent.category == "earnings") |
-        (MarketEvent.category == "board_meeting")
+        or_(
+            (MarketEvent.event_type == "board_meeting"),
+            (MarketEvent.category == "earnings"),
+            (MarketEvent.category == "board_meeting")
+        )
     ).all()
     
     def parse_date(date_str):
@@ -819,48 +826,55 @@ def get_upcoming_earnings(db: Session = Depends(get_db)):
                     "created_at": bm.created_at.isoformat() if bm.created_at else None
                 })
 
-    # Sort chronologically by meeting date ascending
     upcoming.sort(key=lambda x: x["date"])
 
-    # Calculate / Attach 1-year returns % using Real Market Chart API
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-    import requests
-
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-
-    def fetch_real_1y_return(sym):
-        try:
-            ticker = f"{sym}.NS"
-            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range=1y&interval=1d"
-            r = requests.get(url, headers=headers, timeout=4)
-            if r.status_code == 200:
-                data = r.json()
-                result = data["chart"]["result"][0]
-                closes = [c for c in result["indicators"]["quote"][0]["close"] if c is not None]
-                if len(closes) > 1:
-                    p_start = closes[0]
-                    p_end = closes[-1]
-                    if p_start > 0:
-                        ret_1y = ((p_end - p_start) / p_start) * 100
-                        return sym, f"{ret_1y:+.1f}%"
-        except Exception:
-            pass
-        return sym, "N/A"
+    # Calculate / Attach 1-year returns % using Real Market Chart API with 1-hour cache
+    global _1Y_RETURNS_CACHE, _1Y_RETURNS_CACHE_TIME
+    now_ts = time.time()
 
     unique_symbols = list({item["symbol"] for item in upcoming})
-    returns_map = {}
+    missing_symbols = [s for s in unique_symbols if s not in _1Y_RETURNS_CACHE]
 
-    with ThreadPoolExecutor(max_workers=15) as executor:
-        futures = {executor.submit(fetch_real_1y_return, s): s for s in unique_symbols}
-        for future in as_completed(futures):
+    # Refresh cache if expired (1 hour) or missing symbols exist
+    if (now_ts - _1Y_RETURNS_CACHE_TIME) > _1Y_RETURNS_CACHE_TTL or missing_symbols:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import requests
+
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+
+        def fetch_real_1y_return(sym):
             try:
-                sym, ret_val = future.result()
-                returns_map[sym] = ret_val
+                ticker = f"{sym}.NS"
+                url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range=1y&interval=1d"
+                r = requests.get(url, headers=headers, timeout=4)
+                if r.status_code == 200:
+                    data = r.json()
+                    result = data["chart"]["result"][0]
+                    closes = [c for c in result["indicators"]["quote"][0]["close"] if c is not None]
+                    if len(closes) > 1:
+                        p_start = closes[0]
+                        p_end = closes[-1]
+                        if p_start > 0:
+                            ret_1y = ((p_end - p_start) / p_start) * 100
+                            return sym, f"{ret_1y:+.1f}%"
             except Exception:
                 pass
+            return sym, "N/A"
+
+        to_fetch = missing_symbols if (now_ts - _1Y_RETURNS_CACHE_TIME) <= _1Y_RETURNS_CACHE_TTL else unique_symbols
+        if to_fetch:
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                futures = {executor.submit(fetch_real_1y_return, s): s for s in to_fetch}
+                for future in as_completed(futures):
+                    try:
+                        sym, ret_val = future.result()
+                        _1Y_RETURNS_CACHE[sym] = ret_val
+                    except Exception:
+                        pass
+        _1Y_RETURNS_CACHE_TIME = now_ts
 
     for item in upcoming:
-        ret_val = returns_map.get(item["symbol"], "N/A")
+        ret_val = _1Y_RETURNS_CACHE.get(item["symbol"], "N/A")
         item["return_1y"] = ret_val
         item["returns_1y"] = ret_val
 
