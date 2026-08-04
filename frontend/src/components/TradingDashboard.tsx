@@ -535,41 +535,24 @@ export function TradingDashboard() {
     }
   };
 
-  // Add stock from upcoming earnings calendar to Target Stock Configurations
-  const selectUpcomingStock = async (item: any, autoArm: boolean = false) => {
-    const payload = {
+  // Add stock from upcoming earnings calendar to Target Stock Configurations & open config screen
+  const selectUpcomingStock = (item: any, autoArm: boolean = false) => {
+    setFormData({
       symbol: item.symbol,
+      instrument_key: item.instrument_key || `NSE_EQ|${item.symbol}`,
       purchase_date: item.meeting_date || item.date || todayStr,
       quantity: 1,
       stoploss_pct: 2.0,
       stoploss_type: "software",
       broker: "upstox",
       order_type: "MARKET",
+      limit_price: "",
+      ai_provider: "groq",
       trigger_subject: item.purpose || "Outcome of Board Meeting",
-      ai_provider: "groq"
-    };
-
-    try {
-      const res = await fetch(`${API_BASE}/api/trading/configs`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-
-      if (res.ok) {
-        const newConfig = await res.json();
-        if (autoArm && newConfig.id) {
-          await fetch(`${API_BASE}/api/trading/configs/${newConfig.id}/arm`, { method: "POST" });
-        }
-        fetchData();
-        alert(`✅ Added ${item.symbol} to target stock configurations${autoArm ? ' and ARMED for auto-trading' : ''}!`);
-      } else {
-        const errData = await res.json();
-        alert(`Failed to add target stock: ${errData.detail || 'Unknown error'}`);
-      }
-    } catch (err) {
-      console.error("Error adding target stock:", err);
-    }
+      notes: autoArm ? "Auto-Arm requested from Earnings Calendar" : "Added from Earnings Calendar"
+    });
+    setShowAddForm(true);
+    window.scrollTo({ top: 300, behavior: "smooth" });
   };
 
   // Manual Buy

@@ -886,7 +886,7 @@ def get_upcoming_earnings(db: Session = Depends(get_db)):
             upcoming_keys.append(ikey.replace("|", ":"))
 
         if upcoming_keys:
-            feed = get_active_feed()
+            feed = get_active_feed(db=db)
             live_quotes = feed.get_quotes(upcoming_keys)
             for item in upcoming:
                 sym = item["symbol"].upper()
