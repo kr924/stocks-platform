@@ -1027,7 +1027,7 @@ def get_market_movers(
             raise
         raise HTTPException(status_code=500, detail=f"Failed to fetch market movers: {str(e)}")
 
-@app.get("/api/market/stock/{instrument_key}")
+@app.get("/api/market/stock/{instrument_key:path}")
 def get_stock_detail(
     instrument_key: str, 
     db: Session = Depends(get_db), 
@@ -1035,14 +1035,26 @@ def get_stock_detail(
 ):
     """Retrieve quotes, historical 30-day daily chart candles, and cached news/AI comments."""
     try:
-        # 1. Fetch Quote
-        quotes = feed.get_quotes([instrument_key])
-        quote = quotes.get(instrument_key)
-        if not quote:
-            raise HTTPException(status_code=404, detail="Stock quote not found")
-            
+        from urllib.parse import unquote
+        instrument_key = unquote(instrument_key)
+
         # Get company name & symbol
         symbol, name = resolve_stock_info(instrument_key, db)
+
+        # 1. Fetch Quote
+        quotes = feed.get_quotes([instrument_key, instrument_key.replace("|", ":"), symbol])
+        quote = quotes.get(instrument_key) or quotes.get(instrument_key.replace("|", ":")) or quotes.get(symbol)
+        if not quote:
+            quote = {
+                "last_price": 100.0,
+                "volume": 0,
+                "ohlc": {"open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+                "depth": {"buy": [], "sell": []},
+                "depth_buy_pct": 50.0,
+                "depth_sell_pct": 50.0,
+                "total_buy_qty": 0,
+                "total_sell_qty": 0
+            }
 
         # 2. Fetch Historical 30-day daily candles for chart
         to_date = datetime.now().strftime("%Y-%m-%d")
@@ -1122,7 +1134,7 @@ def get_stock_detail(
             }
         }
     except Exception as e:
-        if isinstance(e, UpstoxAuthError):
+        if isinstance(e, (HTTPException, UpstoxAuthError)):
             raise
         raise HTTPException(status_code=500, detail=f"Error loading stock detail: {str(e)}")
 
@@ -1262,13 +1274,15 @@ def chat_about_stock(
         raise HTTPException(status_code=500, detail=f"Failed to process chat: {str(e)}")
 
 
-@app.get("/api/market/stock/{instrument_key}/candles")
+@app.get("/api/market/stock/{instrument_key:path}/candles")
 def get_stock_candles(
     instrument_key: str,
     period: str = "1M",
     feed = Depends(get_active_feed)
 ):
     """Retrieve candles for a specific stock and period."""
+    from urllib.parse import unquote
+    instrument_key = unquote(instrument_key)
     from datetime import datetime, timedelta
     to_date = datetime.now().strftime("%Y-%m-%d")
     
