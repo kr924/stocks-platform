@@ -19,7 +19,7 @@ def sync_earnings_to_watchlist(db: Session):
         if not upcoming:
             return {"status": "success", "added_count": 0, "synced_count": 0, "synced_symbols": []}
 
-        eqs = get_nse_equities(db=db)
+        eqs = get_nse_equities()
         sym_to_info = {}
         for item in eqs:
             if item.get("symbol") and item.get("key"):
