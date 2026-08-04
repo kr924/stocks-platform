@@ -375,9 +375,21 @@ class IntelConfig:
 
     @property
     def local_llm_enabled(self) -> bool:
-        """Check whether local CPU Ollama LLM is enabled."""
+        """
+        Check whether local CPU Ollama LLM is enabled.
+        By default, from Monday to Friday 9:00 AM IST to 3:30 PM IST (market hours),
+        Local LLM is automatically turned OFF (disabled) to preserve CPU resources for trading poller (0% CPU).
+        """
         import json
-        val = self._config.get("local_llm_enabled", True)
+        from datetime import datetime, timezone, timedelta
+
+        IST = timezone(timedelta(hours=5, minutes=30))
+        now = datetime.now(IST)
+        is_market_hours = (now.weekday() <= 4) and (
+            now.replace(hour=9, minute=0, second=0, microsecond=0) <= now <= now.replace(hour=15, minute=30, second=0, microsecond=0)
+        )
+
+        val = None
         try:
             from app.database import SessionLocal, SystemSetting
             db = SessionLocal()
@@ -389,11 +401,40 @@ class IntelConfig:
                 db.close()
         except Exception:
             pass
+
+        if val is None:
+            # Default behavior: OFF during market hours (Mon-Fri 9am-3:30pm IST), ON off-market
+            val = not is_market_hours
+        elif is_market_hours and val is True:
+            # During market hours, unless explicitly manually forced ON during market hours, stay OFF
+            override_setting = None
+            try:
+                from app.database import SessionLocal, SystemSetting
+                db = SessionLocal()
+                try:
+                    s = db.query(SystemSetting).filter(SystemSetting.key == "local_llm_manual_override").first()
+                    if s and s.value is not None:
+                        override_setting = json.loads(s.value)
+                finally:
+                    db.close()
+            except Exception:
+                pass
+            if not override_setting:
+                val = False
+
         return bool(val)
 
     def set_local_llm_enabled(self, enabled: bool):
         """Set local_llm_enabled state in memory and SQLite database."""
         import json
+        from datetime import datetime, timezone, timedelta
+
+        IST = timezone(timedelta(hours=5, minutes=30))
+        now = datetime.now(IST)
+        is_market_hours = (now.weekday() <= 4) and (
+            now.replace(hour=9, minute=0, second=0, microsecond=0) <= now <= now.replace(hour=15, minute=30, second=0, microsecond=0)
+        )
+
         self._config["local_llm_enabled"] = bool(enabled)
         try:
             from app.database import SessionLocal, SystemSetting
@@ -405,6 +446,15 @@ class IntelConfig:
                     db.add(setting)
                 else:
                     setting.value = json.dumps(bool(enabled))
+                
+                # Save manual override flag for market hours
+                override_setting = db.query(SystemSetting).filter(SystemSetting.key == "local_llm_manual_override").first()
+                if not override_setting:
+                    override_setting = SystemSetting(key="local_llm_manual_override", value=json.dumps(bool(enabled) if is_market_hours else False))
+                    db.add(override_setting)
+                else:
+                    override_setting.value = json.dumps(bool(enabled) if is_market_hours else False)
+
                 db.commit()
                 logger.info(f"Updated local_llm_enabled to {enabled}")
             except Exception as e:

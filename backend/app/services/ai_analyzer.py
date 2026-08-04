@@ -908,11 +908,14 @@ def analyze_pending_events(db: Session) -> int:
                 count += 1
                 continue
             
-            # ── STANDARD — Local Ollama only (retry once) ──
-            logger.info(f"🦙 [STANDARD → LOCAL LLM] Event #{event.id} [{event.symbol or 'GENERAL'}]: '{event.title}'")
+            # ── STANDARD — Local Ollama if enabled, else Rule Engine ──
+            local_on = get_intel_config().local_llm_enabled
+            prov_label = "ollama" if local_on else "rule_engine"
+            tier_label = "Local Ollama" if local_on else "Rule Engine (Local LLM OFF)"
+            logger.info(f"⚡ [STANDARD → {tier_label}] Event #{event.id} [{event.symbol or 'GENERAL'}]: '{event.title}'")
             try:
                 from app.services.ai_log_tracker import record_ai_log
-                record_ai_log(f"Standard tier → Local Ollama: [{event.symbol or 'GENERAL'}] '{event.title}'", provider="ollama", tier="standard", level="info")
+                record_ai_log(f"Standard tier → {tier_label}: [{event.symbol or 'GENERAL'}] '{event.title}'", provider=prov_label, tier="standard", level="info")
             except Exception:
                 pass
             
