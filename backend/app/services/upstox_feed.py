@@ -82,97 +82,103 @@ class UpstoxMarketFeed(BaseMarketFeed):
             if len(cached_result) == len(instrument_keys):
                 return cached_result
 
-        # Upstox supports up to 500 comma separated instrument keys in one call
+        # Batch in chunks of 80 to prevent 414 Request-URI Too Large errors
         url = f"{self.base_url}/market-quote/quotes"
-        params = {"instrument_key": ",".join(instrument_keys)}
-        
-        response = requests.get(url, headers=self._get_headers(), params=params)
-        if response.status_code == 401:
-            raise UpstoxAuthError(f"Unauthorized Upstox API call: {response.text}")
-        elif response.status_code != 200:
-            # If request fails off-market, return cache if available
-            if self._quotes_cache:
-                return {k: self._quotes_cache[k] for k in instrument_keys if k in self._quotes_cache}
-            raise Exception(f"Failed to fetch Upstox quotes: {response.text}")
-            
-        data = response.json().get("data", {})
-        result = {}
-        for key, val in data.items():
-            # Use instrument_token if available (it matches the requested key like 'NSE_EQ|INE002A01018')
-            resolved_key = val.get("instrument_token") or key
-            last_price = val.get("last_price", 0.0)
-            net_change = val.get("net_change", 0.0)
-            # If net_change is non-zero, compute previous close dynamically to get correct non-zero daily change%
-            prev_close = last_price - net_change if net_change != 0.0 else val.get("ohlc", {}).get("close", 0.0)
-            
-            # Parse depth for buyer vs seller sentiment
-            depth = val.get("depth", {}) or {}
-            buy_levels = depth.get("buy", []) or []
-            sell_levels = depth.get("sell", []) or []
-            
-            total_buy_qty_weighted = 0.0
-            total_sell_qty_weighted = 0.0
-            total_buy_qty_raw = 0
-            total_sell_qty_raw = 0
-            epsilon = 0.05
-            
-            for bid in buy_levels:
-                price = bid.get("price", 0.0)
-                qty = bid.get("quantity", 0)
-                total_buy_qty_raw += qty
-                if qty > 0 and price > 0:
-                    weight = 1.0 / (abs(price - last_price) + epsilon)
-                    total_buy_qty_weighted += qty * weight
-                    
-            for ask in sell_levels:
-                price = ask.get("price", 0.0)
-                qty = ask.get("quantity", 0)
-                total_sell_qty_raw += qty
-                if qty > 0 and price > 0:
-                    weight = 1.0 / (abs(price - last_price) + epsilon)
-                    total_sell_qty_weighted += qty * weight
-            
-            grand_total = total_buy_qty_weighted + total_sell_qty_weighted
-            if grand_total > 0:
-                depth_buy_pct = round((total_buy_qty_weighted / grand_total) * 100, 2)
-                depth_sell_pct = round(100.0 - depth_buy_pct, 2)
-            else:
-                depth_buy_pct = 50.0
-                depth_sell_pct = 50.0
+        all_results = {}
+        chunk_size = 80
+        unique_keys = list(set(instrument_keys))
 
-            item_quote = {
-                "last_price": last_price,
-                "volume": val.get("volume", 0),
-                "ohlc": {
-                    "open": val.get("ohlc", {}).get("open", 0.0),
-                    "high": val.get("ohlc", {}).get("high", 0.0),
-                    "low": val.get("ohlc", {}).get("low", 0.0),
-                    "close": round(prev_close, 2),
-                },
-                "depth": {
-                    "buy": buy_levels,
-                    "sell": sell_levels
-                },
-                "depth_buy_pct": depth_buy_pct,
-                "depth_sell_pct": depth_sell_pct,
-                "total_buy_qty": total_buy_qty_raw,
-                "total_sell_qty": total_sell_qty_raw
-            }
-            result[resolved_key] = item_quote
-            self._quotes_cache[resolved_key] = item_quote
+        for i in range(0, len(unique_keys), chunk_size):
+            chunk = unique_keys[i:i + chunk_size]
+            params = {"instrument_key": ",".join(chunk)}
 
-            if key:
-                result[key] = item_quote
-                pipe_key = key.replace(":", "|")
-                result[pipe_key] = item_quote
-                self._quotes_cache[pipe_key] = item_quote
+            try:
+                response = requests.get(url, headers=self._get_headers(), params=params)
+                if response.status_code == 401:
+                    raise UpstoxAuthError(f"Unauthorized Upstox API call: {response.text}")
+                elif response.status_code != 200:
+                    continue
 
-            sym_name = val.get("trading_symbol") or val.get("symbol")
-            if sym_name:
-                sym_upper = sym_name.upper()
-                result[sym_upper] = item_quote
-                self._quotes_cache[sym_upper] = item_quote
-        return result
+                data = response.json().get("data", {})
+                for key, val in data.items():
+                    resolved_key = val.get("instrument_token") or key
+                    last_price = val.get("last_price", 0.0)
+                    net_change = val.get("net_change", 0.0)
+                    prev_close = last_price - net_change if net_change != 0.0 else val.get("ohlc", {}).get("close", 0.0)
+
+                    depth = val.get("depth", {}) or {}
+                    buy_levels = depth.get("buy", []) or []
+                    sell_levels = depth.get("sell", []) or []
+
+                    total_buy_qty_weighted = 0.0
+                    total_sell_qty_weighted = 0.0
+                    total_buy_qty_raw = 0
+                    total_sell_qty_raw = 0
+                    epsilon = 0.05
+
+                    for bid in buy_levels:
+                        price = bid.get("price", 0.0)
+                        qty = bid.get("quantity", 0)
+                        total_buy_qty_raw += qty
+                        if qty > 0 and price > 0:
+                            weight = 1.0 / (abs(price - last_price) + epsilon)
+                            total_buy_qty_weighted += qty * weight
+
+                    for ask in sell_levels:
+                        price = ask.get("price", 0.0)
+                        qty = ask.get("quantity", 0)
+                        total_sell_qty_raw += qty
+                        if qty > 0 and price > 0:
+                            weight = 1.0 / (abs(price - last_price) + epsilon)
+                            total_sell_qty_weighted += qty * weight
+
+                    grand_total = total_buy_qty_weighted + total_sell_qty_weighted
+                    if grand_total > 0:
+                        depth_buy_pct = round((total_buy_qty_weighted / grand_total) * 100, 2)
+                        depth_sell_pct = round(100.0 - depth_buy_pct, 2)
+                    else:
+                        depth_buy_pct = 50.0
+                        depth_sell_pct = 50.0
+
+                    item_quote = {
+                        "last_price": last_price,
+                        "volume": val.get("volume", 0),
+                        "ohlc": {
+                            "open": val.get("ohlc", {}).get("open", 0.0),
+                            "high": val.get("ohlc", {}).get("high", 0.0),
+                            "low": val.get("ohlc", {}).get("low", 0.0),
+                            "close": round(prev_close, 2),
+                        },
+                        "depth": {
+                            "buy": buy_levels,
+                            "sell": sell_levels
+                        },
+                        "depth_buy_pct": depth_buy_pct,
+                        "depth_sell_pct": depth_sell_pct,
+                        "total_buy_qty": total_buy_qty_raw,
+                        "total_sell_qty": total_sell_qty_raw
+                    }
+
+                    all_results[resolved_key] = item_quote
+                    self._quotes_cache[resolved_key] = item_quote
+
+                    if key:
+                        all_results[key] = item_quote
+                        pipe_key = key.replace(":", "|")
+                        all_results[pipe_key] = item_quote
+                        self._quotes_cache[pipe_key] = item_quote
+
+                    sym_name = val.get("trading_symbol") or val.get("symbol")
+                    if sym_name:
+                        sym_upper = sym_name.upper()
+                        all_results[sym_upper] = item_quote
+                        self._quotes_cache[sym_upper] = item_quote
+            except UpstoxAuthError:
+                raise
+            except Exception as err:
+                logger.warning(f"Error in quote chunk fetch: {err}")
+
+        return all_results
 
     def get_historical_candles(self, instrument_key: str, interval: str, to_date: str, from_date: Optional[str] = None) -> List[List[Any]]:
         # Format: /historical-candle/{instrumentKey}/{interval}/{to_date}[/{from_date}]
