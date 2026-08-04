@@ -173,8 +173,6 @@ class UpstoxMarketFeed(BaseMarketFeed):
                         sym_upper = sym_name.upper()
                         all_results[sym_upper] = item_quote
                         self._quotes_cache[sym_upper] = item_quote
-            except UpstoxAuthError:
-                raise
             except Exception as err:
                 logger.warning(f"Error in quote chunk fetch: {err}")
 
@@ -182,7 +180,6 @@ class UpstoxMarketFeed(BaseMarketFeed):
 
     def get_historical_candles(self, instrument_key: str, interval: str, to_date: str, from_date: Optional[str] = None) -> List[List[Any]]:
         # Format: /historical-candle/{instrumentKey}/{interval}/{to_date}[/{from_date}]
-        # Route to intraday endpoint if from_date == to_date (for today's intraday ticks)
         if from_date and from_date == to_date:
             url = f"{self.base_url}/historical-candle/intraday/{instrument_key}/{interval}"
         elif from_date:
@@ -190,25 +187,22 @@ class UpstoxMarketFeed(BaseMarketFeed):
         else:
             url = f"{self.base_url}/historical-candle/{instrument_key}/{interval}/{to_date}"
             
-        # Historical candle does not strictly require headers if public, but authentication header ensures access
         headers = self._get_headers() if self.access_token else {"accept": "application/json"}
         
-        response = requests.get(url, headers=headers)
-        if response.status_code == 401:
-            raise UpstoxAuthError(f"Unauthorized Upstox API call: {response.text}")
-        elif response.status_code != 200:
-            raise Exception(f"Failed to fetch historical candles: {response.text}")
-            
-        # Upstox candles list: [timestamp, open, high, low, close, volume, open_interest]
-        candles = response.json().get("data", {}).get("candles", [])
-        # Upstox returns candles sorted descending (newest first). Let's return them as is,
-        # but the charting library expects them sorted ascending (oldest first).
-        # We can reverse them here or on the frontend. Reversing here is very clean.
-        candles.reverse()
-        return candles
+        try:
+            response = requests.get(url, headers=headers)
+            if response.status_code == 200:
+                candles = response.json().get("data", {}).get("candles", [])
+                candles.reverse()
+                return candles
+            else:
+                logger.warning(f"Upstox historical candles returned status {response.status_code}")
+        except Exception as err:
+            logger.warning(f"Failed to fetch historical candles: {err}")
+
+        return []
 
     def get_news(self, instrument_key: str) -> List[Dict[str, Any]]:
-        # Upstox News API: /v2/news
         url = f"{self.base_url}/news"
         params = {
             "category": "instrument_keys",
@@ -217,44 +211,43 @@ class UpstoxMarketFeed(BaseMarketFeed):
             "page_size": 10
         }
         
-        response = requests.get(url, headers=self._get_headers(), params=params)
-        if response.status_code == 401:
-            raise UpstoxAuthError(f"Unauthorized Upstox API call: {response.text}")
-        elif response.status_code != 200:
-            # If news API fails or is not available on this subscription, fallback to empty list
-            return []
-            
-        data = response.json().get("data", {})
-        articles = []
-        if isinstance(data, dict):
-            articles = data.get(instrument_key, [])
-        elif isinstance(data, list):
-            articles = data
-            
-        result = []
-        for article in articles:
-            # Map Upstox news schema fields:
-            headline = article.get("heading") or article.get("headline") or article.get("title") or "Stock News Update"
-            summary = article.get("summary") or article.get("description") or ""
-            source = article.get("publisher") or article.get("source") or "Upstox News"
-            url_link = article.get("article_link") or article.get("url") or article.get("link") or "#"
-            
-            pub_val = article.get("published_time") or article.get("publish_time") or article.get("published_at")
-            if isinstance(pub_val, (int, float)):
-                pub_time = datetime.utcfromtimestamp(pub_val / 1000).isoformat() + "Z"
-            elif isinstance(pub_val, str):
-                pub_time = pub_val
-            else:
-                pub_time = datetime.utcnow().isoformat()
-            
-            result.append({
-                "headline": headline,
-                "summary": summary,
-                "source": source,
-                "url": url_link,
-                "published_at": pub_time
-            })
-        return result
+        try:
+            response = requests.get(url, headers=self._get_headers(), params=params)
+            if response.status_code == 200:
+                data = response.json().get("data", {})
+                articles = []
+                if isinstance(data, dict):
+                    articles = data.get(instrument_key, [])
+                elif isinstance(data, list):
+                    articles = data
+
+                result = []
+                for article in articles:
+                    headline = article.get("heading") or article.get("headline") or article.get("title") or "Stock News Update"
+                    summary = article.get("summary") or article.get("description") or ""
+                    source = article.get("publisher") or article.get("source") or "Upstox News"
+                    url_link = article.get("article_link") or article.get("url") or article.get("link") or "#"
+
+                    pub_val = article.get("published_time") or article.get("publish_time") or article.get("published_at")
+                    if isinstance(pub_val, (int, float)):
+                        pub_time = datetime.utcfromtimestamp(pub_val / 1000).isoformat() + "Z"
+                    elif isinstance(pub_val, str):
+                        pub_time = pub_val
+                    else:
+                        pub_time = datetime.utcnow().isoformat()
+
+                    result.append({
+                        "headline": headline,
+                        "summary": summary,
+                        "source": source,
+                        "url": url_link,
+                        "published_at": pub_time
+                    })
+                return result
+        except Exception as err:
+            logger.warning(f"Failed to fetch Upstox news: {err}")
+
+        return []
 
     def search(self, query: str) -> List[Dict[str, Any]]:
         if not self.access_token:
