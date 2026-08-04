@@ -893,15 +893,26 @@ def get_upcoming_earnings(db: Session = Depends(get_db)):
                     data = r.json()
                     result = data["chart"]["result"][0]
                     closes = [c for c in result["indicators"]["quote"][0]["close"] if c is not None]
-                    if len(closes) > 1:
+                    meta = result.get("meta", {})
+                    ltp = meta.get("regularMarketPrice", closes[-1] if closes else 0.0)
+                    prev_close = meta.get("chartPreviousClose", meta.get("previousClose", closes[0] if closes else 0.0))
+                    day_high = meta.get("regularMarketDayHigh", max(closes[-5:]) if closes else ltp)
+                    ret_str = "N/A"
+                    if len(closes) > 1 and closes[0] > 0:
                         p_start = closes[0]
                         p_end = closes[-1]
-                        if p_start > 0:
-                            ret_1y = ((p_end - p_start) / p_start) * 100
-                            return sym, f"{ret_1y:+.1f}%"
+                        ret_1y = ((p_end - p_start) / p_start) * 100
+                        ret_str = f"{ret_1y:+.1f}%"
+                    return sym, {
+                        "return_1y": ret_str,
+                        "ltp": round(ltp, 2),
+                        "prev_close": round(prev_close, 2),
+                        "day_high": round(day_high, 2),
+                        "change_pct": round(((ltp - prev_close) / prev_close * 100), 2) if prev_close > 0 else 0.0
+                    }
             except Exception:
                 pass
-            return sym, "N/A"
+            return sym, {"return_1y": "N/A", "ltp": 0.0, "prev_close": 0.0, "day_high": 0.0, "change_pct": 0.0}
 
         to_fetch = missing_symbols if (now_ts - _1Y_RETURNS_CACHE_TIME) <= _1Y_RETURNS_CACHE_TTL else unique_symbols
         if to_fetch:
@@ -909,15 +920,28 @@ def get_upcoming_earnings(db: Session = Depends(get_db)):
                 futures = {executor.submit(fetch_real_1y_return, s): s for s in to_fetch}
                 for future in as_completed(futures):
                     try:
-                        sym, ret_val = future.result()
-                        _1Y_RETURNS_CACHE[sym] = ret_val
+                        sym, qdata = future.result()
+                        _1Y_RETURNS_CACHE[sym] = qdata
                     except Exception:
                         pass
         _1Y_RETURNS_CACHE_TIME = now_ts
         _save_1y_returns_cache_to_db(db)
 
     for item in upcoming:
-        ret_val = _1Y_RETURNS_CACHE.get(item["symbol"], "N/A")
+        cdata = _1Y_RETURNS_CACHE.get(item["symbol"])
+        if isinstance(cdata, dict):
+            ret_val = cdata.get("return_1y", "N/A")
+            item["ltp"] = cdata.get("ltp", 0.0)
+            item["prev_close"] = cdata.get("prev_close", 0.0)
+            item["day_high"] = cdata.get("day_high", 0.0)
+            item["change_pct"] = cdata.get("change_pct", 0.0)
+        else:
+            ret_val = str(cdata) if cdata else "N/A"
+            item["ltp"] = 0.0
+            item["prev_close"] = 0.0
+            item["day_high"] = 0.0
+            item["change_pct"] = 0.0
+
         item["return_1y"] = ret_val
         item["returns_1y"] = ret_val
         try:
