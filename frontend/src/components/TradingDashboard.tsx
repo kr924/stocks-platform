@@ -230,25 +230,18 @@ export function TradingDashboard() {
       );
     }
 
-    // Quick Pill Filter
-    if (earningsFilter === "positive") {
-      list = list.filter(item => (item.return_1y_val !== undefined && item.return_1y_val > -900 ? item.return_1y_val > 0 : (item.return_1y || "").startsWith("+")));
-    } else if (earningsFilter === "top") {
-      list = list.filter(item => (item.return_1y_val !== undefined ? item.return_1y_val >= 20.0 : false));
-    }
-
     // Sort
     if (earningsSortBy === "return_desc") {
-      list.sort((a, b) => (b.return_1y_val ?? -999) - (a.return_1y_val ?? -999));
+      list.sort((a, b) => (b.change_pct ?? 0) - (a.change_pct ?? 0));
     } else if (earningsSortBy === "return_asc") {
-      list.sort((a, b) => (a.return_1y_val ?? 999) - (b.return_1y_val ?? 999));
+      list.sort((a, b) => (a.change_pct ?? 0) - (b.change_pct ?? 0));
     } else {
       // Date ascending (nearest meeting first)
       list.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     }
 
     return list;
-  }, [upcomingEarnings, earningsSortBy, earningsFilter, earningsSearch, earningsDateFilter, todayStr]);
+  }, [upcomingEarnings, earningsSortBy, earningsSearch, earningsDateFilter]);
 
   // Fetch initial & fast status data
   const fetchData = async () => {
@@ -895,41 +888,6 @@ export function TradingDashboard() {
               }}
             >
               🌐 All Dates
-            </button>
-
-            {/* Quick Filter Pills */}
-            <button
-              onClick={() => setEarningsFilter("positive")}
-              style={{
-                backgroundColor: earningsFilter === "positive" ? "rgba(52, 211, 153, 0.2)" : "rgba(15, 23, 42, 0.6)",
-                border: earningsFilter === "positive" ? "1px solid #34d399" : "1px solid rgba(255, 255, 255, 0.1)",
-                color: earningsFilter === "positive" ? "#34d399" : "#94a3b8",
-                fontSize: "11px",
-                fontWeight: "700",
-                padding: "5px 10px",
-                borderRadius: "6px",
-                cursor: "pointer",
-                transition: "all 0.15s"
-              }}
-            >
-              📈 Positive 1Y
-            </button>
-
-            <button
-              onClick={() => setEarningsFilter("top")}
-              style={{
-                backgroundColor: earningsFilter === "top" ? "rgba(168, 85, 247, 0.2)" : "rgba(15, 23, 42, 0.6)",
-                border: earningsFilter === "top" ? "1px solid #c084fc" : "1px solid rgba(255, 255, 255, 0.1)",
-                color: earningsFilter === "top" ? "#c084fc" : "#94a3b8",
-                fontSize: "11px",
-                fontWeight: "700",
-                padding: "5px 10px",
-                borderRadius: "6px",
-                cursor: "pointer",
-                transition: "all 0.15s"
-              }}
-            >
-              🚀 Gainers &gt;20%
             </button>
           </div>
 
