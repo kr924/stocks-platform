@@ -953,6 +953,49 @@ def get_upcoming_earnings(db: Session = Depends(get_db)):
         except Exception:
             item["return_1y_val"] = -999.0
 
+    # ── Live Upstox Market Feed Quote Enrichment ──
+    try:
+        from app.main import get_nse_equities, get_active_feed
+        eqs = get_nse_equities()
+        sym_to_key = {item["symbol"].upper(): item["key"] for item in eqs if item.get("symbol") and item.get("key")}
+        
+        upcoming_keys = []
+        for item in upcoming:
+            sym = item["symbol"].upper()
+            ikey = sym_to_key.get(sym)
+            if ikey:
+                item["instrument_key"] = ikey
+                upcoming_keys.append(ikey)
+
+        if upcoming_keys:
+            feed = get_active_feed()
+            live_quotes = feed.get_quotes(upcoming_keys)
+            for item in upcoming:
+                ikey = item.get("instrument_key")
+                if ikey and ikey in live_quotes:
+                    q = live_quotes[ikey]
+                    last_price = q.get("last_price", 0.0)
+                    ohlc = q.get("ohlc", {})
+                    prev_close = ohlc.get("close", 0.0)
+                    day_high = ohlc.get("high", 0.0)
+                    if last_price > 0:
+                        item["ltp"] = round(last_price, 2)
+                        if prev_close > 0:
+                            item["prev_close"] = round(prev_close, 2)
+                            item["change_pct"] = round(((last_price - prev_close) / prev_close) * 100, 2)
+                        if day_high > 0:
+                            item["day_high"] = round(day_high, 2)
+                        if "depth_buy_pct" in q and q["depth_buy_pct"] is not None:
+                            item["depth_buy_pct"] = round(q["depth_buy_pct"], 1)
+                        if "depth_sell_pct" in q and q["depth_sell_pct"] is not None:
+                            item["depth_sell_pct"] = round(q["depth_sell_pct"], 1)
+                        if "total_buy_qty" in q and q["total_buy_qty"] is not None:
+                            item["buy_qty"] = q["total_buy_qty"]
+                        if "total_sell_qty" in q and q["total_sell_qty"] is not None:
+                            item["sell_qty"] = q["total_sell_qty"]
+    except Exception as err:
+        logger.warning(f"Live Upstox feed quote enrichment skipped: {err}")
+
     return upcoming
 
 

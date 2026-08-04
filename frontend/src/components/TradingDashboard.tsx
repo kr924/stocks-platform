@@ -327,11 +327,10 @@ export function TradingDashboard() {
     const intervalFast = setInterval(() => {
       fetchData();
       fetchMarketQuotes();
-    }, 3000); // Live poller & market price stream every 3s
-    const intervalEarnings = setInterval(fetchUpcomingEarnings, 30000); // Upcoming earnings refresh every 30s
+      fetchUpcomingEarnings();
+    }, 3000); // Fast 3-second live price stream for all panels including Upcoming Earnings
     return () => {
       clearInterval(intervalFast);
-      clearInterval(intervalEarnings);
     };
   }, []);
 
