@@ -137,6 +137,8 @@ export function TradingDashboard() {
 
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [autoArmOnSave, setAutoArmOnSave] = useState(false);
+  const [hoveredOrder, setHoveredOrder] = useState<{ order: TradeOrder; x: number; y: number } | null>(null);
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
 
   // Form State
@@ -487,7 +489,13 @@ export function TradingDashboard() {
       });
 
       if (res.ok) {
+        const newConfig = await res.json();
+        // If autoArmOnSave flag is set, arm the config immediately after creation
+        if (autoArmOnSave && newConfig.id) {
+          await fetch(`${API_BASE}/api/trading/configs/${newConfig.id}/arm`, { method: "POST" });
+        }
         setShowAddForm(false);
+        setAutoArmOnSave(false);
         setFormData({
           symbol: "",
           instrument_key: "",
@@ -535,63 +543,31 @@ export function TradingDashboard() {
     }
   };
 
-  // Add stock from upcoming earnings calendar to Target Stock Configurations
-  const selectUpcomingStock = async (item: any, autoArm: boolean = false) => {
-    const payload = {
+  // Open target config form pre-filled from upcoming earnings calendar
+  const selectUpcomingStock = (item: any, autoArm: boolean = false) => {
+    setFormData({
       symbol: item.symbol,
+      instrument_key: item.instrument_key || `NSE_EQ|${item.symbol}`,
       purchase_date: item.meeting_date || item.date || todayStr,
       quantity: 1,
       stoploss_pct: 2.0,
       stoploss_type: "software",
       broker: "upstox",
       order_type: "MARKET",
+      limit_price: "",
+      ai_provider: "groq",
       trigger_subject: item.purpose || "Outcome of Board Meeting",
-      ai_provider: "groq"
-    };
+      notes: ""
+    });
+    setAutoArmOnSave(autoArm);
+    setShowAddForm(true);
 
-    try {
-      const res = await fetch(`${API_BASE}/api/trading/configs`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-
-      if (res.ok) {
-        const newConfig = await res.json();
-        if (autoArm && newConfig.id) {
-          await fetch(`${API_BASE}/api/trading/configs/${newConfig.id}/arm`, { method: "POST" });
-        }
-        await fetchData();
-
-        setFormData({
-          symbol: item.symbol,
-          instrument_key: item.instrument_key || `NSE_EQ|${item.symbol}`,
-          purchase_date: item.meeting_date || item.date || todayStr,
-          quantity: 1,
-          stoploss_pct: 2.0,
-          stoploss_type: "software",
-          broker: "upstox",
-          order_type: "MARKET",
-          limit_price: "",
-          ai_provider: "groq",
-          trigger_subject: item.purpose || "Outcome of Board Meeting",
-          notes: ""
-        });
-        setShowAddForm(true);
-
-        setTimeout(() => {
-          const configEl = document.getElementById("auto-trading-target-configs");
-          if (configEl) {
-            configEl.scrollIntoView({ behavior: "smooth" });
-          }
-        }, 100);
-      } else {
-        const errData = await res.json();
-        alert(`Failed to add target stock: ${errData.detail || 'Unknown error'}`);
+    setTimeout(() => {
+      const configEl = document.getElementById("auto-trading-target-configs");
+      if (configEl) {
+        configEl.scrollIntoView({ behavior: "smooth" });
       }
-    } catch (err) {
-      console.error("Error adding target stock:", err);
-    }
+    }, 100);
   };
 
   // Manual Buy
@@ -1995,14 +1971,11 @@ export function TradingDashboard() {
               </div>
             ) : (
               orders.map((o) => {
-                const logText = o.error_message 
-                  ? `[EXECUTION LOG]: ${o.error_message}` 
-                  : `[EXECUTION LOG]: Order ${o.status.toUpperCase()} (${o.side} ${o.quantity}x @ ${o.price || 'Market'}) via ${o.broker.toUpperCase()} at ${o.created_at ? new Date(o.created_at).toLocaleTimeString() : ''}`;
+                const matchingAiLog = aiLogs.find(l => l.symbol?.toUpperCase() === o.symbol?.toUpperCase());
 
                 return (
                   <div
                     key={o.id}
-                    title={logText}
                     onClick={() => {
                       const el = document.getElementById(`ai-card-${o.symbol.toUpperCase()}`);
                       if (el) {
@@ -2023,10 +1996,18 @@ export function TradingDashboard() {
                       marginBottom: "8px",
                       fontSize: "12px",
                       cursor: "pointer",
-                      transition: "all 0.2s"
+                      transition: "all 0.2s",
+                      position: "relative" as const
                     }}
-                    onMouseEnter={(e) => (e.currentTarget.style.borderColor = "rgba(59, 130, 246, 0.5)")}
-                    onMouseLeave={(e) => (e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.08)")}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.borderColor = "rgba(59, 130, 246, 0.5)";
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      setHoveredOrder({ order: o, x: rect.right + 8, y: rect.top });
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.08)";
+                      setHoveredOrder(null);
+                    }}
                   >
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <span style={{ fontSize: "14px", fontWeight: "800", color: "#f8fafc" }}>#{o.symbol}</span>
@@ -2059,6 +2040,125 @@ export function TradingDashboard() {
             )}
           </div>
         </div>
+
+        {/* Executed Order Hover Popover */}
+        {hoveredOrder && (() => {
+          const o = hoveredOrder.order;
+          const matchingAiLog = aiLogs.find(l => l.symbol?.toUpperCase() === o.symbol?.toUpperCase());
+          let brokerResp: any = null;
+          try { if (o.broker_response) brokerResp = JSON.parse(o.broker_response); } catch {}
+
+          let popX = hoveredOrder.x;
+          let popY = hoveredOrder.y;
+          const popWidth = 380;
+          const popHeight = 320;
+          if (popX + popWidth > window.innerWidth) popX = hoveredOrder.x - popWidth - 16;
+          if (popX < 8) popX = 8;
+          if (popY + popHeight > window.innerHeight) popY = window.innerHeight - popHeight - 8;
+          if (popY < 8) popY = 8;
+
+          return (
+            <div style={{
+              position: "fixed",
+              left: `${popX}px`,
+              top: `${popY}px`,
+              width: `${popWidth}px`,
+              zIndex: 99999,
+              background: "linear-gradient(135deg, rgba(20, 24, 45, 0.98) 0%, rgba(12, 15, 29, 0.99) 100%)",
+              border: "1px solid rgba(59, 130, 246, 0.3)",
+              borderRadius: "12px",
+              boxShadow: "0 20px 50px rgba(0, 0, 0, 0.9), 0 0 30px rgba(59, 130, 246, 0.15)",
+              padding: "16px",
+              pointerEvents: "none" as const,
+              backdropFilter: "blur(20px)",
+              maxHeight: `${popHeight}px`,
+              overflowY: "auto" as const
+            }}>
+              {/* Header */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid rgba(255,255,255,0.08)", paddingBottom: "10px", marginBottom: "10px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span style={{ padding: "3px 8px", borderRadius: "6px", background: o.status === "filled" || o.status === "placed" ? "#10b981" : "#ef4444", color: "white", fontWeight: "800", fontSize: "11px" }}>
+                    {o.symbol}
+                  </span>
+                  <span style={{ fontSize: "12px", fontWeight: "700", color: "white" }}>
+                    Execution Log
+                  </span>
+                </div>
+                <span style={{ fontSize: "10px", color: "#64748b" }}>
+                  {o.created_at ? new Date(o.created_at).toLocaleString() : ""}
+                </span>
+              </div>
+
+              {/* Order Details */}
+              <div style={{ fontSize: "11px", color: "#94a3b8", marginBottom: "8px" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 12px" }}>
+                  <span>Side: <b style={{ color: o.side === "BUY" ? "#34d399" : "#f87171" }}>{o.side}</b></span>
+                  <span>Qty: <b style={{ color: "white" }}>{o.quantity}</b></span>
+                  <span>Price: <b style={{ color: "white" }}>{o.price ? `₹${o.price}` : "Market"}</b></span>
+                  <span>Type: <b style={{ color: "white" }}>{o.order_type}</b></span>
+                  <span>Broker: <b style={{ color: "#38bdf8" }}>{o.broker.toUpperCase()}</b></span>
+                  <span>Status: <b style={{ color: o.status === "filled" || o.status === "placed" ? "#34d399" : "#f87171" }}>{o.status.toUpperCase()}</b></span>
+                </div>
+                {o.broker_order_id && (
+                  <div style={{ marginTop: "4px", fontSize: "10px", color: "#64748b" }}>
+                    Order ID: {o.broker_order_id}
+                  </div>
+                )}
+              </div>
+
+              {/* Error Message */}
+              {o.error_message && (
+                <div style={{ background: "rgba(239, 68, 68, 0.1)", border: "1px solid rgba(239, 68, 68, 0.3)", borderRadius: "6px", padding: "8px", marginBottom: "8px", fontSize: "10px", color: "#f87171", fontWeight: "600" }}>
+                  ⚠️ {o.error_message}
+                </div>
+              )}
+
+              {/* AI Analysis Summary (if available) */}
+              {matchingAiLog && (
+                <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: "8px" }}>
+                  <div style={{ fontSize: "10px", fontWeight: "800", color: "#a78bfa", marginBottom: "6px", letterSpacing: "0.5px" }}>
+                    🤖 AI ANALYSIS
+                  </div>
+                  {matchingAiLog.ai_sentiment && (
+                    <div style={{ fontSize: "11px", marginBottom: "4px" }}>
+                      Sentiment: <b style={{ color: matchingAiLog.ai_sentiment === "positive" ? "#34d399" : matchingAiLog.ai_sentiment === "negative" ? "#f87171" : "#fbbf24" }}>
+                        {matchingAiLog.ai_sentiment.toUpperCase()}
+                      </b>
+                      {matchingAiLog.ai_impact_score !== null && matchingAiLog.ai_impact_score !== undefined && (
+                        <span style={{ marginLeft: "8px", color: "#94a3b8" }}>Impact: <b style={{ color: "white" }}>{matchingAiLog.ai_impact_score}/10</b></span>
+                      )}
+                    </div>
+                  )}
+                  {matchingAiLog.ai_suggestion && (
+                    <div style={{ fontSize: "10px", color: "#cbd5e1", marginBottom: "4px" }}>
+                      💡 {matchingAiLog.ai_suggestion}
+                    </div>
+                  )}
+                  {matchingAiLog.ai_summary && (
+                    <div style={{ fontSize: "10px", color: "#94a3b8", lineHeight: "1.4", maxHeight: "60px", overflow: "hidden" }}>
+                      {matchingAiLog.ai_summary.substring(0, 200)}{matchingAiLog.ai_summary.length > 200 ? "..." : ""}
+                    </div>
+                  )}
+                  {matchingAiLog.flow_used && (
+                    <div style={{ fontSize: "9px", color: "#64748b", marginTop: "4px" }}>
+                      Flow: {matchingAiLog.flow_used === "custom_rest_api" ? "🔵 Local LLM" : "🟣 Groq/OpenRouter"}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Broker Raw Response (if no AI log) */}
+              {!matchingAiLog && brokerResp && (
+                <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: "8px" }}>
+                  <div style={{ fontSize: "10px", fontWeight: "800", color: "#38bdf8", marginBottom: "4px" }}>BROKER RESPONSE</div>
+                  <div style={{ fontSize: "10px", color: "#94a3b8", lineHeight: "1.3", maxHeight: "60px", overflow: "hidden" }}>
+                    {JSON.stringify(brokerResp, null, 1).substring(0, 200)}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Premium 2-Step AI Earnings Analysis Logs */}
         <div style={{

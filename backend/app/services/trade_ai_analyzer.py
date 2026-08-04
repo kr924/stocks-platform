@@ -294,12 +294,13 @@ Format the JSON response precisely as follows:
             if base64_pdf:
                 payload["images"] = [f"data:application/pdf;base64,{base64_pdf}"]
 
-            # 3. Post to gemcall / Custom REST API (timeout=90s)
+            # 3. Post to gemcall / Custom REST API (timeout=180s)
+            #    Gemini with PDF attachments can take 2-3 minutes to process
             resp = requests.post(
                 custom_url,
                 json=payload,
                 headers={"Content-Type": "application/json"},
-                timeout=90
+                timeout=180
             )
             if resp.status_code == 200:
                 try:
@@ -311,10 +312,17 @@ Format the JSON response precisely as follows:
                 except Exception:
                     result_raw = resp.text
 
-                used_flow = "custom_rest_api"
-                used_provider = f"Custom REST API ({custom_url})"
-                logger.info(f"✅ [AUTO AI FLOW 1 SUCCESS]: Custom REST API responded for #{symbol}")
-                print(f"✅ [AUTO AI FLOW 1 SUCCESS]: Custom REST API responded for #{symbol}")
+                # Validate that we actually got meaningful content back
+                # Gemcall can return 200 with empty response if Playwright failed to extract
+                if not result_raw or (isinstance(result_raw, str) and len(result_raw.strip()) < 20):
+                    logger.warning(f"⚠️ [AUTO AI FLOW 1 EMPTY]: Custom REST API returned 200 but response is empty/too short for #{symbol}. Falling back.")
+                    print(f"⚠️ [AUTO AI FLOW 1 EMPTY]: Custom REST API returned 200 but response is empty/too short for #{symbol}. Falling back.")
+                    result_raw = None
+                else:
+                    used_flow = "custom_rest_api"
+                    used_provider = f"Custom REST API ({custom_url})"
+                    logger.info(f"✅ [AUTO AI FLOW 1 SUCCESS]: Custom REST API responded for #{symbol} (len={len(str(result_raw))})")
+                    print(f"✅ [AUTO AI FLOW 1 SUCCESS]: Custom REST API responded for #{symbol} (len={len(str(result_raw))})")
             else:
                 logger.warning(f"⚠️ [AUTO AI FLOW 1 FAILED]: Status {resp.status_code} ({resp.text[:100]}). Triggering OpenRouter fallback.")
                 print(f"⚠️ [AUTO AI FLOW 1 FAILED]: Status {resp.status_code} ({resp.text[:100]}). Triggering OpenRouter fallback.")
