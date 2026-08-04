@@ -37,6 +37,7 @@ def sync_earnings_to_watchlist(db: Session):
             if not info:
                 info = {"key": f"NSE_EQ|{sym}", "name": item.get("title") or f"{sym} Ltd"}
 
+            ikey = info["key"]
             existing = db.query(Watchlist).filter(
                 (Watchlist.instrument_key == ikey) | (Watchlist.symbol == sym)
             ).first()
