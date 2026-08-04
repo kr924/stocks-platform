@@ -41,18 +41,23 @@ def sync_earnings_to_watchlist(db: Session):
             existing = db.query(Watchlist).filter(
                 (Watchlist.instrument_key == ikey) | (Watchlist.symbol == sym)
             ).first()
-            if not existing:
-                wl = Watchlist(
-                    symbol=sym,
-                    name=info["name"],
-                    instrument_key=ikey,
-                    is_holding=False
-                )
-                db.add(wl)
-                added_count += 1
-            synced_symbols.append(sym)
 
-        db.commit()
+            if not existing:
+                try:
+                    wl = Watchlist(
+                        symbol=sym,
+                        name=info["name"],
+                        instrument_key=ikey,
+                        is_holding=False
+                    )
+                    db.add(wl)
+                    db.commit()
+                    added_count += 1
+                except Exception as row_err:
+                    db.rollback()
+                    logger.debug(f"Skipping duplicate watchlist item {sym}/{ikey}: {row_err}")
+
+            synced_symbols.append(sym)
         logger.info(f"Synced {len(synced_symbols)} earnings stocks ({added_count} new) to Watchlist for live Upstox quotes.")
         return {
             "status": "success",
