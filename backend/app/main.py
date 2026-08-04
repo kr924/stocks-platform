@@ -298,13 +298,22 @@ def _run_ai_analysis():
         logger.error(f"AI analysis error: {e}")
 
 # Dependency to resolve the active feed and inject the current access token
-def get_active_feed(db: Session = Depends(get_db)) -> BaseMarketFeed:
+def get_active_feed(db: Any = Depends(get_db)) -> BaseMarketFeed:
     feed = get_feed()
-    stored_session = db.query(SessionStore).filter(SessionStore.provider == PROVIDER).first()
-    if stored_session:
-        feed.set_access_token(stored_session.access_token)
-    else:
-        feed.set_access_token(None)
+    if db is None or not hasattr(db, "query"):
+        try:
+            db = next(get_db())
+        except Exception:
+            db = None
+    if db and hasattr(db, "query"):
+        try:
+            stored_session = db.query(SessionStore).filter(SessionStore.provider == PROVIDER).first()
+            if stored_session:
+                feed.set_access_token(stored_session.access_token)
+            else:
+                feed.set_access_token(None)
+        except Exception as e:
+            logger.warning(f"Session lookup in get_active_feed: {e}")
     return feed
 
 import gzip
@@ -443,15 +452,8 @@ def get_watchlist(
     if not items:
         return []
     try:
-        keys = []
-        for item in items:
-            if item.instrument_key:
-                keys.append(item.instrument_key)
-                keys.append(item.instrument_key.replace("|", ":"))
-            if item.symbol:
-                keys.append(item.symbol.upper())
-
-        quotes = feed.get_quotes(keys) if keys else {}
+        keys = [item.instrument_key for item in items]
+        quotes = feed.get_quotes(keys)
         
         # Resolve historical prices if period is not "today"
         historical_prices = {}
@@ -495,6 +497,7 @@ def get_watchlist(
                         pass
                 db.commit()
                 
+        keys = [item.instrument_key for item in items]
         analysis_map = {}
         try:
             cached_analyses = db.query(AICache).filter(AICache.instrument_key.in_(keys)).all()
@@ -513,40 +516,33 @@ def get_watchlist(
 
         result = []
         for item in items:
-            sym_upper = (item.symbol or "").upper()
-            ikey = item.instrument_key or f"NSE_EQ|{sym_upper}"
-            colon_key = ikey.replace("|", ":")
-
-            q = quotes.get(ikey) or quotes.get(colon_key) or quotes.get(sym_upper) or {}
-            
+            q = quotes.get(item.instrument_key, {})
             last_price = q.get("last_price", 0.0)
             ohlc = q.get("ohlc", {})
-            prev_close = q.get("close") or ohlc.get("close", 0.0)
-            day_high = ohlc.get("high", 0.0) or q.get("high", 0.0)
-            day_low = ohlc.get("low", 0.0) or q.get("low", 0.0)
-
+            prev_close = ohlc.get("close", 0.0)
+            
             if period == "today":
                 pct_change = 0.0
-                if prev_close > 0 and last_price > 0:
+                if prev_close > 0:
                     pct_change = ((last_price - prev_close) / prev_close) * 100
             else:
-                hist_close = historical_prices.get(ikey, prev_close)
+                hist_close = historical_prices.get(item.instrument_key, prev_close)
                 pct_change = 0.0
                 if hist_close > 0:
                     pct_change = ((last_price - hist_close) / hist_close) * 100
-
+                    
             result.append({
                 "id": item.id,
                 "symbol": item.symbol,
                 "name": item.name,
-                "instrument_key": ikey,
+                "instrument_key": item.instrument_key,
                 "last_price": last_price,
                 "change": round(pct_change, 2),
-                "high": day_high,
-                "low": day_low,
+                "high": ohlc.get("high", 0.0),
+                "low": ohlc.get("low", 0.0),
                 "close": prev_close,
                 "is_holding": item.is_holding,
-                "analysis": analysis_map.get(ikey) or analysis_map.get(colon_key),
+                "analysis": analysis_map.get(item.instrument_key),
                 "depth_buy_pct": q.get("depth_buy_pct", 50.0),
                 "depth_sell_pct": q.get("depth_sell_pct", 50.0),
                 "total_buy_qty": q.get("total_buy_qty", 0),
@@ -1040,7 +1036,7 @@ def get_market_movers(
             raise
         raise HTTPException(status_code=500, detail=f"Failed to fetch market movers: {str(e)}")
 
-@app.get("/api/market/stock/{instrument_key:path}")
+@app.get("/api/market/stock/{instrument_key}")
 def get_stock_detail(
     instrument_key: str, 
     db: Session = Depends(get_db), 
@@ -1048,26 +1044,14 @@ def get_stock_detail(
 ):
     """Retrieve quotes, historical 30-day daily chart candles, and cached news/AI comments."""
     try:
-        from urllib.parse import unquote
-        instrument_key = unquote(instrument_key)
-
+        # 1. Fetch Quote
+        quotes = feed.get_quotes([instrument_key])
+        quote = quotes.get(instrument_key)
+        if not quote:
+            raise HTTPException(status_code=404, detail="Stock quote not found")
+            
         # Get company name & symbol
         symbol, name = resolve_stock_info(instrument_key, db)
-
-        # 1. Fetch Quote
-        quotes = feed.get_quotes([instrument_key, instrument_key.replace("|", ":"), symbol])
-        quote = quotes.get(instrument_key) or quotes.get(instrument_key.replace("|", ":")) or quotes.get(symbol)
-        if not quote:
-            quote = {
-                "last_price": 100.0,
-                "volume": 0,
-                "ohlc": {"open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
-                "depth": {"buy": [], "sell": []},
-                "depth_buy_pct": 50.0,
-                "depth_sell_pct": 50.0,
-                "total_buy_qty": 0,
-                "total_sell_qty": 0
-            }
 
         # 2. Fetch Historical 30-day daily candles for chart
         to_date = datetime.now().strftime("%Y-%m-%d")
@@ -1147,7 +1131,7 @@ def get_stock_detail(
             }
         }
     except Exception as e:
-        if isinstance(e, (HTTPException, UpstoxAuthError)):
+        if isinstance(e, UpstoxAuthError):
             raise
         raise HTTPException(status_code=500, detail=f"Error loading stock detail: {str(e)}")
 
@@ -1287,15 +1271,13 @@ def chat_about_stock(
         raise HTTPException(status_code=500, detail=f"Failed to process chat: {str(e)}")
 
 
-@app.get("/api/market/stock/{instrument_key:path}/candles")
+@app.get("/api/market/stock/{instrument_key}/candles")
 def get_stock_candles(
     instrument_key: str,
     period: str = "1M",
     feed = Depends(get_active_feed)
 ):
     """Retrieve candles for a specific stock and period."""
-    from urllib.parse import unquote
-    instrument_key = unquote(instrument_key)
     from datetime import datetime, timedelta
     to_date = datetime.now().strftime("%Y-%m-%d")
     

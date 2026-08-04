@@ -535,24 +535,63 @@ export function TradingDashboard() {
     }
   };
 
-  // Add stock from upcoming earnings calendar to Target Stock Configurations & open config screen
-  const selectUpcomingStock = (item: any, autoArm: boolean = false) => {
-    setFormData({
+  // Add stock from upcoming earnings calendar to Target Stock Configurations
+  const selectUpcomingStock = async (item: any, autoArm: boolean = false) => {
+    const payload = {
       symbol: item.symbol,
-      instrument_key: item.instrument_key || `NSE_EQ|${item.symbol}`,
       purchase_date: item.meeting_date || item.date || todayStr,
       quantity: 1,
       stoploss_pct: 2.0,
       stoploss_type: "software",
       broker: "upstox",
       order_type: "MARKET",
-      limit_price: "",
-      ai_provider: "groq",
       trigger_subject: item.purpose || "Outcome of Board Meeting",
-      notes: autoArm ? "Auto-Arm requested from Earnings Calendar" : "Added from Earnings Calendar"
-    });
-    setShowAddForm(true);
-    window.scrollTo({ top: 300, behavior: "smooth" });
+      ai_provider: "groq"
+    };
+
+    try {
+      const res = await fetch(`${API_BASE}/api/trading/configs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      if (res.ok) {
+        const newConfig = await res.json();
+        if (autoArm && newConfig.id) {
+          await fetch(`${API_BASE}/api/trading/configs/${newConfig.id}/arm`, { method: "POST" });
+        }
+        await fetchData();
+
+        setFormData({
+          symbol: item.symbol,
+          instrument_key: item.instrument_key || `NSE_EQ|${item.symbol}`,
+          purchase_date: item.meeting_date || item.date || todayStr,
+          quantity: 1,
+          stoploss_pct: 2.0,
+          stoploss_type: "software",
+          broker: "upstox",
+          order_type: "MARKET",
+          limit_price: "",
+          ai_provider: "groq",
+          trigger_subject: item.purpose || "Outcome of Board Meeting",
+          notes: ""
+        });
+        setShowAddForm(true);
+
+        setTimeout(() => {
+          const configEl = document.getElementById("auto-trading-target-configs");
+          if (configEl) {
+            configEl.scrollIntoView({ behavior: "smooth" });
+          }
+        }, 100);
+      } else {
+        const errData = await res.json();
+        alert(`Failed to add target stock: ${errData.detail || 'Unknown error'}`);
+      }
+    } catch (err) {
+      console.error("Error adding target stock:", err);
+    }
   };
 
   // Manual Buy
@@ -1461,16 +1500,19 @@ export function TradingDashboard() {
       )}
 
       {/* TOOLBAR */}
-      <div style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        marginBottom: "16px",
-        background: "rgba(17, 24, 39, 0.4)",
-        padding: "12px 18px",
-        borderRadius: "12px",
-        border: "1px solid rgba(255, 255, 255, 0.05)"
-      }}>
+      <div
+        id="auto-trading-target-configs"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: "16px",
+          background: "rgba(17, 24, 39, 0.4)",
+          padding: "12px 18px",
+          borderRadius: "12px",
+          border: "1px solid rgba(255, 255, 255, 0.05)"
+        }}
+      >
         <h2 style={{ fontSize: "16px", fontWeight: "700", color: "#f8fafc", display: "flex", alignItems: "center", gap: "8px" }}>
           ⚡ Auto-Trading Target Stock Configurations
         </h2>
