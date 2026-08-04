@@ -846,6 +846,13 @@ def get_upcoming_earnings(db: Session = Depends(get_db)):
             if key not in seen:
                 seen.add(key)
                 purpose = raw.get("bm_purpose", raw.get("purpose", bm.title or "Financial Results"))
+                # Filter out pure board meetings that are not financial results/earnings
+                purpose_lower = str(purpose).lower()
+                is_earnings = any(k in purpose_lower for k in [
+                    "financial", "result", "quarterly", "audited", "unaudited", "q1", "q2", "q3", "q4", "earning", "profit", "loss"
+                ])
+                if not is_earnings:
+                    continue
                 upcoming.append({
                     "id": bm.id,
                     "symbol": symbol,

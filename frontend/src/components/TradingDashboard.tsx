@@ -164,9 +164,18 @@ export function TradingDashboard() {
   const [earningsSortBy, setEarningsSortBy] = useState<"date" | "return_desc" | "return_asc">("date");
   const [earningsFilter, setEarningsFilter] = useState<"all" | "positive" | "top">("all");
   const [earningsSearch, setEarningsSearch] = useState<string>("");
+  const [earningsDateFilter, setEarningsDateFilter] = useState<string>(todayStr);
 
   const processedUpcomingEarnings = useMemo(() => {
     let list = [...upcomingEarnings];
+
+    // Calendar Date Filter (default TODAY)
+    if (earningsDateFilter.trim()) {
+      list = list.filter(item => {
+        const itemDate = item.meeting_date || item.date;
+        return itemDate === earningsDateFilter;
+      });
+    }
 
     // Symbol / Text Search
     if (earningsSearch.trim()) {
@@ -195,7 +204,7 @@ export function TradingDashboard() {
     }
 
     return list;
-  }, [upcomingEarnings, earningsSortBy, earningsFilter, earningsSearch]);
+  }, [upcomingEarnings, earningsSortBy, earningsFilter, earningsSearch, earningsDateFilter, todayStr]);
 
   // Fetch initial & fast status data
   const fetchData = async () => {
@@ -284,15 +293,7 @@ export function TradingDashboard() {
     }
   };
 
-  const selectUpcomingStock = (item: UpcomingEarningsItem) => {
-    setFormData(prev => ({
-      ...prev,
-      symbol: item.symbol.toUpperCase(),
-      notes: `Target configured from Upcoming Earnings: ${item.purpose || item.title}`
-    }));
-    setShowAddForm(true);
-    window.scrollTo({ top: 400, behavior: "smooth" });
-  };
+
 
 
   useEffect(() => {
@@ -397,6 +398,43 @@ export function TradingDashboard() {
       console.error("Failed to disarm config:", err);
     } finally {
       setActionLoading(prev => ({ ...prev, [`disarm-${id}`]: false }));
+    }
+  };
+
+  // Add stock from upcoming earnings calendar to Target Stock Configurations
+  const selectUpcomingStock = async (item: any, autoArm: boolean = false) => {
+    const payload = {
+      symbol: item.symbol,
+      purchase_date: item.meeting_date || item.date || todayStr,
+      quantity: 1,
+      stoploss_pct: 2.0,
+      stoploss_type: "software",
+      broker: "upstox",
+      order_type: "MARKET",
+      trigger_subject: item.purpose || "Outcome of Board Meeting",
+      ai_provider: "groq"
+    };
+
+    try {
+      const res = await fetch(`${API_BASE}/api/trading/configs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      if (res.ok) {
+        const newConfig = await res.json();
+        if (autoArm && newConfig.id) {
+          await fetch(`${API_BASE}/api/trading/configs/${newConfig.id}/arm`, { method: "POST" });
+        }
+        fetchData();
+        alert(`✅ Added ${item.symbol} to target stock configurations${autoArm ? ' and ARMED for auto-trading' : ''}!`);
+      } else {
+        const errData = await res.json();
+        alert(`Failed to add target stock: ${errData.detail || 'Unknown error'}`);
+      }
+    } catch (err) {
+      console.error("Error adding target stock:", err);
     }
   };
 
@@ -686,14 +724,14 @@ export function TradingDashboard() {
       }}>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "14px" }}>
           <h3 style={{ fontSize: "15px", fontWeight: "700", color: "#60a5fa", display: "flex", alignItems: "center", gap: "8px", margin: 0 }}>
-            <Calendar size={18} /> 📅 Upcoming Board Meetings & Earnings Calendar ({processedUpcomingEarnings.length})
+            <Calendar size={18} /> 📊 Upcoming Earnings Calendar ({processedUpcomingEarnings.length})
           </h3>
           <span style={{ fontSize: "11px", color: "#94a3b8", background: "rgba(59,130,246,0.1)", padding: "4px 10px", borderRadius: "20px" }}>
-            Click stock to configure auto-trade
+            Real-Time Corporate Earnings Disclosures
           </span>
         </div>
 
-        {/* Toolbar: Search, Filter, & Sort Controls */}
+        {/* Toolbar: Search, Date Filter, Quick Filter Pills & Sort */}
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "14px", backgroundColor: "rgba(15, 23, 42, 0.5)", padding: "10px 12px", borderRadius: "10px", border: "1px solid rgba(255, 255, 255, 0.05)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
             {/* Search Input */}
@@ -709,18 +747,39 @@ export function TradingDashboard() {
                 color: "#f8fafc",
                 fontSize: "12px",
                 padding: "6px 12px",
-                width: "140px",
+                width: "130px",
                 outline: "none"
               }}
             />
 
-            {/* Quick Filter Pills */}
+            {/* Calendar Date Picker Filter */}
+            <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+              <span style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "600" }}>Date:</span>
+              <input
+                type="date"
+                value={earningsDateFilter}
+                onChange={(e) => setEarningsDateFilter(e.target.value)}
+                style={{
+                  backgroundColor: "#0f172a",
+                  border: "1px solid rgba(59, 130, 246, 0.4)",
+                  borderRadius: "8px",
+                  color: "#38bdf8",
+                  fontSize: "11px",
+                  fontWeight: "700",
+                  padding: "5px 8px",
+                  outline: "none",
+                  cursor: "pointer"
+                }}
+              />
+            </div>
+
+            {/* Date Quick Pills */}
             <button
-              onClick={() => setEarningsFilter("all")}
+              onClick={() => setEarningsDateFilter(todayStr)}
               style={{
-                backgroundColor: earningsFilter === "all" ? "rgba(59, 130, 246, 0.25)" : "rgba(15, 23, 42, 0.6)",
-                border: earningsFilter === "all" ? "1px solid #3b82f6" : "1px solid rgba(255, 255, 255, 0.1)",
-                color: earningsFilter === "all" ? "#60a5fa" : "#94a3b8",
+                backgroundColor: earningsDateFilter === todayStr ? "rgba(56, 189, 248, 0.25)" : "rgba(15, 23, 42, 0.6)",
+                border: earningsDateFilter === todayStr ? "1px solid #38bdf8" : "1px solid rgba(255, 255, 255, 0.1)",
+                color: earningsDateFilter === todayStr ? "#38bdf8" : "#94a3b8",
                 fontSize: "11px",
                 fontWeight: "700",
                 padding: "5px 10px",
@@ -729,9 +788,27 @@ export function TradingDashboard() {
                 transition: "all 0.15s"
               }}
             >
-              All ({upcomingEarnings.length})
+              📅 Today
             </button>
 
+            <button
+              onClick={() => setEarningsDateFilter("")}
+              style={{
+                backgroundColor: earningsDateFilter === "" ? "rgba(59, 130, 246, 0.25)" : "rgba(15, 23, 42, 0.6)",
+                border: earningsDateFilter === "" ? "1px solid #3b82f6" : "1px solid rgba(255, 255, 255, 0.1)",
+                color: earningsDateFilter === "" ? "#60a5fa" : "#94a3b8",
+                fontSize: "11px",
+                fontWeight: "700",
+                padding: "5px 10px",
+                borderRadius: "6px",
+                cursor: "pointer",
+                transition: "all 0.15s"
+              }}
+            >
+              🌐 All Dates
+            </button>
+
+            {/* Quick Filter Pills */}
             <button
               onClick={() => setEarningsFilter("positive")}
               style={{
@@ -794,74 +871,106 @@ export function TradingDashboard() {
 
         {loading && upcomingEarnings.length === 0 ? (
           <div style={{ color: "#60a5fa", fontSize: "12px", textAlign: "center", padding: "20px", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
-            <RefreshCw size={14} className="animate-spin" /> Loading upcoming board meetings calendar...
+            <RefreshCw size={14} className="animate-spin" /> Loading upcoming earnings calendar...
           </div>
         ) : processedUpcomingEarnings.length === 0 ? (
           <div style={{ color: "#64748b", fontSize: "12px", textAlign: "center", padding: "16px" }}>
-            No board meetings match the selected filter/search.
+            No earnings disclosures match the selected date ({earningsDateFilter || 'All Dates'}) / search filter.
           </div>
         ) : (
-          <div style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))",
-            gap: "12px",
-            maxHeight: "260px",
-            overflowY: "auto"
-          }}>
-            {processedUpcomingEarnings.map((item) => {
-              const ret1y = item.return_1y || item.returns_1y || "N/A";
-              const isPos = ret1y.startsWith("+");
-              const isNeg = ret1y.startsWith("-");
+          <div style={{ maxHeight: "350px", overflowY: "auto", border: "1px solid rgba(255, 255, 255, 0.08)", borderRadius: "10px" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: "12px" }}>
+              <thead>
+                <tr style={{ background: "rgba(15, 23, 42, 0.9)", borderBottom: "1px solid rgba(255, 255, 255, 0.1)", color: "#94a3b8" }}>
+                  <th style={{ padding: "10px 14px" }}>Stock Symbol &amp; Company</th>
+                  <th style={{ padding: "10px 14px" }}>Earnings Event / Purpose</th>
+                  <th style={{ padding: "10px 14px", textAlign: "center" }}>Meeting Date</th>
+                  <th style={{ padding: "10px 14px", textAlign: "center" }}>1Y Return %</th>
+                  <th style={{ padding: "10px 14px", textAlign: "right" }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {processedUpcomingEarnings.map((item) => {
+                  const ret1y = item.return_1y || item.returns_1y || "N/A";
+                  const isPos = ret1y.startsWith("+");
+                  const isNeg = ret1y.startsWith("-");
 
-              return (
-                <div
-                  key={item.id || item.symbol}
-                  onClick={() => selectUpcomingStock(item)}
-                  style={{
-                    backgroundColor: "#0d131f",
-                    border: "1px solid rgba(255, 255, 255, 0.08)",
-                    borderRadius: "10px",
-                    padding: "12px",
-                    cursor: "pointer",
-                    transition: "all 0.2s",
-                    display: "flex",
-                    flexDirection: "column",
-                    justifyContent: "space-between"
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = "rgba(59, 130, 246, 0.5)")}
-                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.08)")}
-                >
-                  <div>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
-                      <span style={{ fontSize: "14px", fontWeight: "800", color: "#f8fafc" }}>#{item.symbol}</span>
-                      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                        {ret1y !== "N/A" && (
+                  return (
+                    <tr key={item.id || item.symbol} style={{ borderBottom: "1px solid rgba(255, 255, 255, 0.05)", background: "#0d131f" }}>
+                      <td style={{ padding: "10px 14px", fontWeight: "700", color: "#f8fafc" }}>
+                        <div style={{ fontSize: "13px" }}>#{item.symbol}</div>
+                        <div style={{ fontSize: "11px", color: "#64748b", fontWeight: "400" }}>{item.title || item.symbol}</div>
+                      </td>
+                      <td style={{ padding: "10px 14px" }}>
+                        <span style={{ fontSize: "11px", fontWeight: "600", color: "#a7f3d0", background: "rgba(16, 185, 129, 0.12)", padding: "3px 8px", borderRadius: "6px" }}>
+                          📊 {item.purpose}
+                        </span>
+                      </td>
+                      <td style={{ padding: "10px 14px", textAlign: "center" }}>
+                        <span style={{ fontSize: "11px", fontWeight: "700", color: "#38bdf8", background: "rgba(56, 189, 248, 0.12)", padding: "3px 8px", borderRadius: "6px" }}>
+                          📅 {item.display_date || item.meeting_date}
+                        </span>
+                      </td>
+                      <td style={{ padding: "10px 14px", textAlign: "center" }}>
+                        {ret1y !== "N/A" ? (
                           <span style={{
-                            fontSize: "10px",
+                            fontSize: "11px",
                             fontWeight: "700",
                             color: isPos ? "#34d399" : isNeg ? "#f87171" : "#94a3b8",
                             background: isPos ? "rgba(52,211,153,0.12)" : isNeg ? "rgba(248,113,113,0.12)" : "rgba(148,163,184,0.12)",
-                            padding: "2px 6px",
-                            borderRadius: "4px"
+                            padding: "3px 8px",
+                            borderRadius: "6px"
                           }}>
-                            📈 1Y: {ret1y}
+                            📈 {ret1y}
                           </span>
-                        )}
-                        <span style={{ fontSize: "10px", fontWeight: "600", color: "#38bdf8", background: "rgba(56,189,248,0.1)", padding: "2px 6px", borderRadius: "4px" }}>
-                          {item.display_date || item.meeting_date}
-                        </span>
-                      </div>
-                    </div>
-                    <div style={{ fontSize: "11px", color: "#94a3b8", lineHeight: "1.3" }}>
-                      {item.purpose.length > 55 ? item.purpose.slice(0, 55) + "..." : item.purpose}
-                    </div>
-                  </div>
-                  <div style={{ marginTop: "10px", display: "flex", alignItems: "center", gap: "4px", fontSize: "11px", fontWeight: "700", color: "#60a5fa" }}>
-                    <Plus size={12} /> Add to Target Stocks
-                  </div>
-                </div>
-              );
-            })}
+                        ) : "—"}
+                      </td>
+                      <td style={{ padding: "10px 14px", textAlign: "right" }}>
+                        <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>
+                          <button
+                            onClick={() => selectUpcomingStock(item, false)}
+                            style={{
+                              padding: "5px 10px",
+                              fontSize: "11px",
+                              fontWeight: "700",
+                              borderRadius: "6px",
+                              backgroundColor: "rgba(59, 130, 246, 0.15)",
+                              color: "#60a5fa",
+                              border: "1px solid rgba(59, 130, 246, 0.3)",
+                              cursor: "pointer",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "4px"
+                            }}
+                          >
+                            <Plus size={12} /> Add Target
+                          </button>
+                          <button
+                            onClick={() => selectUpcomingStock(item, true)}
+                            style={{
+                              padding: "5px 10px",
+                              fontSize: "11px",
+                              fontWeight: "700",
+                              borderRadius: "6px",
+                              backgroundColor: "#10b981",
+                              color: "white",
+                              border: "none",
+                              cursor: "pointer",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "4px",
+                              boxShadow: "0 2px 8px rgba(16, 185, 129, 0.3)"
+                            }}
+                          >
+                            <Zap size={12} /> Add &amp; Arm
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
