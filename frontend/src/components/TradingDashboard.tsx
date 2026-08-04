@@ -163,6 +163,9 @@ export function TradingDashboard() {
   // Live Stock Tracker Market Quotes Map State
   const [marketQuotesMap, setMarketQuotesMap] = useState<Record<string, any>>({});
 
+  // Rolling Sentiment History Ref (Last 15 updates per symbol)
+  const sentimentHistoryRef = useRef<Record<string, number[]>>({});
+
   // Hover Sentiment Popover State
   const [hoveredSentiment, setHoveredSentiment] = useState<{
     symbol: string;
@@ -172,14 +175,18 @@ export function TradingDashboard() {
     buyQty: number;
     sellQty: number;
     changePct: number;
+    ltp: number;
+    prevClose: number;
+    dayHigh: number;
+    dayLow: number;
     x: number;
     y: number;
   } | null>(null);
 
   const handleSentimentMouseEnter = (e: React.MouseEvent, item: any, buyPct: number, buyQty: number, sellQty: number, changePct: number) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    const width = 320;
-    const height = 160;
+    const width = 360;
+    const height = 240;
 
     let left = rect.left - 100;
     if (left + width > window.innerWidth) left = window.innerWidth - width - 16;
@@ -188,14 +195,35 @@ export function TradingDashboard() {
     let top = rect.bottom + 8;
     if (top + height > window.innerHeight) top = rect.top - height - 8;
 
+    const sym = item.symbol.toUpperCase();
+    const q = marketQuotesMap[sym] || {};
+    const ltp = q.last_price || item.ltp || 100;
+    const prevClose = q.close || item.prev_close || ltp;
+    const dayHigh = q.high || item.day_high || Math.max(ltp, prevClose);
+    const dayLow = q.low || (ltp > 0 ? ltp * 0.985 : prevClose * 0.985);
+
+    // Record into rolling sparkline history
+    if (!sentimentHistoryRef.current[sym]) {
+      sentimentHistoryRef.current[sym] = [];
+    }
+    const hist = sentimentHistoryRef.current[sym];
+    if (hist.length === 0 || hist[hist.length - 1] !== buyPct) {
+      hist.push(Math.round(buyPct));
+      if (hist.length > 15) hist.shift();
+    }
+
     setHoveredSentiment({
-      symbol: item.symbol,
+      symbol: sym,
       name: item.title || item.symbol,
       buyPct,
       sellPct: 100 - buyPct,
       buyQty,
       sellQty,
       changePct,
+      ltp,
+      prevClose,
+      dayHigh,
+      dayLow,
       x: left,
       y: top
     });
@@ -1180,40 +1208,105 @@ export function TradingDashboard() {
           </div>
         )}
 
-        {/* Floating Sentiment Hover Tooltip Card */}
-        {hoveredSentiment && (
-          <div style={{
-            position: "fixed",
-            left: `${hoveredSentiment.x}px`,
-            top: `${hoveredSentiment.y}px`,
-            width: "320px",
-            zIndex: 99999,
-            backgroundColor: "#0f172a",
-            border: "1px solid rgba(56, 189, 248, 0.4)",
-            borderRadius: "10px",
-            padding: "12px 14px",
-            boxShadow: "0 10px 30px rgba(0, 0, 0, 0.8)",
-            pointerEvents: "none"
-          }}>
-            <div style={{ fontSize: "12px", fontWeight: "800", color: "#f8fafc", marginBottom: "6px" }}>
-              📊 {hoveredSentiment.symbol} — Order Book Sentiment
+        {/* Floating Sentiment Trend Analyzer Popover */}
+        {hoveredSentiment && (() => {
+          const range = hoveredSentiment.dayHigh - hoveredSentiment.dayLow;
+          const priceBuyPct = range > 0 ? Math.round(((hoveredSentiment.ltp - hoveredSentiment.dayLow) / range) * 100) : 50;
+          const depthBuyPct = Math.round(hoveredSentiment.buyPct);
+          const compositeBuyPct = Math.round((priceBuyPct * 0.15) + (depthBuyPct * 0.85));
+          const compositeSellPct = 100 - compositeBuyPct;
+
+          const history = sentimentHistoryRef.current[hoveredSentiment.symbol] || [compositeBuyPct];
+
+          const drawSparkline = (hist: number[]) => {
+            const displayHist = hist.length === 1 ? [hist[0], hist[0]] : hist;
+            const width = 328;
+            const height = 40;
+            const padding = 5;
+            const maxX = displayHist.length - 1;
+            const maxY = 100;
+
+            const points = displayHist.map((val, index) => {
+              const x = padding + (index / (maxX || 1)) * (width - 2 * padding);
+              const y = height - (padding + (val / maxY) * (height - 2 * padding));
+              return `${x},${y}`;
+            }).join(" ");
+
+            const isUp = displayHist[displayHist.length - 1] >= displayHist[0];
+            const strokeColor = isUp ? "#10b981" : "#ef4444";
+
+            return (
+              <svg width={width} height={height} style={{ overflow: "visible" }}>
+                <line x1={0} y1={height / 2} x2={width} y2={height / 2} stroke="rgba(255,255,255,0.06)" strokeDasharray="3 3" />
+                <polyline fill="none" stroke={strokeColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" points={points} />
+              </svg>
+            );
+          };
+
+          return (
+            <div style={{
+              position: "fixed",
+              left: `${hoveredSentiment.x}px`,
+              top: `${hoveredSentiment.y}px`,
+              width: "360px",
+              zIndex: 99999,
+              background: "linear-gradient(135deg, rgba(20, 24, 45, 0.98) 0%, rgba(12, 15, 29, 0.99) 100%)",
+              border: "1px solid rgba(255, 255, 255, 0.15)",
+              borderRadius: "12px",
+              boxShadow: "0 20px 50px rgba(0, 0, 0, 0.9), 0 0 30px rgba(56, 189, 248, 0.15)",
+              padding: "16px",
+              pointerEvents: "none",
+              backdropFilter: "blur(20px)"
+            }}>
+              {/* Popover Header */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid rgba(255, 255, 255, 0.08)", paddingBottom: "10px", marginBottom: "12px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span style={{ padding: "3px 8px", borderRadius: "6px", background: "#38bdf8", color: "#0f172a", fontWeight: "800", fontSize: "12px" }}>
+                    {hoveredSentiment.symbol}
+                  </span>
+                  <span style={{ fontSize: "13px", fontWeight: "700", color: "white" }}>
+                    Sentiment &amp; Trend Analyzer
+                  </span>
+                </div>
+              </div>
+
+              {/* Big Buyers vs Sellers percentage */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "6px" }}>
+                <span style={{ fontSize: "20px", fontWeight: "900", color: "#10b981" }}>
+                  {compositeBuyPct}% <span style={{ fontSize: "11px", fontWeight: "700", opacity: 0.8 }}>BUYERS</span>
+                </span>
+                <span style={{ fontSize: "20px", fontWeight: "900", color: "#ef4444" }}>
+                  {compositeSellPct}% <span style={{ fontSize: "11px", fontWeight: "700", opacity: 0.8 }}>SELLERS</span>
+                </span>
+              </div>
+
+              {/* Visual sentiment bar */}
+              <div style={{ width: "100%", height: "6px", backgroundColor: "#ef4444", borderRadius: "3px", overflow: "hidden", display: "flex", marginBottom: "14px" }}>
+                <div style={{ width: `${compositeBuyPct}%`, height: "100%", backgroundColor: "#10b981", transition: "width 0.3s ease" }} />
+              </div>
+
+              {/* Metrics Grid: Daily Range vs Order Book */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "14px" }}>
+                <div style={{ backgroundColor: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: "8px", padding: "8px 10px" }}>
+                  <div style={{ fontSize: "9px", color: "#94a3b8", fontWeight: "700", marginBottom: "2px" }}>DAILY RANGE (15% WT)</div>
+                  <div style={{ fontSize: "12px", fontWeight: "800", color: "white" }}>{priceBuyPct}% B / {100 - priceBuyPct}% S</div>
+                </div>
+                <div style={{ backgroundColor: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: "8px", padding: "8px 10px" }}>
+                  <div style={{ fontSize: "9px", color: "#94a3b8", fontWeight: "700", marginBottom: "2px" }}>ORDER BOOK (85% WT)</div>
+                  <div style={{ fontSize: "12px", fontWeight: "800", color: "white" }}>{depthBuyPct}% B / {100 - depthBuyPct}% S</div>
+                </div>
+              </div>
+
+              {/* Buyer Sentiment Sparkline Chart */}
+              <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: "10px" }}>
+                <div style={{ fontSize: "9px", color: "#64748b", fontWeight: "700", letterSpacing: "0.5px", marginBottom: "6px" }}>
+                  BUYER SENTIMENT SPARKLINE (LAST 15 UPDATES)
+                </div>
+                {drawSparkline(history)}
+              </div>
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", fontWeight: "700", marginBottom: "4px" }}>
-              <span style={{ color: "#34d399" }}>Buy Interest: {hoveredSentiment.buyPct}%</span>
-              <span style={{ color: "#f87171" }}>Sell Interest: {hoveredSentiment.sellPct}%</span>
-            </div>
-            <div style={{ width: "100%", height: "6px", backgroundColor: "#ef4444", borderRadius: "3px", overflow: "hidden", display: "flex", marginBottom: "8px" }}>
-              <div style={{ width: `${hoveredSentiment.buyPct}%`, height: "100%", backgroundColor: "#10b981" }} />
-            </div>
-            <div style={{ fontSize: "10px", color: "#94a3b8", display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
-              <span>Total Buy Vol: {hoveredSentiment.buyQty.toLocaleString()}</span>
-              <span>Total Sell Vol: {hoveredSentiment.sellQty.toLocaleString()}</span>
-            </div>
-            <div style={{ fontSize: "10px", color: "#38bdf8", fontWeight: "600", borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: "6px" }}>
-              💡 Evaluated continuously during market hours (9:00 AM – 3:30 PM IST).
-            </div>
-          </div>
-        )}
+          );
+        })()}
       </div>
 
       {/* AI SETTINGS MODAL */}

@@ -23,6 +23,15 @@ class Watchlist(Base):
     is_holding = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+class EarningsBucket(Base):
+    __tablename__ = "earnings_bucket"
+    id = Column(Integer, primary_key=True, index=True)
+    symbol = Column(String(50), nullable=False)
+    name = Column(String(200), nullable=True)
+    instrument_key = Column(String(100), unique=True, index=True, nullable=False)
+    earnings_date = Column(String(50), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 class NewsCache(Base):
     __tablename__ = "news_cache"
     # One entry per stock. Stores news as a serialized JSON list of articles
