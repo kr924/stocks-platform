@@ -163,9 +163,50 @@ export function TradingDashboard() {
   // Live Stock Tracker Market Quotes Map State
   const [marketQuotesMap, setMarketQuotesMap] = useState<Record<string, any>>({});
 
+  // Hover Sentiment Popover State
+  const [hoveredSentiment, setHoveredSentiment] = useState<{
+    symbol: string;
+    name: string;
+    buyPct: number;
+    sellPct: number;
+    buyQty: number;
+    sellQty: number;
+    changePct: number;
+    x: number;
+    y: number;
+  } | null>(null);
+
+  const handleSentimentMouseEnter = (e: React.MouseEvent, item: any, buyPct: number, buyQty: number, sellQty: number, changePct: number) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const width = 320;
+    const height = 160;
+
+    let left = rect.left - 100;
+    if (left + width > window.innerWidth) left = window.innerWidth - width - 16;
+    if (left < 16) left = 16;
+
+    let top = rect.bottom + 8;
+    if (top + height > window.innerHeight) top = rect.top - height - 8;
+
+    setHoveredSentiment({
+      symbol: item.symbol,
+      name: item.title || item.symbol,
+      buyPct,
+      sellPct: 100 - buyPct,
+      buyQty,
+      sellQty,
+      changePct,
+      x: left,
+      y: top
+    });
+  };
+
+  const handleSentimentMouseLeave = () => {
+    setHoveredSentiment(null);
+  };
+
   // Upcoming Earnings Sorting, Search, and Filtering state
   const [earningsSortBy, setEarningsSortBy] = useState<"date" | "return_desc" | "return_asc">("date");
-  const [earningsFilter, setEarningsFilter] = useState<"all" | "positive" | "top">("all");
   const [earningsSearch, setEarningsSearch] = useState<string>("");
   const [earningsDateFilter, setEarningsDateFilter] = useState<string>(todayStr);
 
@@ -1021,7 +1062,11 @@ export function TradingDashboard() {
                       </td>
 
                       {/* 7. SENTIMENT (B/S) */}
-                      <td style={{ verticalAlign: "middle", padding: "8px 10px", textAlign: "center" }}>
+                      <td
+                        style={{ verticalAlign: "middle", padding: "8px 10px", textAlign: "center", cursor: "pointer" }}
+                        onMouseEnter={(e) => handleSentimentMouseEnter(e, item, buyPct, buyQty, sellQty, changePct)}
+                        onMouseLeave={handleSentimentMouseLeave}
+                      >
                         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2px", width: "85px", margin: "0 auto" }}>
                           <div style={{ display: "flex", justifyContent: "space-between", width: "100%", fontSize: "9px", fontWeight: "800" }}>
                             <span style={{ color: "#10b981", display: "flex", alignItems: "center", gap: "2px" }}>
@@ -1036,7 +1081,11 @@ export function TradingDashboard() {
                       </td>
 
                       {/* 8. BUY/SELL QTY */}
-                      <td style={{ textAlign: "center", padding: "8px 10px" }}>
+                      <td
+                        style={{ textAlign: "center", padding: "8px 10px", cursor: "pointer" }}
+                        onMouseEnter={(e) => handleSentimentMouseEnter(e, item, buyPct, buyQty, sellQty, changePct)}
+                        onMouseLeave={handleSentimentMouseLeave}
+                      >
                         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2px", width: "95px", margin: "0 auto" }}>
                           <div style={{ display: "flex", justifyContent: "space-between", width: "100%", fontSize: "9px", fontWeight: "700" }}>
                             <span style={{ color: "#10b981" }}>{fmtQty(buyQty)}</span>
@@ -1052,7 +1101,11 @@ export function TradingDashboard() {
                       </td>
 
                       {/* 9. 2M SIGNAL */}
-                      <td style={{ textAlign: "center", padding: "8px 6px" }}>
+                      <td
+                        style={{ textAlign: "center", padding: "8px 6px", cursor: "pointer" }}
+                        onMouseEnter={(e) => handleSentimentMouseEnter(e, item, buyPct, buyQty, sellQty, changePct)}
+                        onMouseLeave={handleSentimentMouseLeave}
+                      >
                         <div style={{
                           display: "inline-flex",
                           flexDirection: "column",
@@ -1125,6 +1178,41 @@ export function TradingDashboard() {
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* Floating Sentiment Hover Tooltip Card */}
+        {hoveredSentiment && (
+          <div style={{
+            position: "fixed",
+            left: `${hoveredSentiment.x}px`,
+            top: `${hoveredSentiment.y}px`,
+            width: "320px",
+            zIndex: 99999,
+            backgroundColor: "#0f172a",
+            border: "1px solid rgba(56, 189, 248, 0.4)",
+            borderRadius: "10px",
+            padding: "12px 14px",
+            boxShadow: "0 10px 30px rgba(0, 0, 0, 0.8)",
+            pointerEvents: "none"
+          }}>
+            <div style={{ fontSize: "12px", fontWeight: "800", color: "#f8fafc", marginBottom: "6px" }}>
+              📊 {hoveredSentiment.symbol} — Order Book Sentiment
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", fontWeight: "700", marginBottom: "4px" }}>
+              <span style={{ color: "#34d399" }}>Buy Interest: {hoveredSentiment.buyPct}%</span>
+              <span style={{ color: "#f87171" }}>Sell Interest: {hoveredSentiment.sellPct}%</span>
+            </div>
+            <div style={{ width: "100%", height: "6px", backgroundColor: "#ef4444", borderRadius: "3px", overflow: "hidden", display: "flex", marginBottom: "8px" }}>
+              <div style={{ width: `${hoveredSentiment.buyPct}%`, height: "100%", backgroundColor: "#10b981" }} />
+            </div>
+            <div style={{ fontSize: "10px", color: "#94a3b8", display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
+              <span>Total Buy Vol: {hoveredSentiment.buyQty.toLocaleString()}</span>
+              <span>Total Sell Vol: {hoveredSentiment.sellQty.toLocaleString()}</span>
+            </div>
+            <div style={{ fontSize: "10px", color: "#38bdf8", fontWeight: "600", borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: "6px" }}>
+              💡 Evaluated continuously during market hours (9:00 AM – 3:30 PM IST).
+            </div>
           </div>
         )}
       </div>

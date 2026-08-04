@@ -841,12 +841,12 @@ def get_upcoming_earnings(db: Session = Depends(get_db)):
             else:
                 continue
 
-        if (today - timedelta(days=1)) <= m_date <= end_date:
+        # Filter strictly to earnings disclosures on or after today (clearing old past dates)
+        if m_date >= today and m_date <= end_date:
             key = (symbol, m_date)
             if key not in seen:
                 seen.add(key)
                 purpose = raw.get("bm_purpose", raw.get("purpose", bm.title or "Financial Results"))
-                # Filter out pure board meetings that are not financial results/earnings
                 purpose_lower = str(purpose).lower()
                 is_earnings = any(k in purpose_lower for k in [
                     "financial", "result", "quarterly", "audited", "unaudited", "q1", "q2", "q3", "q4", "earning", "profit", "loss"
@@ -862,98 +862,16 @@ def get_upcoming_earnings(db: Session = Depends(get_db)):
                     "purpose": purpose,
                     "title": bm.title or f"{symbol}: Board Meeting",
                     "description": bm.description or purpose,
-                    "created_at": bm.created_at.isoformat() if bm.created_at else None
+                    "created_at": bm.created_at.isoformat() if bm.created_at else None,
+                    "ltp": 0.0,
+                    "prev_close": 0.0,
+                    "day_high": 0.0,
+                    "change_pct": 0.0
                 })
 
     upcoming.sort(key=lambda x: x["date"])
 
-    # Calculate / Attach 1-year returns % using Real Market Chart API (ONCE A DAY 24-HOUR CACHE)
-    global _1Y_RETURNS_CACHE, _1Y_RETURNS_CACHE_TIME
-    now_ts = time.time()
-
-    if not _1Y_RETURNS_CACHE:
-        _load_1y_returns_cache_from_db(db)
-
-    unique_symbols = list({item["symbol"] for item in upcoming})
-    missing_symbols = [s for s in unique_symbols if s not in _1Y_RETURNS_CACHE or not isinstance(_1Y_RETURNS_CACHE[s], dict)]
-
-    # Refresh cache strictly if 24 hours have elapsed or dict quotes are missing
-    if (now_ts - _1Y_RETURNS_CACHE_TIME) > _1Y_RETURNS_CACHE_TTL or missing_symbols:
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        import requests
-
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-
-        def fetch_real_1y_return(sym):
-            try:
-                ticker = f"{sym}.NS"
-                url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range=1y&interval=1d"
-                r = requests.get(url, headers=headers, timeout=4)
-                if r.status_code == 200:
-                    data = r.json()
-                    result = data["chart"]["result"][0]
-                    closes = [c for c in result["indicators"]["quote"][0]["close"] if c is not None]
-                    meta = result.get("meta", {})
-                    ltp = meta.get("regularMarketPrice", closes[-1] if closes else 0.0)
-                    prev_close = meta.get("chartPreviousClose", meta.get("previousClose", closes[0] if closes else 0.0))
-                    day_high = meta.get("regularMarketDayHigh", max(closes[-5:]) if closes else ltp)
-                    ret_str = "N/A"
-                    if len(closes) > 1 and closes[0] > 0:
-                        p_start = closes[0]
-                        p_end = closes[-1]
-                        ret_1y = ((p_end - p_start) / p_start) * 100
-                        ret_str = f"{ret_1y:+.1f}%"
-                    return sym, {
-                        "return_1y": ret_str,
-                        "ltp": round(ltp, 2),
-                        "prev_close": round(prev_close, 2),
-                        "day_high": round(day_high, 2),
-                        "change_pct": round(((ltp - prev_close) / prev_close * 100), 2) if prev_close > 0 else 0.0
-                    }
-            except Exception:
-                pass
-            return sym, {"return_1y": "N/A", "ltp": 0.0, "prev_close": 0.0, "day_high": 0.0, "change_pct": 0.0}
-
-        to_fetch = missing_symbols if (now_ts - _1Y_RETURNS_CACHE_TIME) <= _1Y_RETURNS_CACHE_TTL else unique_symbols
-        if to_fetch:
-            with ThreadPoolExecutor(max_workers=10) as executor:
-                futures = {executor.submit(fetch_real_1y_return, s): s for s in to_fetch}
-                for future in as_completed(futures):
-                    try:
-                        sym, qdata = future.result()
-                        _1Y_RETURNS_CACHE[sym] = qdata
-                    except Exception:
-                        pass
-        _1Y_RETURNS_CACHE_TIME = now_ts
-        _save_1y_returns_cache_to_db(db)
-
-    for item in upcoming:
-        cdata = _1Y_RETURNS_CACHE.get(item["symbol"])
-        if isinstance(cdata, dict):
-            ret_val = cdata.get("return_1y", "N/A")
-            item["ltp"] = cdata.get("ltp", 0.0)
-            item["prev_close"] = cdata.get("prev_close", 0.0)
-            item["day_high"] = cdata.get("day_high", 0.0)
-            item["change_pct"] = cdata.get("change_pct", 0.0)
-        else:
-            ret_val = str(cdata) if cdata else "N/A"
-            item["ltp"] = 0.0
-            item["prev_close"] = 0.0
-            item["day_high"] = 0.0
-            item["change_pct"] = 0.0
-
-        item["return_1y"] = ret_val
-        item["returns_1y"] = ret_val
-        try:
-            if ret_val != "N/A":
-                num_str = ret_val.replace("%", "").replace("+", "").strip()
-                item["return_1y_val"] = float(num_str)
-            else:
-                item["return_1y_val"] = -999.0
-        except Exception:
-            item["return_1y_val"] = -999.0
-
-    # ── Live Upstox Market Feed Quote Enrichment ──
+    # ── Live Upstox Market Feed 1-Day Intraday Quote Enrichment ──
     try:
         from app.main import get_nse_equities, get_active_feed
         eqs = get_nse_equities()
