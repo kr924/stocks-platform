@@ -880,22 +880,24 @@ def get_upcoming_earnings(db: Session = Depends(get_db)):
         upcoming_keys = []
         for item in upcoming:
             sym = item["symbol"].upper()
-            ikey = sym_to_key.get(sym)
-            if ikey:
-                item["instrument_key"] = ikey
-                upcoming_keys.append(ikey)
+            ikey = sym_to_key.get(sym) or f"NSE_EQ|{sym}"
+            item["instrument_key"] = ikey
+            upcoming_keys.append(ikey)
+            upcoming_keys.append(ikey.replace("|", ":"))
 
         if upcoming_keys:
             feed = get_active_feed()
             live_quotes = feed.get_quotes(upcoming_keys)
             for item in upcoming:
-                ikey = item.get("instrument_key")
-                if ikey and ikey in live_quotes:
-                    q = live_quotes[ikey]
+                sym = item["symbol"].upper()
+                ikey = item.get("instrument_key", "")
+                
+                q = live_quotes.get(ikey) or live_quotes.get(ikey.replace("|", ":")) or live_quotes.get(sym)
+                if q:
                     last_price = q.get("last_price", 0.0)
                     ohlc = q.get("ohlc", {})
-                    prev_close = ohlc.get("close", 0.0)
-                    day_high = ohlc.get("high", 0.0)
+                    prev_close = q.get("prev_close") or ohlc.get("close", 0.0)
+                    day_high = ohlc.get("high", 0.0) or q.get("high", 0.0)
                     if last_price > 0:
                         item["ltp"] = round(last_price, 2)
                         if prev_close > 0:
@@ -912,7 +914,7 @@ def get_upcoming_earnings(db: Session = Depends(get_db)):
                         if "total_sell_qty" in q and q["total_sell_qty"] is not None:
                             item["sell_qty"] = q["total_sell_qty"]
     except Exception as err:
-        logger.warning(f"Live Upstox feed quote enrichment skipped: {err}")
+        logger.warning(f"Live Upstox feed quote enrichment error: {err}")
 
     return upcoming
 

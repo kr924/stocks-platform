@@ -160,6 +160,18 @@ class UpstoxMarketFeed(BaseMarketFeed):
             }
             result[resolved_key] = item_quote
             self._quotes_cache[resolved_key] = item_quote
+
+            if key:
+                result[key] = item_quote
+                pipe_key = key.replace(":", "|")
+                result[pipe_key] = item_quote
+                self._quotes_cache[pipe_key] = item_quote
+
+            sym_name = val.get("trading_symbol") or val.get("symbol")
+            if sym_name:
+                sym_upper = sym_name.upper()
+                result[sym_upper] = item_quote
+                self._quotes_cache[sym_upper] = item_quote
         return result
 
     def get_historical_candles(self, instrument_key: str, interval: str, to_date: str, from_date: Optional[str] = None) -> List[List[Any]]:

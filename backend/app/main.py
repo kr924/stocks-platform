@@ -384,10 +384,12 @@ def get_quotes_by_symbols(
     keys = []
     key_to_sym = {}
     for s in sym_list:
-        k = sym_to_key.get(s)
-        if k:
-            keys.append(k)
-            key_to_sym[k] = s
+        k = sym_to_key.get(s) or f"NSE_EQ|{s}"
+        keys.append(k)
+        keys.append(k.replace("|", ":"))
+        key_to_sym[k] = s
+        key_to_sym[k.replace("|", ":")] = s
+        key_to_sym[s] = s
 
     if not keys:
         return {}
@@ -396,19 +398,23 @@ def get_quotes_by_symbols(
         quotes = feed.get_quotes(keys)
         result = {}
         for k, q in quotes.items():
-            sym = key_to_sym.get(k)
+            sym = key_to_sym.get(k) or key_to_sym.get(k.replace(":", "|"))
+            if not sym and ":" in k:
+                sym = k.split(":")[-1]
+            if not sym and "|" in k:
+                sym = k.split("|")[-1]
             if sym:
                 last_price = q.get("last_price", 0.0)
                 ohlc = q.get("ohlc", {})
-                prev_close = ohlc.get("close", 0.0)
-                day_high = ohlc.get("high", 0.0)
-                day_low = ohlc.get("low", 0.0)
+                prev_close = q.get("close") or ohlc.get("close", 0.0)
+                day_high = ohlc.get("high", 0.0) or q.get("high", 0.0)
+                day_low = ohlc.get("low", 0.0) or q.get("low", 0.0)
                 pct_change = 0.0
                 if prev_close > 0 and last_price > 0:
                     pct_change = ((last_price - prev_close) / prev_close) * 100
 
-                result[sym] = {
-                    "symbol": sym,
+                result[sym.upper()] = {
+                    "symbol": sym.upper(),
                     "instrument_key": k,
                     "last_price": last_price,
                     "change": round(pct_change, 2),
