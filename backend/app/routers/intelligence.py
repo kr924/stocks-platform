@@ -875,9 +875,9 @@ def get_upcoming_earnings(db: Session = Depends(get_db)):
         _load_1y_returns_cache_from_db(db)
 
     unique_symbols = list({item["symbol"] for item in upcoming})
-    missing_symbols = [s for s in unique_symbols if s not in _1Y_RETURNS_CACHE]
+    missing_symbols = [s for s in unique_symbols if s not in _1Y_RETURNS_CACHE or not isinstance(_1Y_RETURNS_CACHE[s], dict)]
 
-    # Refresh cache strictly if 24 hours have elapsed or new symbols exist
+    # Refresh cache strictly if 24 hours have elapsed or dict quotes are missing
     if (now_ts - _1Y_RETURNS_CACHE_TIME) > _1Y_RETURNS_CACHE_TTL or missing_symbols:
         from concurrent.futures import ThreadPoolExecutor, as_completed
         import requests
