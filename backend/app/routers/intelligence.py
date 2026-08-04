@@ -874,7 +874,7 @@ def get_upcoming_earnings(db: Session = Depends(get_db)):
     # ── Live Upstox Market Feed 1-Day Intraday Quote Enrichment ──
     try:
         from app.main import get_nse_equities, get_active_feed
-        eqs = get_nse_equities()
+        eqs = get_nse_equities(db=db)
         sym_to_key = {item["symbol"].upper(): item["key"] for item in eqs if item.get("symbol") and item.get("key")}
         
         upcoming_keys = []
