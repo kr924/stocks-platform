@@ -8,7 +8,7 @@ PROVIDER = os.getenv("PROVIDER", "mock").lower()
 
 UPSTOX_CLIENT_ID = os.getenv("UPSTOX_CLIENT_ID", "")
 UPSTOX_CLIENT_SECRET = os.getenv("UPSTOX_CLIENT_SECRET", "")
-UPSTOX_REDIRECT_URI = os.getenv("UPSTOX_REDIRECT_URI", "http://localhost:8000/api/auth/callback")
+UPSTOX_REDIRECT_URI = os.getenv("UPSTOX_REDIRECT_URI", "https://mesh-deferred-legendary-ellis.trycloudflare.com/api/auth/callback")
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
