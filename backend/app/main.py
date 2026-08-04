@@ -525,18 +525,9 @@ def get_watchlist(
             day_high = ohlc.get("high", 0.0) or q.get("high", 0.0)
             day_low = ohlc.get("low", 0.0) or q.get("low", 0.0)
 
-            # Fallback for off-market / missing feed prices so Watchlist never shows empty ₹0.00 or —
-            if last_price <= 0:
-                hash_val = sum(ord(c) for c in sym_upper) if sym_upper else 100
-                base_ltp = 125.0 + (hash_val % 1450)
-                last_price = round(base_ltp, 2)
-                prev_close = round(base_ltp * 0.98, 2)
-                day_high = round(base_ltp * 1.02, 2)
-                day_low = round(base_ltp * 0.97, 2)
-
             if period == "today":
                 pct_change = 0.0
-                if prev_close > 0:
+                if prev_close > 0 and last_price > 0:
                     pct_change = ((last_price - prev_close) / prev_close) * 100
             else:
                 hist_close = historical_prices.get(ikey, prev_close)
