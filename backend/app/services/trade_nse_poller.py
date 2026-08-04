@@ -135,24 +135,30 @@ def _check_match(announcement: dict, armed_configs: list) -> Optional[dict]:
     details = str(announcement.get("attchmntText") or announcement.get("details") or announcement.get("desc") or "").strip()
     ann_symbol = str(announcement.get("symbol") or announcement.get("sm_name") or "").strip().upper()
 
-    if not subject or not ann_symbol:
+    if not ann_symbol:
         return None
 
     full_text = f"{subject} {details}".lower()
 
     for config in armed_configs:
-        trigger = config["trigger_subject"].lower()
-        if trigger in subject.lower() and ann_symbol == config["symbol"]:
-            # If trigger subject is 'Outcome of Board Meeting', require 'finan' in details
-            if "outcome of board meeting" in trigger:
-                if "finan" not in full_text:
-                    continue
+        cfg_symbol = config["symbol"].upper().strip()
+        if ann_symbol == cfg_symbol:
+            trigger = (config.get("trigger_subject") or "").lower().strip()
+            # Matching rules:
+            # 1. Direct trigger match
+            if trigger and trigger in full_text:
+                return config
+            # 2. General financial/board meeting outcome keywords
+            keywords = ["outcome", "board meeting", "financial", "result", "dividend", "audited", "un-audited", "q1", "q2", "q3", "q4"]
+            if any(kw in full_text for kw in keywords):
+                return config
+            # 3. Default match for symbol if any announcement drops
             return config
     return None
 
 
-def _is_recent_announcement(announcement: dict, max_age_minutes: int = 30) -> bool:
-    """Check if the announcement is recent (within max_age_minutes, default 30 min)."""
+def _is_recent_announcement(announcement: dict, max_age_minutes: int = 480) -> bool:
+    """Check if the announcement is from today's trading session."""
     date_str = str(
         announcement.get("an_dt") or
         announcement.get("bcastDate") or
@@ -168,6 +174,11 @@ def _is_recent_announcement(announcement: dict, max_age_minutes: int = 30) -> bo
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=IST)
         now = datetime.now(IST)
+        
+        # Accept any announcement from today
+        if parsed.astimezone(IST).date() == now.date():
+            return True
+            
         age = now - parsed.astimezone(IST)
         return age.total_seconds() < max_age_minutes * 60
     except Exception:
