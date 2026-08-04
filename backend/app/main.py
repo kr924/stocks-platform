@@ -180,9 +180,9 @@ async def _intelligence_scheduler():
 
             # Daily 6:00 AM IST Earnings Auto-Sync to Watchlist
             try:
-                from datetime import datetime, timezone, timedelta
-                ist = timezone(timedelta(hours=5, minutes=30))
-                now_ist = datetime.now(ist)
+                from datetime import datetime as dt_cls, timezone as tz_cls, timedelta as td_cls
+                ist = tz_cls(td_cls(hours=5, minutes=30))
+                now_ist = dt_cls.now(ist)
                 today_str = now_ist.strftime("%Y-%m-%d")
                 if now_ist.hour >= 6 and last_run.get("earnings_sync_date") != today_str:
                     last_run["earnings_sync_date"] = today_str
