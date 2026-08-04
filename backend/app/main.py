@@ -342,6 +342,65 @@ def logout(db: Session = Depends(get_db), feed: BaseMarketFeed = Depends(get_act
 
 # ----------------- WATCHLIST ENDPOINTS -----------------
 
+@app.get("/api/market/quotes-by-symbols")
+def get_quotes_by_symbols(
+    symbols: str = Query(...),
+    db: Session = Depends(get_db),
+    feed: BaseMarketFeed = Depends(get_active_feed)
+):
+    """Get real-time Upstox quotes for a comma-separated list of symbols without requiring them to be in watchlist DB."""
+    sym_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    if not sym_list:
+        return {}
+
+    eqs = get_nse_equities()
+    sym_to_key = {item["symbol"].upper(): item["key"] for item in eqs if item.get("symbol") and item.get("key")}
+
+    keys = []
+    key_to_sym = {}
+    for s in sym_list:
+        k = sym_to_key.get(s)
+        if k:
+            keys.append(k)
+            key_to_sym[k] = s
+
+    if not keys:
+        return {}
+
+    try:
+        quotes = feed.get_quotes(keys)
+        result = {}
+        for k, q in quotes.items():
+            sym = key_to_sym.get(k)
+            if sym:
+                last_price = q.get("last_price", 0.0)
+                ohlc = q.get("ohlc", {})
+                prev_close = ohlc.get("close", 0.0)
+                day_high = ohlc.get("high", 0.0)
+                day_low = ohlc.get("low", 0.0)
+                pct_change = 0.0
+                if prev_close > 0 and last_price > 0:
+                    pct_change = ((last_price - prev_close) / prev_close) * 100
+
+                result[sym] = {
+                    "symbol": sym,
+                    "instrument_key": k,
+                    "last_price": last_price,
+                    "change": round(pct_change, 2),
+                    "close": prev_close,
+                    "high": day_high,
+                    "low": day_low,
+                    "depth_buy_pct": q.get("depth_buy_pct", 50.0),
+                    "depth_sell_pct": q.get("depth_sell_pct", 50.0),
+                    "total_buy_qty": q.get("total_buy_qty", 0),
+                    "total_sell_qty": q.get("total_sell_qty", 0)
+                }
+        return result
+    except Exception as e:
+        print(f"Error in quotes-by-symbols: {e}")
+        return {}
+
+
 @app.get("/api/watchlist")
 def get_watchlist(
     period: str = "today",

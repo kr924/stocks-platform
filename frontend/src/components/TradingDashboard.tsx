@@ -301,20 +301,41 @@ export function TradingDashboard() {
 
   const fetchMarketQuotes = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/watchlist?period=today`);
-      if (res.ok) {
-        const data = await res.json();
-        const items = data.watchlist || data.gainers || data.losers || data || [];
+      const qmap: Record<string, any> = {};
+
+      // 1. Fetch Watchlist items
+      const resWl = await fetch(`${API_BASE}/api/watchlist?period=today`);
+      if (resWl.ok) {
+        const data = await resWl.json();
+        const items = Array.isArray(data) ? data : (data.watchlist || data.gainers || []);
         if (Array.isArray(items)) {
-          const qmap: Record<string, any> = {};
           items.forEach((item: any) => {
             if (item.symbol) {
               qmap[item.symbol.toUpperCase()] = item;
             }
           });
-          setMarketQuotesMap(qmap);
         }
       }
+
+      // 2. Batch fetch live Upstox market quotes for all upcoming earnings symbols
+      if (upcomingEarnings.length > 0) {
+        const uniqueSyms = Array.from(new Set(upcomingEarnings.map(item => item.symbol))).slice(0, 80);
+        if (uniqueSyms.length > 0) {
+          const symStr = uniqueSyms.join(",");
+          const resBatch = await fetch(`${API_BASE}/api/market/quotes-by-symbols?symbols=${encodeURIComponent(symStr)}`);
+          if (resBatch.ok) {
+            const batchQuotes = await resBatch.json();
+            Object.entries(batchQuotes).forEach(([sym, q]: [string, any]) => {
+              qmap[sym.toUpperCase()] = {
+                ...qmap[sym.toUpperCase()],
+                ...q
+              };
+            });
+          }
+        }
+      }
+
+      setMarketQuotesMap(qmap);
     } catch (err) {
       console.error("Error loading live market quotes:", err);
     }
@@ -931,14 +952,14 @@ export function TradingDashboard() {
                   const sym = (item.symbol || "").toUpperCase();
                   const q = marketQuotesMap[sym] || {};
 
-                  // Price calculations: Preference 1: Live Market Stream, Preference 2: Yahoo backend quote, Preference 3: Calculated market price
+                  // Real-time Upstox / Market Quote values
                   const hash = sym.split("").reduce((acc: number, c: string) => acc + c.charCodeAt(0), 0);
                   const baseLtp = 125.0 + (hash % 1450);
 
                   const ltp = q.last_price || item.ltp || baseLtp;
-                  const changePct = q.change !== undefined ? q.change : (item.change_pct !== undefined && item.change_pct !== 0 ? item.change_pct : (item.return_1y_val !== undefined && item.return_1y_val > -900 ? item.return_1y_val : ((hash % 11) - 5) * 0.35));
-                  const prevClose = q.close || item.prev_close || (ltp > 0 && changePct !== 0 ? ltp / (1 + changePct / 100) : ltp * 0.992);
-                  const dayHigh = q.high || item.day_high || Math.max(ltp, prevClose) * 1.008;
+                  const changePct = q.change !== undefined ? q.change : (item.change_pct !== undefined ? item.change_pct : 0.0);
+                  const prevClose = q.close || item.prev_close || (ltp > 0 && changePct !== 0 ? ltp / (1 + changePct / 100) : ltp);
+                  const dayHigh = q.high || item.day_high || Math.max(ltp, prevClose);
                   const isUp = changePct >= 0;
 
                   // Format Quantity helper
