@@ -286,6 +286,23 @@ export function TradingDashboard() {
     }
   };
 
+  const [syncingQuotes, setSyncingQuotes] = useState(false);
+
+  const handleSyncQuotesNow = async () => {
+    setSyncingQuotes(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/trading/upcoming-earnings/sync`, { method: "POST" });
+      if (res.ok) {
+        await fetchUpcomingEarnings();
+        await fetchMarketQuotes();
+      }
+    } catch (err) {
+      console.error("Error syncing quotes:", err);
+    } finally {
+      setSyncingQuotes(false);
+    }
+  };
+
   const fetchUpcomingEarnings = async () => {
     try {
       const earningsRes = await fetch(`${API_BASE}/api/trading/upcoming-earnings`);
@@ -888,6 +905,30 @@ export function TradingDashboard() {
               }}
             >
               🌐 All Dates
+            </button>
+
+            <button
+              onClick={handleSyncQuotesNow}
+              disabled={syncingQuotes}
+              title="Click to manually register all earnings stocks into Upstox live streaming quote feed"
+              style={{
+                backgroundColor: "rgba(16, 185, 129, 0.2)",
+                border: "1px solid #10b981",
+                color: "#34d399",
+                fontSize: "11px",
+                fontWeight: "700",
+                padding: "5px 12px",
+                borderRadius: "6px",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "5px",
+                transition: "all 0.15s",
+                boxShadow: "0 2px 8px rgba(16, 185, 129, 0.25)"
+              }}
+            >
+              <RefreshCw size={12} className={syncingQuotes ? "animate-spin" : ""} />
+              {syncingQuotes ? "Syncing Quotes..." : "🔄 Sync Live Quotes"}
             </button>
           </div>
 

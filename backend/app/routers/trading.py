@@ -534,6 +534,14 @@ def get_upcoming_earnings(db: Session = Depends(get_db)):
     return {"upcoming_earnings": items}
 
 
+@router.post("/upcoming-earnings/sync")
+def sync_upcoming_earnings_now(db: Session = Depends(get_db)):
+    """Manually trigger immediate sync of upcoming earnings stocks to live Upstox Watchlist quote feed."""
+    from app.services.earnings_sync import sync_earnings_to_watchlist
+    res = sync_earnings_to_watchlist(db)
+    return res
+
+
 @router.get("/settings")
 def get_auto_trading_settings():
     """Get auto trading AI configuration."""

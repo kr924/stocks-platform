@@ -177,12 +177,37 @@ async def _intelligence_scheduler():
             if now - last_run["ai_analysis"] >= ai_interval:
                 last_run["ai_analysis"] = now
                 await asyncio.to_thread(_run_ai_analysis)
+
+            # Daily 6:00 AM IST Earnings Auto-Sync to Watchlist
+            try:
+                from datetime import datetime, timezone, timedelta
+                ist = timezone(timedelta(hours=5, minutes=30))
+                now_ist = datetime.now(ist)
+                today_str = now_ist.strftime("%Y-%m-%d")
+                if now_ist.hour >= 6 and last_run.get("earnings_sync_date") != today_str:
+                    last_run["earnings_sync_date"] = today_str
+                    await asyncio.to_thread(_run_earnings_sync)
+            except Exception as e:
+                logger.error(f"6 AM IST earnings sync error: {e}")
             
         except Exception as e:
             logger.error(f"Intelligence scheduler error: {e}")
         
         # Sleep for 1 second between loop iterations for 1-second polling responsiveness
         await asyncio.sleep(1)
+
+
+def _run_earnings_sync():
+    """Thread-safe wrapper for daily 6 AM IST earnings watchlist sync."""
+    try:
+        from app.services.earnings_sync import sync_earnings_to_watchlist
+        db = next(get_db())
+        try:
+            sync_earnings_to_watchlist(db)
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"Daily earnings sync error: {e}")
 
 
 def _run_corporate_announcements_scraper():
