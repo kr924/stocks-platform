@@ -400,10 +400,10 @@ def _classify_ai_tier(event) -> str:
 
     # ── RULE 2: Financial Results / Finance AI Routing ──
     # User Rules:
-    # 1. Subject contains "Outcome of Board Meeting" AND details contain "finan"
+    # 1. Subject contains "Outcome of Board Meeting"
     # 2. Subject contains "Updates" AND details contain "finan", "revenue", or "profit"
     # 3. Subject or details contain "Acquisition", "Merger", "Dividend", "Bonus", "Split", "Financial Results", "Quarterly Results", "Audited Results"
-    has_outcome_with_finan = "outcome of board meeting" in title_lower and "finan" in desc_lower
+    has_outcome_with_finan = "outcome of board meeting" in title_lower
     has_updates_with_finan = "update" in title_lower and any(kw in desc_lower for kw in ["finan", "revenue", "profit"])
     has_finance_keywords = any(kw in title_lower or kw in desc_lower for kw in [
         "acquisition", "merger", "dividend", "bonus", "split",
