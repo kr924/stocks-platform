@@ -126,6 +126,7 @@ export function TradingDashboard() {
   const [configs, setConfigs] = useState<TradeConfig[]>([]);
   const [orders, setOrders] = useState<TradeOrder[]>([]);
   const [aiLogs, setAiLogs] = useState<TradeAILog[]>([]);
+  const [nseAnnouncements, setNseAnnouncements] = useState<any[]>([]);
   const [pollerStatus, setPollerStatus] = useState<PollerStatus | null>(null);
   const [upcomingEarnings, setUpcomingEarnings] = useState<UpcomingEarningsItem[]>([]);
   const [aiSettings, setAiSettings] = useState<AutoTradingSettings>({
@@ -331,12 +332,13 @@ export function TradingDashboard() {
   // Fetch initial & fast status data
   const fetchData = async () => {
     try {
-      const [configsRes, ordersRes, aiLogsRes, pollerRes, settingsRes] = await Promise.all([
+      const [configsRes, ordersRes, aiLogsRes, pollerRes, settingsRes, feedRes] = await Promise.all([
         fetch(`${API_BASE}/api/trading/configs`),
         fetch(`${API_BASE}/api/trading/orders`),
         fetch(`${API_BASE}/api/trading/ai-logs`),
         fetch(`${API_BASE}/api/trading/poller/status`),
         fetch(`${API_BASE}/api/trading/settings`),
+        fetch(`${API_BASE}/api/intelligence/feed?hours=24`),
       ]);
 
       if (configsRes.ok) {
@@ -363,6 +365,13 @@ export function TradingDashboard() {
             ...data.settings
           }));
         }
+      }
+      if (feedRes.ok) {
+        const data = await feedRes.json();
+        const filtered = (data.feed_items || []).filter((item: any) =>
+          item.source === "nse" && item.event_type === "announcement"
+        );
+        setNseAnnouncements(filtered);
       }
     } catch (err) {
       console.error("Error loading trading dashboard data:", err);
@@ -2237,185 +2246,269 @@ export function TradingDashboard() {
           );
         })()}
 
-        {/* Premium 2-Step AI Earnings Analysis Logs */}
-        <div style={{
-          background: "rgba(17, 24, 39, 0.6)",
-          border: "1px solid rgba(168, 85, 247, 0.2)",
-          borderRadius: "12px",
-          padding: "16px"
-        }}>
-          <h3 style={{ fontSize: "14px", fontWeight: "700", color: "#f8fafc", marginBottom: "14px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <Cpu size={16} className="text-purple-400" /> 2-Step AI Earnings Analysis ({aiLogs.length})
-            </span>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <button
-                onClick={handleClearAiLogs}
-                style={{
-                  fontSize: "11px",
-                  color: "#f87171",
-                  background: "rgba(239, 68, 68, 0.12)",
-                  border: "1px solid rgba(239, 68, 68, 0.25)",
-                  padding: "3px 8px",
-                  borderRadius: "6px",
-                  cursor: "pointer",
-                  fontWeight: "700"
-                }}
-              >
-                🧹 Clear / Reset Logs
-              </button>
-              <span style={{ fontSize: "10px", color: "#c084fc", background: "rgba(168,85,247,0.1)", padding: "2px 8px", borderRadius: "12px" }}>
-                Auto-Triggered
+        {/* Right Column: Live Announcements & Premium AI Logs */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+          
+          {/* Real-Time NSE Corporate Announcements */}
+          <div style={{
+            background: "rgba(17, 24, 39, 0.6)",
+            border: "1px solid rgba(59, 130, 246, 0.2)",
+            borderRadius: "12px",
+            padding: "16px"
+          }}>
+            <h3 style={{ fontSize: "14px", fontWeight: "700", color: "#f8fafc", marginBottom: "14px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <Sparkles size={16} className="text-blue-400" /> Live NSE Corporate Announcements ({nseAnnouncements.length})
               </span>
-            </div>
-          </h3>
-          <div style={{ maxHeight: "420px", overflowY: "auto" }}>
-            {aiLogs.length === 0 ? (
-              <div style={{ color: "#64748b", fontSize: "12px", textAlign: "center", padding: "20px" }}>
-                No earnings AI analysis logs yet. Auto-trading poller will populate AI results as soon as announcements arrive.
-              </div>
-            ) : (
-              aiLogs.map((log) => {
-                const hasValidAiSuggestion = Boolean(
-                  log.ai_suggestion &&
-                  log.ai_suggestion !== "PENDING" &&
-                  log.ai_suggestion !== "N/A" &&
-                  log.ai_suggestion !== "UNKNOWN" &&
-                  log.ai_suggestion !== "NULL" &&
-                  log.revenue && log.revenue !== "N/A"
-                );
-                const suggestion = (log.ai_suggestion || "").toUpperCase();
-                const isBeat = suggestion.includes("BEAT") || suggestion.includes("BUY") || log.ai_sentiment === "positive";
-                const isMiss = suggestion.includes("MISS") || suggestion.includes("SELL") || log.ai_sentiment === "negative";
+              <span style={{ fontSize: "10px", color: "#60a5fa", background: "rgba(59,130,246,0.1)", padding: "2px 8px", borderRadius: "12px" }}>
+                Real-Time AI
+              </span>
+            </h3>
+            <div style={{ maxHeight: "300px", overflowY: "auto" }}>
+              {nseAnnouncements.length === 0 ? (
+                <div style={{ color: "#64748b", fontSize: "12px", textAlign: "center", padding: "20px" }}>
+                  No corporate announcements received today.
+                </div>
+              ) : (
+                nseAnnouncements.map((ann) => {
+                  const isBeat = ann.ai_sentiment === "positive";
+                  const isMiss = ann.ai_sentiment === "negative";
+                  const isPendingArm = ann.ai_provider === "pending_arm";
 
-                return (
-                  <div key={log.id} id={`ai-card-${(log.symbol || "").toUpperCase()}`} style={{
-                    padding: "14px",
-                    borderRadius: "10px",
-                    backgroundColor: "#0d131f",
-                    border: isBeat ? "1px solid rgba(16, 185, 129, 0.3)" : isMiss ? "1px solid rgba(239, 68, 68, 0.3)" : "1px solid rgba(168, 85, 247, 0.25)",
-                    marginBottom: "14px",
-                    fontSize: "12px"
-                  }}>
-                    {/* Header bar: Symbol, Suggestion Badge (ONLY IF AI UPDATED), Sentiment, Flow Used */}
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        <span style={{ fontSize: "15px", fontWeight: "800", color: "#f8fafc" }}>#{log.symbol}</span>
-                        {hasValidAiSuggestion ? (
-                          <span style={{
-                            padding: "3px 10px",
-                            borderRadius: "6px",
-                            fontSize: "11px",
-                            fontWeight: "800",
-                            backgroundColor: isBeat ? "#059669" : isMiss ? "#dc2626" : "#d97706",
-                            color: "white"
-                          }}>
-                            💡 {suggestion}
-                          </span>
-                        ) : (
-                          <span style={{
-                            padding: "3px 8px",
-                            borderRadius: "6px",
-                            fontSize: "10px",
-                            fontWeight: "600",
-                            backgroundColor: "rgba(100, 116, 139, 0.2)",
-                            color: "#94a3b8"
-                          }}>
-                            ⏳ AI Analysis Pending
-                          </span>
-                        )}
-                        {log.ai_sentiment && (
-                          <span style={{
-                            fontSize: "10px",
-                            fontWeight: "700",
-                            color: log.ai_sentiment === "positive" ? "#34d399" : log.ai_sentiment === "negative" ? "#f87171" : "#fbbf24",
-                            textTransform: "uppercase"
-                          }}>
-                            ({log.ai_sentiment})
-                          </span>
-                        )}
-                        {log.created_at && (
-                          <span style={{
-                            fontSize: "11px",
-                            color: "#94a3b8",
-                            fontWeight: "600",
-                            marginLeft: "6px"
-                          }}>
-                            • 🕒 {new Date(log.created_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}
-                          </span>
-                        )}
-                      </div>
-                      <span style={{
-                        fontSize: "10px",
-                        fontWeight: "600",
-                        color: log.flow_used === "custom_rest_api" ? "#60a5fa" : "#c084fc",
-                        background: log.flow_used === "custom_rest_api" ? "rgba(59,130,246,0.1)" : "rgba(168,85,247,0.1)",
-                        padding: "2px 8px",
-                        borderRadius: "10px",
-                        border: log.flow_used === "custom_rest_api" ? "1px solid rgba(59,130,246,0.2)" : "1px solid rgba(168,85,247,0.2)"
-                      }}>
-                        {log.flow_used === "custom_rest_api" ? "Flow 1: Custom REST API" : `Flow 2: ${log.provider}`}
-                      </span>
-                    </div>
-
-                    {/* Announcement Headline */}
-                    <div style={{ fontSize: "12px", fontWeight: "600", color: "#e2e8f0", marginBottom: "10px" }}>
-                      📢 {log.nse_event_title || "NSE Corporate Announcement"}
-                    </div>
-
-                    {/* Structured Financial Metrics Grid (YoY %, Last Qtr QoQ %, Prev Year Same Qtr %) */}
-                    <div style={{
-                      display: "grid",
-                      gridTemplateColumns: "1fr 1fr",
-                      gap: "8px",
-                      backgroundColor: "#161e2e",
+                  return (
+                    <div key={ann.id} style={{
                       padding: "12px",
                       borderRadius: "8px",
+                      backgroundColor: "#0d131f",
+                      border: isPendingArm ? "1px dashed rgba(168, 85, 247, 0.4)" : isBeat ? "1px solid rgba(16, 185, 129, 0.25)" : isMiss ? "1px solid rgba(239, 68, 68, 0.25)" : "1px solid rgba(255,255,255,0.06)",
                       marginBottom: "10px",
-                      fontSize: "11px"
+                      fontSize: "12px"
                     }}>
-                      <div><strong style={{ color: "#94a3b8" }}>📊 Revenue (YoY/QoQ):</strong> <div style={{ color: "#f1f5f9", marginTop: "2px", lineHeight: "1.3" }}>{log.revenue || "N/A"}</div></div>
-                      <div><strong style={{ color: "#94a3b8" }}>💸 Expenses:</strong> <div style={{ color: "#f1f5f9", marginTop: "2px", lineHeight: "1.3" }}>{log.expenses || "N/A"}</div></div>
-                      <div><strong style={{ color: "#94a3b8" }}>⚡ Op. Profit (OPM):</strong> <div style={{ color: "#f1f5f9", marginTop: "2px", lineHeight: "1.3" }}>{log.operating_profit || "N/A"}</div></div>
-                      <div><strong style={{ color: "#94a3b8" }}>🏛️ PBT:</strong> <div style={{ color: "#f1f5f9", marginTop: "2px", lineHeight: "1.3" }}>{log.pbt || "N/A"}</div></div>
-                      <div><strong style={{ color: "#94a3b8" }}>🪙 Other Income:</strong> <div style={{ color: "#f1f5f9", marginTop: "2px", lineHeight: "1.3" }}>{log.other_income || "N/A"}</div></div>
-                      <div><strong style={{ color: "#94a3b8" }}>📈 PAT (YoY/QoQ/Same Qtr):</strong> <div style={{ color: "#34d399", fontWeight: "700", marginTop: "2px", lineHeight: "1.3" }}>{log.pat_yoy || "N/A"}</div></div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                          <span 
+                            onClick={() => openEarningsChart(ann.symbol, ann.instrument_key)}
+                            style={{ fontSize: "13px", fontWeight: "800", color: "#60a5fa", cursor: "pointer", textDecoration: "underline" }}
+                          >
+                            #{ann.symbol}
+                          </span>
+                          {ann.time && (
+                            <span style={{ fontSize: "10px", color: "#64748b", fontWeight: "600" }}>
+                              🕒 {new Date(ann.time).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}
+                            </span>
+                          )}
+                        </div>
+                        {isPendingArm ? (
+                          <span style={{ fontSize: "10px", fontWeight: "700", color: "#c084fc", background: "rgba(168, 85, 247, 0.15)", padding: "2px 6px", borderRadius: "4px" }}>
+                            ⏳ Awaiting Arm AI
+                          </span>
+                        ) : ann.ai_sentiment ? (
+                          <span style={{
+                            fontSize: "10px",
+                            fontWeight: "800",
+                            color: isBeat ? "#34d399" : isMiss ? "#f87171" : "#fbbf24",
+                            textTransform: "uppercase"
+                          }}>
+                            {ann.ai_sentiment}
+                          </span>
+                        ) : null}
+                      </div>
+                      <div style={{ fontWeight: "600", color: "#e2e8f0", marginBottom: "6px" }}>
+                        {ann.title}
+                      </div>
+                      {ann.ai_summary && (
+                        <div style={{ fontSize: "11px", color: "#94a3b8", fontStyle: "italic", borderTop: "1px dashed rgba(255,255,255,0.06)", paddingTop: "6px", marginTop: "6px" }}>
+                          💡 {ann.ai_summary}
+                        </div>
+                      )}
+                      {ann.url && ann.url.startsWith("http") && (
+                        <div style={{ marginTop: "6px", textAlign: "right" }}>
+                          <a href={ann.url} target="_blank" rel="noreferrer" style={{ fontSize: "10px", color: "#60a5fa", textDecoration: "none" }}>
+                            View PDF Link <ExternalLink size={10} style={{ display: "inline" }} />
+                          </a>
+                        </div>
+                      )}
                     </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
 
-                    {/* Future Growth Projections & Broker Estimates */}
-                    {log.growth_projection && log.growth_projection !== "N/A" && (
-                      <div style={{ fontSize: "11px", color: "#cbd5e1", marginBottom: "6px", lineHeight: "1.4" }}>
-                        <strong style={{ color: "#38bdf8" }}>🔮 Growth Projection:</strong> {log.growth_projection}
-                      </div>
-                    )}
-                    {log.broker_estimates && log.broker_estimates !== "N/A" && (
-                      <div style={{ fontSize: "11px", color: "#cbd5e1", marginBottom: "8px", lineHeight: "1.4" }}>
-                        <strong style={{ color: "#fbbf24" }}>🎯 Broker Estimates:</strong> {log.broker_estimates}
-                      </div>
-                    )}
+          {/* Premium 2-Step AI Earnings Analysis Logs */}
+          <div style={{
+            background: "rgba(17, 24, 39, 0.6)",
+            border: "1px solid rgba(168, 85, 247, 0.2)",
+            borderRadius: "12px",
+            padding: "16px"
+          }}>
+            <h3 style={{ fontSize: "14px", fontWeight: "700", color: "#f8fafc", marginBottom: "14px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <Cpu size={16} className="text-purple-400" /> 2-Step AI Earnings Analysis ({aiLogs.length})
+              </span>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <button
+                  onClick={handleClearAiLogs}
+                  style={{
+                    fontSize: "11px",
+                    color: "#f87171",
+                    background: "rgba(239, 68, 68, 0.12)",
+                    border: "1px solid rgba(239, 68, 68, 0.25)",
+                    padding: "3px 8px",
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                    fontWeight: "700"
+                  }}
+                >
+                  🧹 Clear / Reset Logs
+                </button>
+                <span style={{ fontSize: "10px", color: "#c084fc", background: "rgba(168,85,247,0.1)", padding: "2px 8px", borderRadius: "12px" }}>
+                  Auto-Triggered
+                </span>
+              </div>
+            </h3>
+            <div style={{ maxHeight: "420px", overflowY: "auto" }}>
+              {aiLogs.length === 0 ? (
+                <div style={{ color: "#64748b", fontSize: "12px", textAlign: "center", padding: "20px" }}>
+                  No earnings AI analysis logs yet. Auto-trading poller will populate AI results as soon as announcements arrive.
+                </div>
+              ) : (
+                aiLogs.map((log) => {
+                  const hasValidAiSuggestion = Boolean(
+                    log.ai_suggestion &&
+                    log.ai_suggestion !== "PENDING" &&
+                    log.ai_suggestion !== "N/A" &&
+                    log.ai_suggestion !== "UNKNOWN" &&
+                    log.ai_suggestion !== "NULL" &&
+                    log.revenue && log.revenue !== "N/A"
+                  );
+                  const suggestion = (log.ai_suggestion || "").toUpperCase();
+                  const isBeat = suggestion.includes("BEAT") || suggestion.includes("BUY") || log.ai_sentiment === "positive";
+                  const isMiss = suggestion.includes("MISS") || suggestion.includes("SELL") || log.ai_sentiment === "negative";
 
-                    {/* AI Executive Summary */}
-                    <div style={{ fontSize: "11px", color: "#94a3b8", fontStyle: "italic", lineHeight: "1.4", borderTop: "1px dashed rgba(255,255,255,0.08)", paddingTop: "8px", marginTop: "8px" }}>
-                      📝 "{log.ai_summary}"
+                  return (
+                    <div key={log.id} id={`ai-card-${(log.symbol || "").toUpperCase()}`} style={{
+                      padding: "14px",
+                      borderRadius: "10px",
+                      backgroundColor: "#0d131f",
+                      border: isBeat ? "1px solid rgba(16, 185, 129, 0.3)" : isMiss ? "1px solid rgba(239, 68, 68, 0.3)" : "1px solid rgba(168, 85, 247, 0.25)",
+                      marginBottom: "14px",
+                      fontSize: "12px"
+                    }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <span style={{ fontSize: "15px", fontWeight: "800", color: "#f8fafc" }}>#{log.symbol}</span>
+                          {hasValidAiSuggestion ? (
+                            <span style={{
+                              padding: "3px 10px",
+                              borderRadius: "6px",
+                              fontSize: "11px",
+                              fontWeight: "800",
+                              backgroundColor: isBeat ? "#059669" : isMiss ? "#dc2626" : "#d97706",
+                              color: "white"
+                            }}>
+                              💡 {suggestion}
+                            </span>
+                          ) : (
+                            <span style={{
+                              padding: "3px 8px",
+                              borderRadius: "6px",
+                              fontSize: "10px",
+                              fontWeight: "600",
+                              backgroundColor: "rgba(100, 116, 139, 0.2)",
+                              color: "#94a3b8"
+                            }}>
+                              ⏳ AI Analysis Pending
+                            </span>
+                          )}
+                          {log.ai_sentiment && (
+                            <span style={{
+                              fontSize: "10px",
+                              fontWeight: "700",
+                              color: log.ai_sentiment === "positive" ? "#34d399" : log.ai_sentiment === "negative" ? "#f87171" : "#fbbf24",
+                              textTransform: "uppercase"
+                            }}>
+                              ({log.ai_sentiment})
+                            </span>
+                          )}
+                          {log.created_at && (
+                            <span style={{
+                              fontSize: "11px",
+                              color: "#94a3b8",
+                              fontWeight: "600",
+                              marginLeft: "6px"
+                            }}>
+                              • 🕒 {new Date(log.created_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}
+                            </span>
+                          )}
+                        </div>
+                        <span style={{
+                          fontSize: "10px",
+                          fontWeight: "600",
+                          color: log.flow_used === "custom_rest_api" ? "#60a5fa" : "#c084fc",
+                          background: log.flow_used === "custom_rest_api" ? "rgba(59,130,246,0.1)" : "rgba(168,85,247,0.1)",
+                          padding: "2px 8px",
+                          borderRadius: "10px",
+                          border: log.flow_used === "custom_rest_api" ? "1px solid rgba(59,130,246,0.2)" : "1px solid rgba(168,85,247,0.2)"
+                        }}>
+                          {log.flow_used === "custom_rest_api" ? "Flow 1: Custom REST API" : `Flow 2: ${log.provider}`}
+                        </span>
+                      </div>
+
+                      <div style={{ fontSize: "12px", fontWeight: "600", color: "#e2e8f0", marginBottom: "10px" }}>
+                        📢 {log.nse_event_title || "NSE Corporate Announcement"}
+                      </div>
+
+                      <div style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr 1fr",
+                        gap: "8px",
+                        backgroundColor: "#161e2e",
+                        padding: "12px",
+                        borderRadius: "8px",
+                        marginBottom: "10px",
+                        fontSize: "11px"
+                      }}>
+                        <div><strong style={{ color: "#94a3b8" }}>📊 Revenue (YoY/QoQ):</strong> <div style={{ color: "#f1f5f9", marginTop: "2px", lineHeight: "1.3" }}>{log.revenue || "N/A"}</div></div>
+                        <div><strong style={{ color: "#94a3b8" }}>💸 Expenses:</strong> <div style={{ color: "#f1f5f9", marginTop: "2px", lineHeight: "1.3" }}>{log.expenses || "N/A"}</div></div>
+                        <div><strong style={{ color: "#94a3b8" }}>⚡ Op. Profit (OPM):</strong> <div style={{ color: "#f1f5f9", marginTop: "2px", lineHeight: "1.3" }}>{log.operating_profit || "N/A"}</div></div>
+                        <div><strong style={{ color: "#94a3b8" }}>🏛️ PBT:</strong> <div style={{ color: "#f1f5f9", marginTop: "2px", lineHeight: "1.3" }}>{log.pbt || "N/A"}</div></div>
+                        <div><strong style={{ color: "#94a3b8" }}>🪙 Other Income:</strong> <div style={{ color: "#f1f5f9", marginTop: "2px", lineHeight: "1.3" }}>{log.other_income || "N/A"}</div></div>
+                        <div><strong style={{ color: "#94a3b8" }}>📈 PAT (YoY/QoQ/Same Qtr):</strong> <div style={{ color: "#34d399", fontWeight: "700", marginTop: "2px", lineHeight: "1.3" }}>{log.pat_yoy || "N/A"}</div></div>
+                      </div>
+
+                      {log.growth_projection && log.growth_projection !== "N/A" && (
+                        <div style={{ fontSize: "11px", color: "#cbd5e1", marginBottom: "6px", lineHeight: "1.4" }}>
+                          <strong style={{ color: "#38bdf8" }}>🔮 Growth Projection:</strong> {log.growth_projection}
+                        </div>
+                      )}
+                      {log.broker_estimates && log.broker_estimates !== "N/A" && (
+                        <div style={{ fontSize: "11px", color: "#cbd5e1", marginBottom: "8px", lineHeight: "1.4" }}>
+                          <strong style={{ color: "#fbbf24" }}>🎯 Broker Estimates:</strong> {log.broker_estimates}
+                        </div>
+                      )}
+
+                      <div style={{ fontSize: "11px", color: "#94a3b8", fontStyle: "italic", lineHeight: "1.4", borderTop: "1px dashed rgba(255,255,255,0.08)", paddingTop: "8px", marginTop: "8px" }}>
+                        📝 "{log.ai_summary}"
+                      </div>
+
+                      {log.attachment_url && log.attachment_url.startsWith("http") && (
+                        <div style={{ marginTop: "8px", textAlign: "right" }}>
+                          <a
+                            href={log.attachment_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            style={{ fontSize: "11px", color: "#60a5fa", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                          >
+                            View Full NSE Document <ExternalLink size={12} />
+                          </a>
+                        </div>
+                      )}
                     </div>
-
-                    {/* Attachment Link */}
-                    {log.attachment_url && log.attachment_url.startsWith("http") && (
-                      <div style={{ marginTop: "8px", textAlign: "right" }}>
-                        <a
-                          href={log.attachment_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          style={{ fontSize: "11px", color: "#60a5fa", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "4px" }}
-                        >
-                          View Full NSE Document <ExternalLink size={12} />
-                        </a>
-                      </div>
-                    )}
-                  </div>
-                );
-              })
-            )}
+                  );
+                })
+              )}
+            </div>
           </div>
         </div>
       </div>

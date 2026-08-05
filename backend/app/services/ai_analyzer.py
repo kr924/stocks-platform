@@ -438,7 +438,7 @@ def apply_instant_tier_classification(event):
     Check AI tier immediately upon ingestion/creation of a MarketEvent.
     - 'skip' / 'manual_only': Set fields instantly (0 AI calls).
     - 'financial_results': Trigger IMMEDIATE cloud AI analysis inline (PDF + Screener.in + cloud LLM).
-    - 'standard': Leave ai_analyzed_at = NULL for background local-LLM queue.
+    # - 'standard': Trigger immediate real-time analysis (unless already in arm to re-use results).
     """
     tier = _classify_ai_tier(event)
     if tier == "skip":
@@ -460,6 +460,79 @@ def apply_instant_tier_classification(event):
         event.ai_affected_stocks = json.dumps([event.symbol] if event.symbol else [])
         event.ai_provider = "manual_pending"
         event.ai_analyzed_at = datetime.utcnow()
+    elif tier == "standard":
+        # Check if symbol is already in arm (active TradeConfig)
+        from app.database import SessionLocal, TradeConfig, TradeAILog
+        db_check = SessionLocal()
+        is_armed = False
+        try:
+            if event.symbol:
+                is_armed = db_check.query(TradeConfig).filter(
+                    TradeConfig.symbol == event.symbol,
+                    TradeConfig.status == "armed"
+                ).first() is not None
+        except Exception:
+            pass
+        
+        if is_armed:
+            logger.info(f"⏭️ [AI ROUTING BYPASS]: #{event.symbol} is already ARMED. Bypassing standard AI to re-use arm results.")
+            # Try to find a recent TradeAILog to re-use
+            try:
+                recent_log = db_check.query(TradeAILog).filter(
+                    TradeAILog.symbol == event.symbol
+                ).order_by(TradeAILog.created_at.desc()).first()
+                if recent_log:
+                    event.ai_sentiment = recent_log.ai_sentiment
+                    event.ai_impact_score = recent_log.ai_impact_score or 0.0
+                    event.ai_summary = f"{recent_log.ai_suggestion.upper() if recent_log.ai_suggestion else 'VERDICT'}: {recent_log.ai_summary}"
+                    event.ai_provider = recent_log.provider
+                    event.ai_analyzed_at = datetime.utcnow()
+                else:
+                    # Let it wait — we will sync it when trade_nse_poller completes the 2-step analysis
+                    event.ai_sentiment = "neutral"
+                    event.ai_impact_score = 0.0
+                    event.ai_summary = "Awaiting armed trade execution AI results..."
+                    event.ai_provider = "pending_arm"
+                    event.ai_analyzed_at = datetime.utcnow()
+            except Exception:
+                pass
+            finally:
+                db_check.close()
+        else:
+            db_check.close()
+            # Trigger standard AI analysis immediately in real time!
+            try:
+                logger.info(f"⚡ [REAL-TIME STANDARD AI]: Analyzing announcement immediately — [{event.symbol or 'GENERAL'}] '{event.title}'")
+                event_data = [{
+                    "event_type": event.event_type,
+                    "source": event.source,
+                    "symbol": event.symbol,
+                    "title": event.title,
+                    "description": event.description or "",
+                    "event_time": event.event_time.isoformat() if event.event_time else "",
+                }]
+                prompt = _build_event_analysis_prompt(event_data)
+                result, provider = _call_local_llm(prompt, event_info=f"[{event.symbol or 'GENERAL'}] '{event.title}'")
+                
+                if result and "analyses" in result and result["analyses"]:
+                    analysis = result["analyses"][0]
+                    event.ai_sentiment = analysis.get("sentiment", "neutral")
+                    event.ai_impact_score = analysis.get("impact_score", 0.0)
+                    event.ai_summary = analysis.get("summary", "")
+                else:
+                    event.ai_sentiment = "neutral"
+                    event.ai_impact_score = 0.0
+                    event.ai_summary = event.title
+                
+                event.ai_provider = provider
+                event.ai_analyzed_at = datetime.utcnow()
+            except Exception as e:
+                logger.error(f"Immediate standard AI failed for [{event.symbol}]: {e}")
+                event.ai_sentiment = "neutral"
+                event.ai_impact_score = 0.0
+                event.ai_summary = event.title
+                event.ai_provider = "failed"
+                event.ai_analyzed_at = datetime.utcnow()
     elif tier == "financial_results":
         # ── IMMEDIATE cloud AI analysis for financial results ──
         try:

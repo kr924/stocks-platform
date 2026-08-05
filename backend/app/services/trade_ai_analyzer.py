@@ -413,6 +413,26 @@ Format the JSON response precisely as follows:
             db.add(log_entry)
             db.commit()
             logger.info(f"✅ [EARNINGS AI SAVED]: Log entry created for #{symbol} (Flow: {used_flow})")
+
+            # Proactively update any matching recent MarketEvent to sync the results
+            try:
+                from app.database import MarketEvent
+                from datetime import timedelta
+                two_hours_ago = datetime.utcnow() - timedelta(hours=2)
+                me = db.query(MarketEvent).filter(
+                    MarketEvent.symbol == symbol,
+                    MarketEvent.event_time >= two_hours_ago
+                ).order_by(MarketEvent.event_time.desc()).first()
+                if me:
+                    me.ai_sentiment = ai_sentiment
+                    me.ai_impact_score = 0.8 if ai_sentiment == "positive" else -0.8 if ai_sentiment == "negative" else 0.0
+                    me.ai_summary = f"{ai_suggestion.upper()}: {ai_summary[:200]}"
+                    me.ai_provider = used_flow
+                    me.ai_analyzed_at = datetime.utcnow()
+                    db.commit()
+                    logger.info(f"🔄 [SYNC MARKET EVENT]: Updated MarketEvent #{me.id} for #{symbol} with 2-step AI results.")
+            except Exception as sync_err:
+                logger.error(f"Failed to sync MarketEvent with TradeAILog: {sync_err}")
         except Exception as db_err:
             db.rollback()
             logger.error(f"Failed to save TradeAILog: {db_err}")
