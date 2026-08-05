@@ -103,7 +103,8 @@ def _call_cloud_llm(prompt: str, event_info: str = ""):
                     pass
 
     # ── Phase 2: Ollama fallback ──
-    local_enabled = get_intel_config().local_llm_enabled
+    from app.services.intel_config import is_market_hours_ist
+    local_enabled = get_intel_config().local_llm_enabled and not is_market_hours_ist()
 
     if local_enabled and env.get("ollama_url"):
         try:
@@ -134,11 +135,12 @@ def _call_cloud_llm(prompt: str, event_info: str = ""):
 def _call_local_llm(prompt: str, event_info: str = ""):
     """
     Local-only LLM routing for STANDARD tier items.
-    1. Calls local Ollama if enabled in UI.
-    2. If disabled, fails, or busy, falls back immediately to Rule Engine.
+    1. Calls local Ollama if enabled in UI AND outside market hours (9am-3:30pm IST).
+    2. If market hours are active, fails, or disabled, falls back immediately to Rule Engine (0% CPU).
     """
-    if not get_intel_config().local_llm_enabled:
-        logger.info("⏸️ [LOCAL LLM DISABLED]: Local Ollama is turned OFF from UI. Using Rule Engine.")
+    from app.services.intel_config import is_market_hours_ist
+    if is_market_hours_ist() or not get_intel_config().local_llm_enabled:
+        logger.info("⏸️ [LOCAL LLM DISABLED]: Market hours (9am-3:30pm IST) active or disabled from UI. Using Rule Engine (0% CPU).")
         res = _smart_rule_analysis(prompt)
         return res, "rule_engine"
 
@@ -908,10 +910,11 @@ def analyze_pending_events(db: Session) -> int:
                 count += 1
                 continue
             
-            # ── STANDARD — Local Ollama if enabled, else Rule Engine ──
-            local_on = get_intel_config().local_llm_enabled
+            # ── STANDARD — Local Ollama if enabled AND off-market, else Rule Engine ──
+            from app.services.intel_config import is_market_hours_ist
+            local_on = (not is_market_hours_ist()) and get_intel_config().local_llm_enabled
             prov_label = "ollama" if local_on else "rule_engine"
-            tier_label = "Local Ollama" if local_on else "Rule Engine (Local LLM OFF)"
+            tier_label = "Local Ollama" if local_on else "Rule Engine (Local LLM OFF - 0% CPU)"
             logger.info(f"⚡ [STANDARD → {tier_label}] Event #{event.id} [{event.symbol or 'GENERAL'}]: '{event.title}'")
             try:
                 from app.services.ai_log_tracker import record_ai_log
