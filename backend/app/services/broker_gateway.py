@@ -132,7 +132,7 @@ class UpstoxBroker(BaseBroker):
 
         payload = {
             "quantity": quantity,
-            "product": "I",            # Intraday — use "D" for delivery
+            "product": "D",            # Delivery (CNC) — holds in portfolio until sold
             "validity": "DAY",
             "price": limit_price or 0,
             "tag": "trading_engine",
@@ -285,7 +285,7 @@ class ZerodhaBroker(BaseBroker):
             "transaction_type": side.upper(),
             "order_type": order_type.upper(),
             "quantity": quantity,
-            "product": "MIS",  # Intraday
+            "product": "CNC",  # Cash & Carry (Delivery)
             "validity": "DAY",
         }
         if order_type.upper() == "LIMIT" and limit_price:

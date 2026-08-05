@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { Chart } from "./Chart";
 import {
   Zap,
   ShieldAlert,
@@ -137,8 +138,15 @@ export function TradingDashboard() {
 
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
-  const [autoArmOnSave, setAutoArmOnSave] = useState(false);
+  const [autoArmOnSave, setAutoArmOnSave] = useState(true);
   const [hoveredOrder, setHoveredOrder] = useState<{ order: TradeOrder; x: number; y: number } | null>(null);
+
+  // Chart Modal State
+  const [chartSymbol, setChartSymbol] = useState<string | null>(null);
+  const [chartInstrumentKey, setChartInstrumentKey] = useState<string | null>(null);
+  const [chartPeriod, setChartPeriod] = useState<string>("1D");
+  const [chartCandles, setChartCandles] = useState<any[]>([]);
+  const [chartLoading, setChartLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
 
   // Form State
@@ -236,7 +244,7 @@ export function TradingDashboard() {
   };
 
   // Upcoming Earnings Sorting, Search, and Filtering state
-  const [earningsSortBy, setEarningsSortBy] = useState<"date" | "return_desc" | "return_asc">("date");
+  const [earningsSortBy, setEarningsSortBy] = useState<"date" | "return_desc" | "return_asc" | "change_desc" | "change_asc">("change_desc");
   const [earningsSearch, setEarningsSearch] = useState<string>("");
   const [earningsDateFilter, setEarningsDateFilter] = useState<string>(todayStr);
 
@@ -261,7 +269,24 @@ export function TradingDashboard() {
     }
 
     // Sort
-    if (earningsSortBy === "return_desc") {
+    if (earningsSortBy === "change_desc") {
+      // Sort by live change % (uses marketQuotesMap for real-time data)
+      list.sort((a, b) => {
+        const qA = marketQuotesMap[a.symbol.toUpperCase()] || {};
+        const qB = marketQuotesMap[b.symbol.toUpperCase()] || {};
+        const cA = qA.change ?? a.change_pct ?? 0;
+        const cB = qB.change ?? b.change_pct ?? 0;
+        return cB - cA;
+      });
+    } else if (earningsSortBy === "change_asc") {
+      list.sort((a, b) => {
+        const qA = marketQuotesMap[a.symbol.toUpperCase()] || {};
+        const qB = marketQuotesMap[b.symbol.toUpperCase()] || {};
+        const cA = qA.change ?? a.change_pct ?? 0;
+        const cB = qB.change ?? b.change_pct ?? 0;
+        return cA - cB;
+      });
+    } else if (earningsSortBy === "return_desc") {
       list.sort((a, b) => (b.change_pct ?? 0) - (a.change_pct ?? 0));
     } else if (earningsSortBy === "return_asc") {
       list.sort((a, b) => (a.change_pct ?? 0) - (b.change_pct ?? 0));
@@ -271,7 +296,37 @@ export function TradingDashboard() {
     }
 
     return list;
-  }, [upcomingEarnings, earningsSortBy, earningsSearch, earningsDateFilter]);
+  }, [upcomingEarnings, earningsSortBy, earningsSearch, earningsDateFilter, marketQuotesMap]);
+
+  // Fetch chart candles for earnings stock chart modal
+  const fetchChartCandles = useCallback(async (key: string, period: string) => {
+    setChartLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/market/stock/${encodeURIComponent(key)}/candles?period=${period}`);
+      if (res.ok) {
+        const data = await res.json();
+        setChartCandles(data.candles || []);
+      }
+    } catch (err) {
+      console.error("Error fetching chart candles:", err);
+    } finally {
+      setChartLoading(false);
+    }
+  }, []);
+
+  const openEarningsChart = (symbol: string, instrumentKey?: string) => {
+    const key = instrumentKey || `NSE_EQ|${symbol}`;
+    setChartSymbol(symbol);
+    setChartInstrumentKey(key);
+    setChartPeriod("1D");
+    fetchChartCandles(key, "1D");
+  };
+
+  useEffect(() => {
+    if (chartInstrumentKey) {
+      fetchChartCandles(chartInstrumentKey, chartPeriod);
+    }
+  }, [chartPeriod, chartInstrumentKey, fetchChartCandles]);
 
   // Fetch initial & fast status data
   const fetchData = async () => {
@@ -983,6 +1038,8 @@ export function TradingDashboard() {
                 outline: "none"
               }}
             >
+              <option value="change_desc">📊 Change % (Highest First)</option>
+              <option value="change_asc">📉 Change % (Lowest First)</option>
               <option value="date">📅 Meeting Date (Earliest First)</option>
               <option value="return_desc">📈 1Y Return % (Highest Gainers First)</option>
               <option value="return_asc">📉 1Y Return % (Lowest / Worst First)</option>
@@ -1075,7 +1132,15 @@ export function TradingDashboard() {
                     <tr key={item.id || item.symbol} style={{ borderBottom: "1px solid rgba(255, 255, 255, 0.05)", background: "#0d131f" }}>
                       {/* 1. SYMBOL */}
                       <td style={{ padding: "10px 12px", fontWeight: "800", color: "white", fontSize: "12px" }}>
-                        {item.symbol}
+                        <span
+                          onClick={() => openEarningsChart(item.symbol, item.instrument_key)}
+                          style={{ cursor: "pointer", color: "#60a5fa", textDecoration: "none", transition: "color 0.2s" }}
+                          onMouseEnter={(e) => (e.currentTarget.style.color = "#93c5fd")}
+                          onMouseLeave={(e) => (e.currentTarget.style.color = "#60a5fa")}
+                          title={`Click to view ${item.symbol} chart`}
+                        >
+                          {item.symbol}
+                        </span>
                       </td>
 
                       {/* 2. COMPANY */}
@@ -1789,8 +1854,20 @@ export function TradingDashboard() {
             </select>
           </div>
 
-          {/* Submit Button */}
-          <div style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "flex-end", marginTop: "10px" }}>
+          {/* Submit Button with Auto-Arm Toggle */}
+          <div style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "flex-end", alignItems: "center", marginTop: "10px", gap: "16px" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontSize: "12px", color: "#94a3b8" }}>
+              <input
+                type="checkbox"
+                checked={autoArmOnSave}
+                onChange={(e) => setAutoArmOnSave(e.target.checked)}
+                style={{ width: "16px", height: "16px", accentColor: "#10b981", cursor: "pointer" }}
+              />
+              <span style={{ fontWeight: "600", color: autoArmOnSave ? "#34d399" : "#94a3b8" }}>
+                <Zap size={12} style={{ display: "inline", verticalAlign: "middle", marginRight: "4px" }} />
+                Auto-Arm on Save
+              </span>
+            </label>
             <button
               type="submit"
               style={{
@@ -2332,6 +2409,121 @@ export function TradingDashboard() {
           </div>
         </div>
       </div>
+      {/* CHART MODAL */}
+      {chartSymbol && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            zIndex: 100000,
+            background: "rgba(0, 0, 0, 0.85)",
+            backdropFilter: "blur(10px)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center"
+          }}
+          onClick={() => { setChartSymbol(null); setChartInstrumentKey(null); setChartCandles([]); }}
+        >
+          <div
+            style={{
+              width: "90vw",
+              maxWidth: "1100px",
+              maxHeight: "85vh",
+              background: "linear-gradient(135deg, rgba(15, 23, 42, 0.98) 0%, rgba(10, 14, 28, 0.99) 100%)",
+              border: "1px solid rgba(59, 130, 246, 0.25)",
+              borderRadius: "16px",
+              boxShadow: "0 25px 80px rgba(0, 0, 0, 0.8), 0 0 40px rgba(59, 130, 246, 0.12)",
+              padding: "24px",
+              overflowY: "auto"
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Chart Header */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                <span style={{
+                  padding: "4px 12px",
+                  borderRadius: "8px",
+                  background: "linear-gradient(135deg, #2563eb, #3b82f6)",
+                  color: "white",
+                  fontWeight: "800",
+                  fontSize: "14px",
+                  letterSpacing: "0.5px"
+                }}>
+                  {chartSymbol}
+                </span>
+                <span style={{ fontSize: "13px", color: "#94a3b8", fontWeight: "600" }}>
+                  Price Chart • {chartPeriod}
+                </span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                {/* Period Selector */}
+                <div style={{
+                  display: "flex",
+                  gap: "4px",
+                  backgroundColor: "rgba(255,255,255,0.03)",
+                  padding: "3px",
+                  borderRadius: "8px",
+                  border: "1px solid rgba(255,255,255,0.06)"
+                }}>
+                  {["1D", "5D", "1M", "3M", "6M", "1Y", "5Y"].map((p) => (
+                    <button
+                      key={p}
+                      onClick={() => setChartPeriod(p)}
+                      style={{
+                        padding: "5px 10px",
+                        fontSize: "11px",
+                        fontWeight: "700",
+                        borderRadius: "6px",
+                        border: "none",
+                        cursor: "pointer",
+                        backgroundColor: chartPeriod === p ? "#2563eb" : "transparent",
+                        color: chartPeriod === p ? "white" : "#94a3b8",
+                        transition: "all 0.2s"
+                      }}
+                    >
+                      {p}
+                    </button>
+                  ))}
+                </div>
+                {/* Close Button */}
+                <button
+                  onClick={() => { setChartSymbol(null); setChartInstrumentKey(null); setChartCandles([]); }}
+                  style={{
+                    padding: "6px 12px",
+                    fontSize: "11px",
+                    fontWeight: "700",
+                    borderRadius: "6px",
+                    backgroundColor: "rgba(248, 113, 113, 0.15)",
+                    color: "#f87171",
+                    border: "1px solid rgba(248, 113, 113, 0.3)",
+                    cursor: "pointer"
+                  }}
+                >
+                  ✕ Close
+                </button>
+              </div>
+            </div>
+
+            {/* Chart Body */}
+            {chartLoading ? (
+              <div style={{ height: "400px", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", gap: "10px" }}>
+                <RefreshCw className="animate-spin" style={{ color: "#3b82f6" }} size={24} />
+                <p style={{ fontSize: "12px", color: "#94a3b8" }}>Loading {chartSymbol} candles for {chartPeriod}...</p>
+              </div>
+            ) : chartCandles && chartCandles.length > 0 ? (
+              <Chart candles={chartCandles} period={chartPeriod} />
+            ) : (
+              <div style={{ height: "400px", display: "flex", justifyContent: "center", alignItems: "center", fontSize: "12px", color: "#64748b" }}>
+                Chart data unavailable for {chartSymbol} ({chartPeriod}). Try a different period.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -27,3 +27,7 @@ __pycache__/
 # Media files
 *.png
 *.mp4
+*.pdf
+
+# Misc
+*.txt
