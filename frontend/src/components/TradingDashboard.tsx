@@ -338,7 +338,7 @@ export function TradingDashboard() {
         fetch(`${API_BASE}/api/trading/ai-logs`),
         fetch(`${API_BASE}/api/trading/poller/status`),
         fetch(`${API_BASE}/api/trading/settings`),
-        fetch(`${API_BASE}/api/intelligence/feed?hours=24`),
+        fetch(`${API_BASE}/api/intelligence/feed?hours=24&category=all_exchange`),
       ]);
 
       if (configsRes.ok) {

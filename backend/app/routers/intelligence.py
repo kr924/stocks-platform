@@ -142,7 +142,13 @@ def get_intelligence_feed(
     )
 
     # Category handling (Strictly Mutually Exclusive across all 4 tabs)
-    if category == "auto_skip":
+    if category == "all_exchange":
+        # Category: All Live NSE/BSE Exchange Announcements
+        events_q = events_q.filter(
+            MarketEvent.source.in_(["nse", "bse"]),
+            ~auto_skip_cond
+        )
+    elif category == "auto_skip":
         # Category 4: NSE/BSE Auto-Skipped
         events_q = events_q.filter(auto_skip_cond)
     elif category in ("finance_ai", "all", None):
