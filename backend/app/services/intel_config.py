@@ -373,24 +373,6 @@ class IntelConfig:
                 logger.error(f"Error saving config YAML: {e}")
 
 
-def is_market_hours_ist() -> bool:
-    """
-    Check if current time is within Indian stock market hours (Mon-Fri 9:00 AM - 3:30 PM IST).
-    Uses integer minute comparison immune to timezone discrepancies.
-    """
-    from datetime import datetime, timezone, timedelta
-    IST = timezone(timedelta(hours=5, minutes=30))
-    now = datetime.now(IST)
-    if now.weekday() > 4:  # Saturday (5) or Sunday (6)
-        return False
-    current_minutes = now.hour * 60 + now.minute
-    # 9:00 AM = 540 mins, 3:30 PM = 930 mins
-    return (9 * 60 <= current_minutes <= 15 * 60 + 30)
-
-
-class IntelConfig:
-    """Singleton configuration manager for the Intelligence Platform."""
-
     @property
     def local_llm_enabled(self) -> bool:
         """
@@ -398,31 +380,14 @@ class IntelConfig:
         By default, from Monday to Friday 9:00 AM IST to 3:30 PM IST (market hours),
         Local LLM is automatically turned OFF (disabled) to preserve CPU resources for trading poller (0% CPU).
         """
-        if is_market_hours_ist():
-            # STRICT GUARD: During market hours, Local LLM is ALWAYS OFF (0% CPU)
-            # unless explicitly manually toggled ON during TODAY'S market session.
-            import json
-            from datetime import datetime, timezone, timedelta
-            IST = timezone(timedelta(hours=5, minutes=30))
-            now = datetime.now(IST)
-            today_str = now.strftime("%Y-%m-%d")
+        import json
+        from datetime import datetime, timezone, timedelta
 
-            try:
-                from app.database import SessionLocal, SystemSetting
-                db = SessionLocal()
-                try:
-                    s = db.query(SystemSetting).filter(SystemSetting.key == "local_llm_manual_override").first()
-                    if s and s.value is not None:
-                        data = json.loads(s.value)
-                        if isinstance(data, dict) and data.get("date") == today_str and data.get("enabled") is True:
-                            return True
-                finally:
-                    db.close()
-            except Exception:
-                pass
-            return False
+        IST = timezone(timedelta(hours=5, minutes=30))
+        now = datetime.now(IST)
+        current_minutes = now.hour * 60 + now.minute
+        is_market_hours = (now.weekday() <= 4) and (9 * 60 <= current_minutes <= 15 * 60 + 30)
 
-        # Off-market hours (nights & weekends): use saved setting or default to True
         val = None
         try:
             from app.database import SessionLocal, SystemSetting
@@ -436,7 +401,35 @@ class IntelConfig:
         except Exception:
             pass
 
-        return True if val is None else bool(val)
+        today_str = now.strftime("%Y-%m-%d")
+        if is_market_hours:
+            # During market hours (Mon-Fri 9am-3:30pm IST), Local LLM is strictly OFF (0% CPU)
+            # unless explicitly manually toggled ON during TODAY'S market session.
+            override_active = False
+            try:
+                from app.database import SessionLocal, SystemSetting
+                db = SessionLocal()
+                try:
+                    s = db.query(SystemSetting).filter(SystemSetting.key == "local_llm_manual_override").first()
+                    if s and s.value is not None:
+                        override_data = json.loads(s.value)
+                        if isinstance(override_data, dict):
+                            if override_data.get("date") == today_str and override_data.get("enabled") is True:
+                                override_active = True
+                        elif override_data is True:
+                            # Legacy boolean override — ignore old persistent overrides
+                            override_active = False
+                finally:
+                    db.close()
+            except Exception:
+                pass
+            val = override_active
+        else:
+            # Off-market hours: use saved setting or default to True
+            if val is None:
+                val = True
+
+        return bool(val)
 
     def set_local_llm_enabled(self, enabled: bool):
         """Set local_llm_enabled state in memory and SQLite database with date tracking."""
@@ -446,7 +439,8 @@ class IntelConfig:
         IST = timezone(timedelta(hours=5, minutes=30))
         now = datetime.now(IST)
         today_str = now.strftime("%Y-%m-%d")
-        market_hours_now = is_market_hours_ist()
+        current_minutes = now.hour * 60 + now.minute
+        is_market_hours = (now.weekday() <= 4) and (9 * 60 <= current_minutes <= 15 * 60 + 30)
 
         self._config["local_llm_enabled"] = bool(enabled)
         try:
@@ -459,10 +453,10 @@ class IntelConfig:
                     db.add(setting)
                 else:
                     setting.value = json.dumps(bool(enabled))
-
+                
                 # Save manual override flag for market hours with date tag
                 override_data = {
-                    "enabled": bool(enabled) if market_hours_now else False,
+                    "enabled": bool(enabled) if is_market_hours else False,
                     "date": today_str
                 }
                 override_setting = db.query(SystemSetting).filter(SystemSetting.key == "local_llm_manual_override").first()
@@ -473,7 +467,7 @@ class IntelConfig:
                     override_setting.value = json.dumps(override_data)
 
                 db.commit()
-                logger.info(f"Updated local_llm_enabled to {enabled} (market_hours={market_hours_now}, date={today_str})")
+                logger.info(f"Updated local_llm_enabled to {enabled} (market_hours={is_market_hours}, date={today_str})")
             except Exception as e:
                 db.rollback()
                 logger.error(f"Error saving local_llm_enabled to DB: {e}")
