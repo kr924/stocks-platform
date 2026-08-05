@@ -402,35 +402,44 @@ class IntelConfig:
         except Exception:
             pass
 
-        if val is None:
-            # Default behavior: OFF during market hours (Mon-Fri 9am-3:30pm IST), ON off-market
-            val = not is_market_hours
-        elif is_market_hours and val is True:
-            # During market hours, unless explicitly manually forced ON during market hours, stay OFF
-            override_setting = None
+        today_str = now.strftime("%Y-%m-%d")
+        if is_market_hours:
+            # During market hours (Mon-Fri 9am-3:30pm IST), Local LLM is strictly OFF (0% CPU)
+            # unless explicitly manually toggled ON during TODAY'S market session.
+            override_active = False
             try:
                 from app.database import SessionLocal, SystemSetting
                 db = SessionLocal()
                 try:
                     s = db.query(SystemSetting).filter(SystemSetting.key == "local_llm_manual_override").first()
                     if s and s.value is not None:
-                        override_setting = json.loads(s.value)
+                        override_data = json.loads(s.value)
+                        if isinstance(override_data, dict):
+                            if override_data.get("date") == today_str and override_data.get("enabled") is True:
+                                override_active = True
+                        elif override_data is True:
+                            # Legacy boolean override — ignore old persistent overrides
+                            override_active = False
                 finally:
                     db.close()
             except Exception:
                 pass
-            if not override_setting:
-                val = False
+            val = override_active
+        else:
+            # Off-market hours: use saved setting or default to True
+            if val is None:
+                val = True
 
         return bool(val)
 
     def set_local_llm_enabled(self, enabled: bool):
-        """Set local_llm_enabled state in memory and SQLite database."""
+        """Set local_llm_enabled state in memory and SQLite database with date tracking."""
         import json
         from datetime import datetime, timezone, timedelta
 
         IST = timezone(timedelta(hours=5, minutes=30))
         now = datetime.now(IST)
+        today_str = now.strftime("%Y-%m-%d")
         is_market_hours = (now.weekday() <= 4) and (
             now.replace(hour=9, minute=0, second=0, microsecond=0) <= now <= now.replace(hour=15, minute=30, second=0, microsecond=0)
         )
@@ -447,16 +456,20 @@ class IntelConfig:
                 else:
                     setting.value = json.dumps(bool(enabled))
                 
-                # Save manual override flag for market hours
+                # Save manual override flag for market hours with date tag
+                override_data = {
+                    "enabled": bool(enabled) if is_market_hours else False,
+                    "date": today_str
+                }
                 override_setting = db.query(SystemSetting).filter(SystemSetting.key == "local_llm_manual_override").first()
                 if not override_setting:
-                    override_setting = SystemSetting(key="local_llm_manual_override", value=json.dumps(bool(enabled) if is_market_hours else False))
+                    override_setting = SystemSetting(key="local_llm_manual_override", value=json.dumps(override_data))
                     db.add(override_setting)
                 else:
-                    override_setting.value = json.dumps(bool(enabled) if is_market_hours else False)
+                    override_setting.value = json.dumps(override_data)
 
                 db.commit()
-                logger.info(f"Updated local_llm_enabled to {enabled}")
+                logger.info(f"Updated local_llm_enabled to {enabled} (market_hours={is_market_hours}, date={today_str})")
             except Exception as e:
                 db.rollback()
                 logger.error(f"Error saving local_llm_enabled to DB: {e}")

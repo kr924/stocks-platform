@@ -264,7 +264,10 @@ Format the JSON response precisely as follows:
     used_provider = f"custom_api ({custom_url})"
 
     # --- FLOW 1: gemcall / Custom REST API ---
-    if custom_url:
+    is_ollama_endpoint = any(kw in custom_url.lower() for kw in ["11434", "ollama", "localhost:11434"])
+    local_llm_active = cfg.local_llm_enabled
+
+    if custom_url and (not is_ollama_endpoint or local_llm_active):
         try:
             logger.info(f"🔬 [AUTO AI FLOW 1]: Posting to Custom REST API: {custom_url} for #{symbol}")
             print(f"🔬 [AUTO AI FLOW 1]: Posting to Custom REST API: {custom_url} for #{symbol}")
@@ -331,6 +334,9 @@ Format the JSON response precisely as follows:
             logger.warning(f"⚠️ [AUTO AI FLOW 1 ERROR]: {e}. Falling back to OpenRouter Premium.")
             print(f"⚠️ [AUTO AI FLOW 1 ERROR]: {e}. Falling back to OpenRouter Premium.")
             result_raw = None
+    elif is_ollama_endpoint and not local_llm_active:
+        logger.info(f"⏸️ [AUTO AI FLOW 1 SKIPPED]: Local Ollama is OFF during market hours (0% CPU). Falling back to Cloud LLM.")
+        print(f"⏸️ [AUTO AI FLOW 1 SKIPPED]: Local Ollama is OFF during market hours (0% CPU). Falling back to Cloud LLM.")
 
     # --- FLOW 2: OpenRouter Premium Fallback ---
     if not result_raw:
