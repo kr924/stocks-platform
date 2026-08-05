@@ -2334,6 +2334,16 @@ export function TradingDashboard() {
                             ({log.ai_sentiment})
                           </span>
                         )}
+                        {log.created_at && (
+                          <span style={{
+                            fontSize: "11px",
+                            color: "#94a3b8",
+                            fontWeight: "600",
+                            marginLeft: "6px"
+                          }}>
+                            • 🕒 {new Date(log.created_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}
+                          </span>
+                        )}
                       </div>
                       <span style={{
                         fontSize: "10px",
