@@ -144,6 +144,12 @@ def _check_match(announcement: dict, armed_configs: list) -> Optional[dict]:
         cfg_symbol = config["symbol"].upper().strip()
         if ann_symbol == cfg_symbol:
             trigger = (config.get("trigger_subject") or "").lower().strip()
+            
+            # Enforce that "Outcome of Board Meeting" triggers MUST contain "finan" to be valid
+            if "outcome of board meeting" in full_text and "finan" not in full_text:
+                logger.info(f"⏭️ [TRADE POLLER BYPASS]: Subject contains 'outcome of board meeting' but missing 'finan' keyword for {ann_symbol}. Skipping match.")
+                continue
+
             # Matching rules:
             # 1. Direct trigger match
             if trigger and trigger in full_text:
