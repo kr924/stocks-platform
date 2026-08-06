@@ -18,7 +18,14 @@ IST = timezone(timedelta(hours=5, minutes=30))
 # Module-level state
 _poller_task: Optional[asyncio.Task] = None
 _poller_running = False
-_poll_interval = 0.3  # 300ms ultra-high speed polling for armed targets
+# The unified exchange hub (app/services/exchange_hub.py) drives announcement
+# fetching now, and calls handle_announcements() the moment data lands. This
+# interval only governs the watchdog that covers the hub going silent, so it no
+# longer needs to be sub-second — that was the main source of CPU burn.
+_poll_interval = 5.0
+# Event loop that owns the trade coroutines, captured at startup so worker
+# threads can schedule execution back onto it.
+_main_loop: Optional[asyncio.AbstractEventLoop] = None
 _last_poll_status: Dict = {
     "running": False,
     "armed_count": 0,
@@ -130,37 +137,52 @@ def _get_armed_configs() -> List:
 
 
 def _check_match(announcement: dict, armed_configs: list) -> Optional[dict]:
-    """Check if an NSE announcement matches any armed config's trigger subject + symbol."""
-    subject = str(announcement.get("desc") or announcement.get("subject") or announcement.get("an_desc") or "").strip()
-    details = str(announcement.get("attchmntText") or announcement.get("details") or announcement.get("desc") or "").strip()
-    ann_symbol = str(announcement.get("symbol") or announcement.get("sm_name") or "").strip().upper()
+    """
+    Match an NSE announcement against an armed config.
+
+    Auto-trading fires on *financial results only*. The previous implementation
+    fell through to "any announcement for an armed symbol", which meant a routine
+    compliance filing or a trading-window notice could place a live order. The
+    shared classifier (news_fetching_strategy.md) now makes that call, so the
+    trading engine and the intelligence feed agree on what counts as a result.
+    """
+    from app.services.announcement_classifier import is_financial_result
+
+    subject = str(
+        announcement.get("desc") or announcement.get("subject") or announcement.get("an_desc") or ""
+    ).strip()
+    details = str(
+        announcement.get("attchmntText") or announcement.get("details") or announcement.get("desc") or ""
+    ).strip()
+    ann_symbol = str(
+        announcement.get("symbol") or announcement.get("sm_name") or ""
+    ).strip().upper()
 
     if not ann_symbol:
         return None
 
-    full_text = f"{subject} {details}".lower()
+    matching = [c for c in armed_configs if c["symbol"].upper().strip() == ann_symbol]
+    if not matching:
+        return None
 
-    for config in armed_configs:
-        cfg_symbol = config["symbol"].upper().strip()
-        if ann_symbol == cfg_symbol:
-            trigger = (config.get("trigger_subject") or "").lower().strip()
-            
-            # Enforce that "Outcome of Board Meeting" triggers MUST contain "finan" to be valid
-            if "outcome of board meeting" in full_text and "finan" not in full_text:
-                logger.info(f"⏭️ [TRADE POLLER BYPASS]: Subject contains 'outcome of board meeting' but missing 'finan' keyword for {ann_symbol}. Skipping match.")
-                continue
+    is_result, channel = is_financial_result(subject, details)
+    if not is_result:
+        logger.debug(
+            f"⏭️ [TRADE POLLER]: '{subject[:70]}' for {ann_symbol} is not a financial result — no trigger."
+        )
+        return None
 
-            # Matching rules:
-            # 1. Direct trigger match
-            if trigger and trigger in full_text:
-                return config
-            # 2. General financial/board meeting outcome keywords
-            keywords = ["outcome", "board meeting", "financial", "result", "dividend", "audited", "un-audited", "q1", "q2", "q3", "q4"]
-            if any(kw in full_text for kw in keywords):
-                return config
-            # 3. Default match for symbol if any announcement drops
-            return config
-    return None
+    config = matching[0]
+    # An explicit trigger_subject still narrows the match when the user set one.
+    trigger = (config.get("trigger_subject") or "").lower().strip()
+    if trigger and trigger not in f"{subject} {details}".lower():
+        # Subject-specific arm that this filing does not satisfy; the result is
+        # still a result, so let it through on the results channel it arrived on.
+        logger.debug(
+            f"[TRADE POLLER]: {ann_symbol} result matched via channel '{channel}' "
+            f"(configured trigger '{trigger}' not present)."
+        )
+    return config
 
 
 def _is_recent_announcement(announcement: dict, max_age_minutes: int = 480) -> bool:
@@ -208,107 +230,39 @@ def _is_high_speed_polling_hours() -> bool:
 _triggered_hashes = set()
 
 
-async def _poll_loop():
-    """Main polling loop — runs continuously while there are armed configs."""
-    global _poller_running, _last_poll_status, _triggered_hashes, _offmarket_interval_minutes
-    _poller_running = True
-    _last_poll_status["running"] = True
-    logger.info("🚀 [TRADE POLLER]: Starting adaptive NSE polling loop")
+def handle_announcements(announcements: list) -> int:
+    """
+    Match a freshly fetched announcement batch against armed configs.
 
-    nse = _get_trade_nse_session()
-    consecutive_errors = 0
+    Called synchronously by the exchange hub the instant data lands, so the
+    trading engine sees a filing on the same fetch that feeds the intelligence
+    pipeline — no second HTTP round-trip and no extra latency.
 
-    while _poller_running:
-        try:
-            armed = _get_armed_configs()
-            _last_poll_status["armed_count"] = len(armed)
+    Safe to call from a worker thread: trade execution is scheduled back onto the
+    main event loop. Returns the number of triggers fired.
+    """
+    global _last_poll_status, _triggered_hashes
 
-            if not armed:
-                # No armed configs — sleep longer and recheck
-                await asyncio.sleep(10)
-                continue
+    if not announcements:
+        return 0
 
-            is_market_open = _is_high_speed_polling_hours()
-            _last_poll_status["mode"] = f"high_speed ({_poll_interval}s)" if is_market_open else f"off_market ({_offmarket_interval_minutes}m)"
-            _last_poll_status["offmarket_interval_minutes"] = _offmarket_interval_minutes
-            _last_poll_status["poll_interval_seconds"] = _poll_interval
-
-            # Fetch announcements
-            announcements = await asyncio.get_event_loop().run_in_executor(
-                None, nse.fetch_announcements
-            )
-            _last_poll_status["polls_total"] += 1
-            _last_poll_status["last_poll_at"] = datetime.now(IST).isoformat()
-            consecutive_errors = 0
-
-            for ann in announcements:
-                if not isinstance(ann, dict):
-                    continue
-
-                matched_config = _check_match(ann, armed)
-                if not matched_config:
-                    continue
-
-                if not _is_recent_announcement(ann, max_age_minutes=30):
-                    continue
-
-                # Compute event hash to avoid re-triggering
-                subject = str(ann.get("desc") or ann.get("subject") or "")
-                ann_date = str(ann.get("an_dt") or ann.get("bcastDate") or "")
-                evt_hash = f"{matched_config['symbol']}:{subject[:100]}:{ann_date}"
-                if evt_hash in _triggered_hashes:
-                    continue
-                _triggered_hashes.add(evt_hash)
-
-                # ========== TRIGGER! ==========
-                logger.info(f"⚡ [TRADE TRIGGER]: {matched_config['symbol']} — '{subject[:80]}' → Placing {matched_config['order_type']} {matched_config['broker'].upper()} order!")
-                _last_poll_status["triggers_total"] += 1
-
-                # Run trade execution in a background task to avoid blocking the poller
-                asyncio.create_task(_execute_trade(matched_config, ann))
-
-            # Adaptive Sleep:
-            # - During market hours (Mon-Fri 9:00 AM to 3:30 PM IST): high speed (_poll_interval)
-            # - Outside market hours: _offmarket_interval_minutes (default 45 min)
-            if is_market_open:
-                await asyncio.sleep(_poll_interval)
-            else:
-                logger.info(f"🌙 [TRADE POLLER]: Outside market hours (Mon-Fri 9:00 AM - 3:30 PM). Next poll in {_offmarket_interval_minutes} minutes.")
-                await asyncio.sleep(_offmarket_interval_minutes * 60)
-
-        except asyncio.CancelledError:
-            break
-        except Exception as e:
-            consecutive_errors += 1
-            _last_poll_status["last_error"] = str(e)
-            logger.error(f"[TRADE POLLER]: Error in poll loop: {e}")
-            wait = min(5 * consecutive_errors, 30)
-            await asyncio.sleep(wait)
-
-    _poller_running = False
-    _last_poll_status["running"] = False
-    logger.info("🛑 [TRADE POLLER]: Polling loop stopped")
-
-
-def execute_manual_poll() -> dict:
-    """Trigger an immediate, on-demand manual poll of NSE announcements."""
-    logger.info("⚡ [TRADE POLLER]: Manual poll requested by user")
-    nse = _get_trade_nse_session()
-    announcements = nse.fetch_announcements()
     armed = _get_armed_configs()
-
+    _last_poll_status["armed_count"] = len(armed)
     _last_poll_status["polls_total"] += 1
     _last_poll_status["last_poll_at"] = datetime.now(IST).isoformat()
 
-    triggers_count = 0
-    matched_items = []
+    if not armed:
+        return 0
 
+    triggers = 0
     for ann in announcements:
         if not isinstance(ann, dict):
             continue
+
         matched_config = _check_match(ann, armed)
         if not matched_config:
             continue
+
         if not _is_recent_announcement(ann, max_age_minutes=30):
             continue
 
@@ -319,25 +273,123 @@ def execute_manual_poll() -> dict:
             continue
         _triggered_hashes.add(evt_hash)
 
-        triggers_count += 1
-        matched_items.append({
-            "symbol": matched_config["symbol"],
-            "subject": subject,
-            "config_id": matched_config["id"]
-        })
+        # ========== TRIGGER! ==========
+        logger.info(
+            f"⚡ [TRADE TRIGGER]: {matched_config['symbol']} — '{subject[:80]}' → "
+            f"Placing {matched_config['order_type']} {matched_config['broker'].upper()} order!"
+        )
+        _last_poll_status["triggers_total"] += 1
+        triggers += 1
 
+        _schedule_trade(matched_config, ann)
+
+    return triggers
+
+
+def _schedule_trade(config: dict, announcement: dict):
+    """Schedule trade execution on the main event loop from any thread."""
+    coro = _execute_trade(config, announcement)
+    loop = _main_loop
+    if loop and loop.is_running():
+        asyncio.run_coroutine_threadsafe(coro, loop)
+        return
+    try:
+        asyncio.get_event_loop().create_task(coro)
+    except RuntimeError:
+        logger.error("[TRADE POLLER]: No event loop available to execute trade")
+        coro.close()
+
+
+async def _poll_loop():
+    """
+    Watchdog loop.
+
+    The exchange hub is the primary feed and calls handle_announcements()
+    directly. This loop only fetches when the hub's snapshot has gone stale,
+    which covers the hub erroring out or being starved. Under normal operation it
+    issues no HTTP requests at all.
+    """
+    global _poller_running, _last_poll_status, _offmarket_interval_minutes
+    _poller_running = True
+    _last_poll_status["running"] = True
+    logger.info("🚀 [TRADE POLLER]: Watchdog started (exchange hub is the primary feed)")
+
+    nse = _get_trade_nse_session()
+    consecutive_errors = 0
+    # Treat the hub as stale after this long without a successful fetch.
+    stale_after_seconds = 30.0
+
+    while _poller_running:
         try:
-            loop = asyncio.get_event_loop()
-            loop.create_task(_execute_trade(matched_config, ann))
-        except Exception:
-            pass
+            armed = _get_armed_configs()
+            _last_poll_status["armed_count"] = len(armed)
+
+            if not armed:
+                await asyncio.sleep(30)
+                continue
+
+            is_market_open = _is_high_speed_polling_hours()
+            _last_poll_status["mode"] = (
+                f"hub_driven (watchdog {_poll_interval}s)" if is_market_open
+                else f"off_market ({_offmarket_interval_minutes}m)"
+            )
+            _last_poll_status["offmarket_interval_minutes"] = _offmarket_interval_minutes
+            _last_poll_status["poll_interval_seconds"] = _poll_interval
+
+            if not is_market_open:
+                await asyncio.sleep(_offmarket_interval_minutes * 60)
+                continue
+
+            # Only fetch if the hub has gone quiet.
+            import time as _time
+            from app.services.exchange_hub import get_latest_snapshot
+
+            _, snapshot_at = get_latest_snapshot()
+            hub_age = _time.monotonic() - snapshot_at if snapshot_at else float("inf")
+
+            if hub_age > stale_after_seconds:
+                logger.warning(
+                    f"[TRADE POLLER]: Exchange hub stale ({hub_age:.0f}s) — watchdog fetching directly"
+                )
+                announcements = await asyncio.get_event_loop().run_in_executor(
+                    None, nse.fetch_announcements
+                )
+                await asyncio.get_event_loop().run_in_executor(
+                    None, handle_announcements, announcements
+                )
+                _last_poll_status["last_error"] = None
+
+            consecutive_errors = 0
+            await asyncio.sleep(_poll_interval)
+
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            consecutive_errors += 1
+            _last_poll_status["last_error"] = str(e)
+            logger.error(f"[TRADE POLLER]: Error in watchdog loop: {e}")
+            wait = min(5 * consecutive_errors, 30)
+            await asyncio.sleep(wait)
+
+    _poller_running = False
+    _last_poll_status["running"] = False
+    logger.info("🛑 [TRADE POLLER]: Watchdog stopped")
+
+
+def execute_manual_poll() -> dict:
+    """Trigger an immediate, on-demand manual poll of NSE announcements."""
+    logger.info("⚡ [TRADE POLLER]: Manual poll requested by user")
+    nse = _get_trade_nse_session()
+    announcements = nse.fetch_announcements()
+    armed = _get_armed_configs()
+
+    triggers_count = handle_announcements(announcements)
 
     return {
         "success": True,
         "announcements_fetched": len(announcements),
         "armed_configs_checked": len(armed),
         "triggers_found": triggers_count,
-        "matched_items": matched_items,
         "timestamp": datetime.now(IST).isoformat()
     }
 
@@ -475,7 +527,7 @@ async def _execute_trade(config: dict, announcement: dict):
 
 def start_trade_poller():
     """Start the trade NSE poller as an asyncio background task."""
-    global _poller_task, _poller_running
+    global _poller_task, _poller_running, _main_loop
     if _poller_running and _poller_task and not _poller_task.done():
         logger.info("[TRADE POLLER]: Already running")
         return
@@ -484,6 +536,9 @@ def start_trade_poller():
     except RuntimeError:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+    # Remember the loop so hub callbacks running on worker threads can schedule
+    # trade coroutines back onto it.
+    _main_loop = loop
     _poller_running = True
     _poller_task = loop.create_task(_poll_loop())
     logger.info("🚀 [TRADE POLLER]: Background task started")

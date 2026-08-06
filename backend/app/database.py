@@ -315,6 +315,59 @@ class TradeAILog(Base):
     flow_used = Column(String(50), nullable=True)                     # "custom_rest_api" or "openrouter_premium"
 
 
+class ResultDedupKey(Base):
+    """
+    Cross-channel suppression for financial results.
+
+    The same result reaches us through up to four paths (board-meeting outcome
+    and direct result filing, on each of NSE and BSE). The first path to arrive
+    claims the key; later arrivals for the same key are dropped.
+    """
+    __tablename__ = "result_dedup_keys"
+    key = Column(String(200), primary_key=True, index=True)
+    symbol = Column(String(50), index=True, nullable=True)
+    isin = Column(String(30), index=True, nullable=True)
+    # Which exchange published it first: nse | bse
+    first_source = Column(String(10), nullable=True)
+    # Which channel it arrived on: board_meeting_outcome | direct_result
+    channel = Column(String(30), nullable=True)
+    event_id = Column(Integer, nullable=True)          # FK to MarketEvent.id
+    result_date = Column(String(20), index=True, nullable=True)   # YYYY-MM-DD
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class PendingResultOrder(Base):
+    """
+    A financial result arrived for a stock that was NOT armed.
+
+    Surfaces on the Auto Trading panel as an order-placement prompt. Once the
+    user places (or dismisses) the order, AI analysis runs against the filing.
+    """
+    __tablename__ = "pending_result_orders"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    symbol = Column(String(50), nullable=False, index=True)
+    instrument_key = Column(String(100), nullable=True)
+    isin = Column(String(30), nullable=True)
+    exchange = Column(String(10), nullable=False)      # nse | bse
+    title = Column(Text, nullable=False)
+    description = Column(Text, nullable=True)
+    attachment_url = Column(Text, nullable=True)
+    event_time = Column(DateTime, nullable=False, index=True)
+    dedup_key = Column(String(200), unique=True, index=True, nullable=False)
+    # pending → ordered | dismissed | expired
+    status = Column(String(20), default="pending", index=True)
+    # AI analysis lifecycle: pending → running → done | failed
+    ai_status = Column(String(20), default="pending", index=True)
+    ai_log_id = Column(Integer, nullable=True)          # FK to TradeAILog.id
+    config_id = Column(Integer, nullable=True)          # FK to TradeConfig.id once ordered
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    resolved_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index("ix_pending_result_status_created", "status", "created_at"),
+    )
+
+
 # ─── Database Initialization ────────────────────────────────────────────────
 
 def init_db():

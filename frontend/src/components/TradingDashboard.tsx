@@ -26,6 +26,27 @@ import {
 
 const API_BASE = import.meta.env.VITE_API_BASE || (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" ? "http://localhost:8000" : "");
 
+/**
+ * A financial result that landed for a stock with no armed config.
+ * The user is prompted to place an order; AI analysis follows.
+ */
+interface PendingResult {
+  id: number;
+  symbol: string;
+  instrument_key: string | null;
+  exchange: string;
+  title: string;
+  description: string | null;
+  attachment_url: string | null;
+  event_time: string | null;
+  status: string;
+  ai_status: string;
+  ai_log_id: number | null;
+  config_id: number | null;
+  created_at: string | null;
+  ai_analysis: TradeAILog | null;
+}
+
 interface TradeConfig {
   id: number;
   symbol: string;
@@ -127,6 +148,12 @@ export function TradingDashboard() {
   const [orders, setOrders] = useState<TradeOrder[]>([]);
   const [aiLogs, setAiLogs] = useState<TradeAILog[]>([]);
   const [nseAnnouncements, setNseAnnouncements] = useState<any[]>([]);
+  const [pendingResults, setPendingResults] = useState<PendingResult[]>([]);
+  // Per-prompt order form state, keyed by pending-result id
+  const [resultOrderForm, setResultOrderForm] = useState<Record<number, {
+    quantity: number; order_type: string; limit_price: string;
+    stoploss_pct: number; stoploss_type: string; broker: string;
+  }>>({});
   const [pollerStatus, setPollerStatus] = useState<PollerStatus | null>(null);
   const [upcomingEarnings, setUpcomingEarnings] = useState<UpcomingEarningsItem[]>([]);
   const [aiSettings, setAiSettings] = useState<AutoTradingSettings>({
@@ -332,13 +359,15 @@ export function TradingDashboard() {
   // Fetch initial & fast status data
   const fetchData = async () => {
     try {
-      const [configsRes, ordersRes, aiLogsRes, pollerRes, settingsRes, feedRes] = await Promise.all([
+      const [configsRes, ordersRes, aiLogsRes, pollerRes, settingsRes, feedRes, pendingRes] = await Promise.all([
         fetch(`${API_BASE}/api/trading/configs`),
         fetch(`${API_BASE}/api/trading/orders`),
         fetch(`${API_BASE}/api/trading/ai-logs`),
         fetch(`${API_BASE}/api/trading/poller/status`),
         fetch(`${API_BASE}/api/trading/settings`),
-        fetch(`${API_BASE}/api/intelligence/feed?hours=24&category=finance_news`),
+        // Financial results live here, not in the AI Intelligence feed
+        fetch(`${API_BASE}/api/intelligence/feed?hours=24&category=financial_results`),
+        fetch(`${API_BASE}/api/trading/pending-results?status=pending`),
       ]);
 
       if (configsRes.ok) {
@@ -373,10 +402,67 @@ export function TradingDashboard() {
         );
         setNseAnnouncements(filtered);
       }
+      if (pendingRes.ok) {
+        const data = await pendingRes.json();
+        setPendingResults(data.pending || []);
+      }
     } catch (err) {
       console.error("Error loading trading dashboard data:", err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // ── Financial-result order prompts ──
+
+  const getResultForm = (id: number) =>
+    resultOrderForm[id] || {
+      quantity: 1, order_type: "MARKET", limit_price: "",
+      stoploss_pct: 2, stoploss_type: "software", broker: "upstox",
+    };
+
+  const updateResultForm = (id: number, patch: Partial<ReturnType<typeof getResultForm>>) => {
+    setResultOrderForm(prev => ({ ...prev, [id]: { ...getResultForm(id), ...patch } }));
+  };
+
+  const handlePlaceResultOrder = async (pending: PendingResult) => {
+    const form = getResultForm(pending.id);
+    setActionLoading(prev => ({ ...prev, [`result_${pending.id}`]: true }));
+    try {
+      const res = await fetch(`${API_BASE}/api/trading/pending-results/${pending.id}/order`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          quantity: form.quantity,
+          order_type: form.order_type,
+          limit_price: form.order_type === "LIMIT" && form.limit_price ? parseFloat(form.limit_price) : null,
+          stoploss_pct: form.stoploss_pct,
+          stoploss_type: form.stoploss_type,
+          broker: form.broker,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        alert(`Order failed for ${pending.symbol}: ${data.message || data.detail || "Unknown error"}`);
+      }
+      await fetchData();
+    } catch (err) {
+      console.error("Error placing result order:", err);
+      alert(`Order failed for ${pending.symbol}. See console for details.`);
+    } finally {
+      setActionLoading(prev => ({ ...prev, [`result_${pending.id}`]: false }));
+    }
+  };
+
+  const handleDismissResult = async (id: number) => {
+    setActionLoading(prev => ({ ...prev, [`result_${id}`]: true }));
+    try {
+      await fetch(`${API_BASE}/api/trading/pending-results/${id}/dismiss`, { method: "POST" });
+      await fetchData();
+    } catch (err) {
+      console.error("Error dismissing result:", err);
+    } finally {
+      setActionLoading(prev => ({ ...prev, [`result_${id}`]: false }));
     }
   };
 
@@ -508,7 +594,7 @@ export function TradingDashboard() {
   }, []);
 
   // Symbol Search Autocomplete
-  const handleSymbolSearch = async (query: str) => {
+  const handleSymbolSearch = async (query: string) => {
     setFormData(prev => ({ ...prev, symbol: query }));
     if (query.trim().length < 2) {
       setSearchResults([]);
@@ -909,6 +995,156 @@ export function TradingDashboard() {
           </div>
         </div>
       </div>
+
+      {/* FINANCIAL RESULT ORDER PROMPTS — results that arrived on unarmed stocks */}
+      {pendingResults.length > 0 && (
+        <div style={{
+          background: "rgba(120, 53, 15, 0.25)",
+          border: "1px solid rgba(251, 191, 36, 0.45)",
+          borderRadius: "14px",
+          padding: "18px",
+          marginBottom: "20px"
+        }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "14px" }}>
+            <h3 style={{ fontSize: "15px", fontWeight: 700, color: "#fbbf24", display: "flex", alignItems: "center", gap: "8px", margin: 0 }}>
+              <AlertTriangle size={18} /> Financial Results — Order Decision Required ({pendingResults.length})
+            </h3>
+            <span style={{ fontSize: "11px", color: "#fcd34d", background: "rgba(251,191,36,0.12)", padding: "4px 10px", borderRadius: "20px" }}>
+              Results filed for stocks that are not armed
+            </span>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+            {pendingResults.map(pending => {
+              const form = getResultForm(pending.id);
+              const busy = !!actionLoading[`result_${pending.id}`];
+              const ai = pending.ai_analysis;
+              return (
+                <div key={pending.id} style={{
+                  background: "rgba(15, 23, 42, 0.6)",
+                  border: "1px solid rgba(251, 191, 36, 0.25)",
+                  borderRadius: "10px",
+                  padding: "14px"
+                }}>
+                  {/* Header line */}
+                  <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "10px", marginBottom: "10px" }}>
+                    <span style={{ fontSize: "16px", fontWeight: 800, color: "#f1f5f9" }}>{pending.symbol}</span>
+                    <span style={{
+                      fontSize: "10px", fontWeight: 700, letterSpacing: "0.5px",
+                      color: pending.exchange === "nse" ? "#60a5fa" : "#a78bfa",
+                      background: pending.exchange === "nse" ? "rgba(59,130,246,0.15)" : "rgba(167,139,250,0.15)",
+                      padding: "3px 8px", borderRadius: "4px"
+                    }}>{pending.exchange.toUpperCase()}</span>
+                    <span style={{ fontSize: "12px", color: "#cbd5e1", flex: 1, minWidth: "200px" }}>{pending.title}</span>
+                    {pending.event_time && (
+                      <span style={{ fontSize: "11px", color: "#94a3b8" }}>
+                        {new Date(pending.event_time).toLocaleString()}
+                      </span>
+                    )}
+                    {pending.attachment_url && (
+                      <a href={pending.attachment_url} target="_blank" rel="noreferrer"
+                         style={{ fontSize: "11px", color: "#60a5fa", display: "flex", alignItems: "center", gap: "4px" }}>
+                        <ExternalLink size={12} /> Filing
+                      </a>
+                    )}
+                  </div>
+
+                  {/* Order form */}
+                  <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: "10px" }}>
+                    <label style={{ fontSize: "10px", color: "#94a3b8" }}>
+                      QTY
+                      <input type="number" min={1} value={form.quantity}
+                        onChange={e => updateResultForm(pending.id, { quantity: parseInt(e.target.value) || 1 })}
+                        style={{ display: "block", width: "70px", marginTop: "3px", padding: "6px 8px", background: "rgba(2,6,23,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "#f1f5f9", fontSize: "12px" }} />
+                    </label>
+                    <label style={{ fontSize: "10px", color: "#94a3b8" }}>
+                      TYPE
+                      <select value={form.order_type}
+                        onChange={e => updateResultForm(pending.id, { order_type: e.target.value })}
+                        style={{ display: "block", marginTop: "3px", padding: "6px 8px", background: "rgba(2,6,23,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "#f1f5f9", fontSize: "12px" }}>
+                        <option value="MARKET">MARKET</option>
+                        <option value="LIMIT">LIMIT</option>
+                      </select>
+                    </label>
+                    {form.order_type === "LIMIT" && (
+                      <label style={{ fontSize: "10px", color: "#94a3b8" }}>
+                        LIMIT ₹
+                        <input type="number" step="0.05" value={form.limit_price}
+                          onChange={e => updateResultForm(pending.id, { limit_price: e.target.value })}
+                          style={{ display: "block", width: "90px", marginTop: "3px", padding: "6px 8px", background: "rgba(2,6,23,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "#f1f5f9", fontSize: "12px" }} />
+                      </label>
+                    )}
+                    <label style={{ fontSize: "10px", color: "#94a3b8" }}>
+                      SL %
+                      <input type="number" step="0.5" min={0.5} value={form.stoploss_pct}
+                        onChange={e => updateResultForm(pending.id, { stoploss_pct: parseFloat(e.target.value) || 2 })}
+                        style={{ display: "block", width: "70px", marginTop: "3px", padding: "6px 8px", background: "rgba(2,6,23,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "#f1f5f9", fontSize: "12px" }} />
+                    </label>
+                    <label style={{ fontSize: "10px", color: "#94a3b8" }}>
+                      BROKER
+                      <select value={form.broker}
+                        onChange={e => updateResultForm(pending.id, { broker: e.target.value })}
+                        style={{ display: "block", marginTop: "3px", padding: "6px 8px", background: "rgba(2,6,23,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "#f1f5f9", fontSize: "12px" }}>
+                        <option value="upstox">Upstox</option>
+                        <option value="zerodha">Zerodha</option>
+                      </select>
+                    </label>
+
+                    <button onClick={() => handlePlaceResultOrder(pending)} disabled={busy}
+                      style={{
+                        padding: "8px 16px", background: busy ? "rgba(34,197,94,0.4)" : "#16a34a",
+                        border: "none", borderRadius: "6px", color: "#fff", fontSize: "12px", fontWeight: 700,
+                        cursor: busy ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: "6px"
+                      }}>
+                      <ShoppingBag size={14} /> {busy ? "Placing…" : "Place Buy Order"}
+                    </button>
+                    <button onClick={() => handleDismissResult(pending.id)} disabled={busy}
+                      style={{
+                        padding: "8px 14px", background: "transparent",
+                        border: "1px solid rgba(148,163,184,0.35)", borderRadius: "6px",
+                        color: "#94a3b8", fontSize: "12px", fontWeight: 600,
+                        cursor: busy ? "not-allowed" : "pointer"
+                      }}>
+                      Dismiss
+                    </button>
+                  </div>
+
+                  {/* AI analysis — runs after the order screen is shown */}
+                  <div style={{ marginTop: "12px", paddingTop: "10px", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                    {pending.ai_status === "done" && ai ? (
+                      <div>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                          <Sparkles size={13} style={{ color: "#a78bfa" }} />
+                          <span style={{ fontSize: "11px", fontWeight: 700, color: "#a78bfa" }}>AI EARNINGS ANALYSIS</span>
+                          {ai.ai_suggestion && (
+                            <span style={{
+                              fontSize: "10px", fontWeight: 800, padding: "2px 8px", borderRadius: "4px",
+                              color: /BEAT|BUY/i.test(ai.ai_suggestion) ? "#4ade80" : /MISS|SELL/i.test(ai.ai_suggestion) ? "#f87171" : "#fbbf24",
+                              background: /BEAT|BUY/i.test(ai.ai_suggestion) ? "rgba(34,197,94,0.15)" : /MISS|SELL/i.test(ai.ai_suggestion) ? "rgba(248,113,113,0.15)" : "rgba(251,191,36,0.15)"
+                            }}>{ai.ai_suggestion}</span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: "11px", color: "#cbd5e1", lineHeight: 1.55 }}>{ai.ai_summary}</div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "12px", marginTop: "8px", fontSize: "10px", color: "#94a3b8" }}>
+                          {ai.revenue && ai.revenue !== "N/A" && <span><b style={{ color: "#e2e8f0" }}>Revenue:</b> {ai.revenue}</span>}
+                          {ai.pat_yoy && ai.pat_yoy !== "N/A" && <span><b style={{ color: "#e2e8f0" }}>PAT:</b> {ai.pat_yoy}</span>}
+                          {ai.operating_profit && ai.operating_profit !== "N/A" && <span><b style={{ color: "#e2e8f0" }}>OP:</b> {ai.operating_profit}</span>}
+                        </div>
+                      </div>
+                    ) : pending.ai_status === "failed" ? (
+                      <span style={{ fontSize: "11px", color: "#f87171" }}>AI analysis failed — place the order on the filing itself.</span>
+                    ) : (
+                      <span style={{ fontSize: "11px", color: "#94a3b8", display: "flex", alignItems: "center", gap: "6px" }}>
+                        <RefreshCw size={12} className="spin" /> AI earnings analysis running…
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* UPCOMING EARNINGS CALENDAR SECTION */}
       <div style={{

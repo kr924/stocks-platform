@@ -18,41 +18,71 @@ from app.services.intel_config import get_intel_config
 from app.services.deduplication import event_hash, is_duplicate_event, to_iso_utc
 from app.services.sse_manager import sse_manager
 
+# Lookup indexes over the NSE equity list, built once and reused. Resolving a
+# BSE symbol used to linear-scan ~2000 equities twice per announcement, which at
+# a few hundred announcements per cycle was pure wasted CPU.
+_bse_isin_index: Optional[Dict[str, str]] = None
+_bse_name_index: Optional[Dict[str, str]] = None
+
+
+def _build_symbol_indexes() -> tuple:
+    """Build (isin -> symbol, upper_name -> symbol) indexes from the NSE equity list."""
+    global _bse_isin_index, _bse_name_index
+    if _bse_isin_index is not None and _bse_name_index is not None:
+        return _bse_isin_index, _bse_name_index
+
+    isin_index: Dict[str, str] = {}
+    name_index: Dict[str, str] = {}
+    try:
+        from app.main import get_nse_equities
+        for eq in get_nse_equities():
+            symbol = (eq.get("symbol") or "").strip().upper()
+            if not symbol:
+                continue
+            key = eq.get("key", "")
+            isin = (key.split("|")[-1] if "|" in key else key).strip().upper()
+            if isin:
+                isin_index.setdefault(isin, symbol)
+            name = (eq.get("name") or "").strip().upper()
+            if name:
+                name_index.setdefault(name, symbol)
+    except Exception as e:
+        logger.debug(f"Failed to build symbol indexes: {e}")
+        # Leave the caches unset so a later call can retry once the list loads.
+        return isin_index, name_index
+
+    _bse_isin_index = isin_index
+    _bse_name_index = name_index
+    return isin_index, name_index
+
+
 def resolve_bse_symbol(scrip_cd: str, slongname: str, isin_code: str, db: Session) -> str:
-    """Resolve BSE scrip_cd / long name / ISIN to the standard NSE symbol using cache mapping."""
-    from app.main import get_nse_equities
-    
+    """Resolve BSE scrip_cd / long name / ISIN to the standard NSE symbol."""
     scrip_cd = str(scrip_cd or "").strip().upper()
     slongname = str(slongname or "").strip().upper()
     isin_code = str(isin_code or "").strip().upper()
-    
-    # 1. Try mapping via ISIN first
+
+    isin_index, name_index = _build_symbol_indexes()
+
+    # 1. ISIN is the authoritative join between the two exchanges.
     if isin_code:
-        try:
-            equities = get_nse_equities()
-            for eq in equities:
-                eq_key = eq.get("key", "")
-                eq_isin = eq_key.split("|")[-1] if "|" in eq_key else eq_key
-                if eq_isin.upper() == isin_code:
-                    return eq.get("symbol").upper()
-        except Exception:
-            pass
+        hit = isin_index.get(isin_code)
+        if hit:
+            return hit
 
-    # 2. Try mapping via long company name
+    # 2. Exact company-name match, then prefix match in either direction.
     if slongname:
-        try:
-            equities = get_nse_equities()
-            for eq in equities:
-                eq_name = str(eq.get("name") or "").strip().upper()
-                if eq_name and (slongname == eq_name or slongname.startswith(eq_name) or eq_name.startswith(slongname)):
-                    return eq.get("symbol").upper()
-        except Exception:
-            pass
+        hit = name_index.get(slongname)
+        if hit:
+            return hit
+        for eq_name, symbol in name_index.items():
+            if slongname.startswith(eq_name) or eq_name.startswith(slongname):
+                return symbol
 
-    # 3. Fallback: Parse from Scrip Code / Long Name directly
+    # 3. Fallback: a non-numeric scrip code is already a ticker.
     if scrip_cd and not scrip_cd.isdigit():
         return scrip_cd
-        
+
     return scrip_cd or slongname
 
 logger = logging.getLogger("app.nse_bse_scraper")
@@ -142,8 +172,23 @@ class NSESession:
 
 
 class BSESession:
-    """Simple session for BSE API calls with Cloudflare worker proxy support."""
-    
+    """
+    BSE API client with a Cloudflare-worker proxy front and a direct fallback.
+
+    The proxy exists to work around BSE geo-blocking, but it is a single point of
+    failure: when the worker is slow or down every call used to burn the full
+    15s timeout and return nothing, so BSE news simply stopped flowing. Now the
+    proxy gets a short budget, and any failure falls straight through to the
+    direct API. A circuit breaker stops us re-testing a dead proxy on every call.
+    """
+
+    # How long to give the proxy before falling back.
+    PROXY_TIMEOUT = 6
+    # Consecutive proxy failures before the breaker opens.
+    PROXY_FAILURE_THRESHOLD = 3
+    # How long the breaker stays open.
+    PROXY_COOLDOWN_SECONDS = 300
+
     def __init__(self):
         self.session = requests.Session()
         self.config = get_intel_config()
@@ -153,56 +198,80 @@ class BSESession:
             "Referer": "https://www.bseindia.com/",
         })
         self._last_cookie_refresh = 0
-        
+        self._proxy_failures = 0
+        self._proxy_disabled_until = 0.0
+
     def _refresh_cookies(self):
-        """Visit BSE homepage first to establish session cookies if not using Cloudflare worker."""
+        """Visit BSE homepage first to establish session cookies for the direct route."""
         now = time.time()
         if now - self._last_cookie_refresh < 300:
             return
         try:
-            self.session.get("https://www.bseindia.com/", timeout=10)
+            self.session.get("https://www.bseindia.com/", timeout=8)
             self._last_cookie_refresh = now
         except Exception as e:
             logger.debug(f"BSE homepage cookie refresh failed: {e}")
 
+    def _proxy_available(self) -> Optional[str]:
+        """Return the proxy base URL if it is configured and the breaker is closed."""
+        if time.time() < self._proxy_disabled_until:
+            return None
+        proxy_url = (self.config.general.get("bse_proxy_url") or "").strip()
+        if not proxy_url or "workers.dev" not in proxy_url:
+            return None
+        if not proxy_url.startswith("http"):
+            proxy_url = "https://" + proxy_url
+        return proxy_url.rstrip("/")
+
+    def _record_proxy_failure(self, err: Exception):
+        self._proxy_failures += 1
+        if self._proxy_failures >= self.PROXY_FAILURE_THRESHOLD:
+            self._proxy_disabled_until = time.time() + self.PROXY_COOLDOWN_SECONDS
+            self._proxy_failures = 0
+            logger.warning(
+                f"BSE proxy failed {self.PROXY_FAILURE_THRESHOLD}x ({err}). "
+                f"Falling back to the direct API for {self.PROXY_COOLDOWN_SECONDS}s."
+            )
+        else:
+            logger.debug(f"BSE proxy attempt failed ({err}); using direct API for this call.")
+
+    @staticmethod
+    def _parse(resp) -> Optional[Any]:
+        """Turn a BSE response into JSON, tolerating its plain-text empty marker."""
+        resp.raise_for_status()
+        text_data = resp.text.strip()
+        if text_data in ('"No Record Found!"', "No Record Found!"):
+            return {"Table": []}
+        return resp.json()
+
     def get(self, url: str, params: dict = None, timeout: int = 15) -> Optional[Any]:
-        """Make a GET request to BSE API with browser cookie management and Cloudflare worker proxy support."""
-        try:
-            proxy_url = self.config.general.get("bse_proxy_url") or ""
-            proxy_url = proxy_url.strip()
-            
-            # If using Cloudflare worker proxy, rewrite the endpoint URL
-            if proxy_url and "workers.dev" in proxy_url:
-                if not proxy_url.startswith("http"):
-                    proxy_url = "https://" + proxy_url
-                
-                # Convert params to query string
-                import urllib.parse
+        """
+        GET a BSE endpoint, preferring the proxy and falling back to direct.
+
+        Returns parsed JSON, or None only when *both* routes fail.
+        """
+        import urllib.parse
+
+        proxy_base = self._proxy_available()
+        if proxy_base:
+            try:
                 query_str = urllib.parse.urlencode(params) if params else ""
-                
-                # Rebuild target URL to hit Cloudflare Worker directly
-                request_url = proxy_url.rstrip("/")
-                if "?" in request_url:
-                    request_url += "&" + query_str
-                else:
-                    request_url += "/?" + query_str
-                
-                resp = self.session.get(request_url, timeout=timeout)
-            else:
-                # Direct route (refresh cookies first)
-                self._refresh_cookies()
-                resp = self.session.get(url, params=params, timeout=timeout)
-                
-            resp.raise_for_status()
-            
-            # Handle text responses like "No Record Found!"
-            text_data = resp.text.strip()
-            if text_data == '"No Record Found!"' or text_data == 'No Record Found!':
-                return {"Table": []}
-                
-            return resp.json()
+                sep = "&" if "?" in proxy_base else "/?"
+                request_url = f"{proxy_base}{sep}{query_str}" if query_str else proxy_base
+                resp = self.session.get(request_url, timeout=self.PROXY_TIMEOUT)
+                data = self._parse(resp)
+                self._proxy_failures = 0
+                return data
+            except Exception as e:
+                self._record_proxy_failure(e)
+
+        # Direct route — either the proxy is unavailable or it just failed.
+        try:
+            self._refresh_cookies()
+            resp = self.session.get(url, params=params, timeout=timeout)
+            return self._parse(resp)
         except Exception as e:
-            logger.error(f"BSE API error for {url}: {e}")
+            logger.error(f"BSE API error for {url} (direct route): {e}")
             return None
 
 
@@ -294,178 +363,6 @@ def _classify_event_category(event_type: str, title: str, description: str = "")
     if any(kw in t for kw in ["board meeting", "board"]):
         return "board_meeting"
     return "general"
-# ─── Corporate Announcements ───────────────────────────────────────────────
-
-def fetch_corporate_announcements(db: Session) -> int:
-    """Fetch latest corporate announcements from NSE and BSE. Returns count of new events."""
-    config = get_intel_config()
-    if not config.is_source_enabled("nse_bse", "corporate_announcements"):
-        return 0
-    
-    count = 0
-    # 1. Fetch NSE Corporate Announcements
-    nse = _get_nse_session()
-    source_config = config.nse_bse.get("sources", {}).get("corporate_announcements", {})
-    url = source_config.get("nse_url", "https://www.nseindia.com/api/corporate-announcements?index=equities")
-    
-    data = nse.get(url)
-    announcements = []
-    if isinstance(data, list):
-        announcements = data
-    elif isinstance(data, dict):
-        announcements = data.get("data", data.get("announcements", []))
-    
-    if isinstance(announcements, list):
-        for ann in announcements:
-            try:
-                if not isinstance(ann, dict):
-                    continue
-                symbol = str(ann.get("symbol") or ann.get("sm_name") or ann.get("col_0") or ann.get("company_name") or "").strip().upper()
-                subject = str(ann.get("desc") or ann.get("subject") or ann.get("an_desc") or ann.get("attchmntText") or "").strip()
-                if not subject:
-                    continue
-                
-                ann_date = str(ann.get("an_dt") or ann.get("bcastDate") or ann.get("broadcastDate") or ann.get("date") or ann.get("dt") or "").strip()
-                evt_time = _safe_datetime(ann_date)
-                
-                # Include symbol in hash so generic titles don't clash across companies
-                h = event_hash("nse", "announcement", f"{symbol}:{subject}", evt_time.isoformat())
-                if is_duplicate_event(db, h):
-                    continue
-                
-                try:
-                    from app.services.ai_analyzer import apply_instant_tier_classification
-                except ImportError:
-                    apply_instant_tier_classification = None
-                
-                event = MarketEvent(
-                    event_type="announcement",
-                    source="nse",
-                    symbol=symbol or None,
-                    title=subject[:500],
-                    description=ann.get("attchmntText", ann.get("description", subject)),
-                    url=ann.get("attchmntFile", ann.get("url", "")),
-                    raw_data=json.dumps(ann, default=str),
-                    event_hash=h,
-                    event_time=evt_time,
-                    category=_classify_event_category("announcement", subject, ann.get("attchmntText", ann.get("description", subject))),
-                )
-
-                if apply_instant_tier_classification:
-                    apply_instant_tier_classification(event)
-                try:
-                    db.add(event)
-                    db.commit()
-                    count += 1
-                    sse_manager.broadcast("new_event", {
-                        "id": f"event_{event.id}",
-                        "type": "event",
-                        "event_type": event.event_type,
-                        "source": event.source,
-                        "symbol": event.symbol,
-                        "title": event.title,
-                        "description": event.description,
-                        "url": event.url,
-                        "time": to_iso_utc(event.event_time),
-                        "category": event.category,
-                        "ai_sentiment": event.ai_sentiment,
-                        "ai_impact_score": event.ai_impact_score,
-                        "ai_summary": event.ai_summary,
-                        "ai_provider": event.ai_provider,
-                    })
-                except Exception as inner_err:
-                    db.rollback()
-                    logger.warning(f"Failed to save NSE announcement {symbol}: {inner_err}")
-            except Exception as e:
-                logger.error(f"Error processing NSE announcement: {e}")
-                continue
-
-    # 2. Fetch BSE Corporate Announcements (Open Public API)
-    try:
-        bse = BSESession()
-        bse_url = "https://api.bseindia.com/BseIndiaAPI/api/AnnGetData/w?strCat=-1&strPrevDate=&strScrip=&strSearch=P&strToDate=&strType=C"
-        bse_data = bse.get(bse_url)
-        bse_items = []
-        if isinstance(bse_data, dict):
-            bse_items = bse_data.get("Table", bse_data.get("data", []))
-        elif isinstance(bse_data, list):
-            bse_items = bse_data
-
-        if isinstance(bse_items, list):
-            for ann in bse_items:
-                try:
-                    bse_scrip = ann.get("SCRIP_CD", ann.get("scrip_cd", ""))
-                    bse_long_name = ann.get("SLONGNAME", "")
-                    bse_isin = ann.get("ISIN_CODE", "")
-                    symbol = resolve_bse_symbol(bse_scrip, bse_long_name, bse_isin, db)
-                    
-                    subject = ann.get("NEWSSUB", ann.get("HEADLINE", ann.get("news_sub", ""))).strip()
-                    if not subject:
-                        continue
-                    
-                    ann_date = ann.get("NEWS_DT", ann.get("dissemdt", ""))
-                    evt_time = _safe_datetime(ann_date)
-                    
-                    h = event_hash("bse", "announcement", f"{symbol}:{subject}", evt_time.isoformat())
-                    if is_duplicate_event(db, h):
-                        continue
-                    
-                    try:
-                        from app.services.ai_analyzer import apply_instant_tier_classification
-                    except ImportError:
-                        apply_instant_tier_classification = None
-
-                    attachment_url = ""
-                    if ann.get("ATTACHMENTNAME"):
-                        attachment_url = f"https://www.bseindia.com/xml-data/corpfiling/AttachLive/{ann['ATTACHMENTNAME']}"
-
-                    event = MarketEvent(
-                        event_type="announcement",
-                        source="bse",
-                        symbol=symbol or None,
-                        title=subject[:500],
-                        description=ann.get("MORE", ann.get("NEWS_BODY", subject)),
-                        url=attachment_url,
-                        raw_data=json.dumps(ann, default=str),
-                        event_hash=h,
-                        event_time=evt_time,
-                        category=_classify_event_category("announcement", subject, ann.get("MORE", ann.get("NEWS_BODY", subject))),
-                    )
-                    if apply_instant_tier_classification:
-                        apply_instant_tier_classification(event)
-                    try:
-                        db.add(event)
-                        db.commit()
-                        count += 1
-                        sse_manager.broadcast("new_event", {
-                            "id": f"event_{event.id}",
-                            "type": "event",
-                            "event_type": event.event_type,
-                            "source": event.source,
-                            "symbol": event.symbol,
-                            "title": event.title,
-                            "description": event.description,
-                            "url": event.url,
-                            "time": to_iso_utc(event.event_time),
-                            "category": event.category,
-                            "ai_sentiment": event.ai_sentiment,
-                            "ai_impact_score": event.ai_impact_score,
-                            "ai_summary": event.ai_summary,
-                            "ai_provider": event.ai_provider,
-                        })
-                    except Exception as inner_err:
-                        db.rollback()
-                        logger.warning(f"Failed to save BSE announcement {symbol}: {inner_err}")
-                except Exception as e:
-                    logger.error(f"Error processing BSE announcement: {e}")
-                    continue
-    except Exception as bse_err:
-        logger.error(f"Error fetching BSE announcements: {bse_err}")
-
-    if count > 0:
-        logger.info(f"Saved {count} new corporate announcements from NSE/BSE")
-    return count
-
 
 # ─── Bulk/Block Deals ──────────────────────────────────────────────────────
 
@@ -605,10 +502,13 @@ def fetch_board_meetings(db: Session) -> int:
             if is_duplicate_event(db, h):
                 continue
             
+            # Board-meeting *intimations* are calendar entries, not results, so
+            # they take the cheap news-impact path. An actual results filing
+            # arrives separately through the exchange hub.
             try:
-                from app.services.ai_analyzer import apply_instant_tier_classification
+                from app.services.ai_analyzer import apply_news_impact_classification
             except ImportError:
-                apply_instant_tier_classification = None
+                apply_news_impact_classification = None
 
             event = MarketEvent(
                 event_type="board_meeting",
@@ -621,8 +521,8 @@ def fetch_board_meetings(db: Session) -> int:
                 event_time=evt_time,
                 category=_classify_event_category("board_meeting", title),
             )
-            if apply_instant_tier_classification:
-                apply_instant_tier_classification(event)
+            if apply_news_impact_classification:
+                apply_news_impact_classification(event)
             try:
                 db.add(event)
                 db.commit()
@@ -732,101 +632,6 @@ def fetch_insider_trading(db: Session) -> int:
     return count
 
 
-# ─── BSE Announcements ─────────────────────────────────────────────────────
-
-def fetch_bse_announcements(db: Session) -> int:
-    """Fetch latest announcements from BSE. Returns count of new events."""
-    config = get_intel_config()
-    if not config.nse_bse.get("enabled", True):
-        return 0
-    
-    bse = _get_bse_session()
-    source_config = config.nse_bse.get("sources", {}).get("corporate_announcements", {})
-    url = source_config.get("bse_url", "https://api.bseindia.com/BseIndiaAPI/api/AnnGetData/w")
-    
-    # BSE API parameters
-    today = datetime.now().strftime("%Y%m%d")
-    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
-    params = {
-        "strCat": "-1",       # All categories
-        "strPrevDate": yesterday,
-        "strScrip": "",
-        "strSearch": "P",
-        "strToDate": today,
-        "strType": "C",       # Company
-    }
-    
-    data = bse.get(url, params=params)
-    if not data or not isinstance(data, dict):
-        return 0
-    
-    table = data.get("Table", [])
-    if not isinstance(table, list):
-        return 0
-    
-    count = 0
-    for ann in table:
-        try:
-            bse_scrip = ann.get("SCRIP_CD", ann.get("scrip_cd", ""))
-            bse_long_name = ann.get("SLONGNAME", "")
-            bse_isin = ann.get("ISIN_CODE", "")
-            symbol = resolve_bse_symbol(bse_scrip, bse_long_name, bse_isin, db)
-            
-            headline = ann.get("HEADLINE", ann.get("NEWS_SUBJECT", "")).strip()
-            if not headline:
-                continue
-            
-            ann_date = ann.get("NEWS_DT", ann.get("DT_TM", ""))
-            evt_time = _safe_datetime(ann_date)
-            
-            h = event_hash("bse", "announcement", headline, evt_time.isoformat())
-            if is_duplicate_event(db, h):
-                continue
-            
-            attachment_url = ""
-            if ann.get("ATTACHMENTNAME"):
-                attachment_url = f"https://www.bseindia.com/xml-data/corpfiling/AttachLive/{ann['ATTACHMENTNAME']}"
-            
-            event = MarketEvent(
-                event_type="announcement",
-                source="bse",
-                symbol=symbol or None,
-                title=headline[:500],
-                description=ann.get("NEWSSUB", headline),
-                url=attachment_url,
-                raw_data=json.dumps(ann, default=str),
-                event_hash=h,
-                event_time=evt_time,
-                category=_classify_event_category("announcement", headline, ann.get("NEWSSUB", headline)),
-            )
-            try:
-                db.add(event)
-                db.commit()
-                count += 1
-                # Broadcast to SSE clients
-                sse_manager.broadcast("new_event", {
-                    "id": f"event_{event.id}",
-                    "type": "event",
-                    "event_type": event.event_type,
-                    "source": event.source,
-                    "symbol": event.symbol,
-                    "title": event.title,
-                    "description": event.description,
-                    "time": to_iso_utc(event.event_time),
-                    "category": event.category,
-                })
-            except Exception as inner_err:
-                db.rollback()
-                logger.warning(f"Failed to save BSE announcement {symbol}: {inner_err}")
-        except Exception as e:
-            logger.error(f"Error processing BSE announcement: {e}")
-            continue
-    
-    if count > 0:
-        logger.info(f"Saved {count} new announcements from BSE")
-    return count
-
-
 # ─── Financial Results ──────────────────────────────────────────────────────
 
 def fetch_financial_results(db: Session) -> int:
@@ -906,53 +711,44 @@ def fetch_financial_results(db: Session) -> int:
 
 def fetch_all_nse_bse(db: Session) -> Dict[str, int]:
     """
-    Run all NSE/BSE scrapers. Returns a dict of {source: new_count}.
-    Called by the background scheduler.
+    Run the slow-moving NSE/BSE scrapers. Returns a dict of {source: new_count}.
+
+    Corporate announcements are NOT fetched here — they belong to the unified
+    exchange hub (app/services/exchange_hub.py), which is the single owner of
+    those endpoints for both the intelligence feed and the trading engine.
     """
     config = get_intel_config()
     if not config.nse_bse.get("enabled", True):
         return {}
-    
+
     results = {}
-    
-    try:
-        results["announcements"] = fetch_corporate_announcements(db)
-    except Exception as e:
-        logger.error(f"Corporate announcements fetch failed: {e}")
-        results["announcements"] = 0
-    
+
     try:
         results["bulk_block_deals"] = fetch_bulk_block_deals(db)
     except Exception as e:
         logger.error(f"Bulk/block deals fetch failed: {e}")
         results["bulk_block_deals"] = 0
-    
+
     try:
         results["board_meetings"] = fetch_board_meetings(db)
     except Exception as e:
         logger.error(f"Board meetings fetch failed: {e}")
         results["board_meetings"] = 0
-    
+
     try:
         results["insider_trading"] = fetch_insider_trading(db)
     except Exception as e:
         logger.error(f"Insider trading fetch failed: {e}")
         results["insider_trading"] = 0
-    
-    try:
-        results["bse_announcements"] = fetch_bse_announcements(db)
-    except Exception as e:
-        logger.error(f"BSE announcements fetch failed: {e}")
-        results["bse_announcements"] = 0
-    
+
     try:
         results["financial_results"] = fetch_financial_results(db)
     except Exception as e:
         logger.error(f"Financial results fetch failed: {e}")
         results["financial_results"] = 0
-    
+
     total = sum(results.values())
     if total > 0:
         logger.info(f"NSE/BSE scrape complete: {total} new events — {results}")
-    
+
     return results

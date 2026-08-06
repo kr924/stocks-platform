@@ -3,9 +3,21 @@ import logging
 import html
 import email.utils
 import asyncio
+import sys
 import urllib.request
 import urllib.parse
 import xml.etree.ElementTree as ET
+
+# Windows consoles default to a legacy code page (cp1252) that cannot encode the
+# emoji used throughout our log and print statements. That raised
+# UnicodeEncodeError from inside the earnings AI worker and aborted the analysis
+# entirely. Force UTF-8 on the standard streams so a log line can never take down
+# a code path.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 from fastapi import FastAPI, Depends, HTTPException, Query
@@ -105,27 +117,34 @@ async def on_startup():
 
 
 async def _intelligence_scheduler():
-    """Background scheduler for all intelligence data collection and AI analysis."""
+    """
+    Background scheduler for all intelligence data collection and AI analysis.
+
+    Every task runs under a single-flight guard (see _single_flight). A cycle that
+    is still executing when its next tick comes around is skipped rather than
+    queued, which is what keeps a slow upstream (NSE timing out at 15s) from
+    building an unbounded backlog of worker threads.
+    """
     from app.services.intel_config import get_intel_config
-    
+
     logger.info("Intelligence scheduler started")
-    
-    # Track last run times for each task
+
+    # Monotonic timestamp of the last *dispatch* for each task
     last_run = {
-        "corporate_announcements": 0,
-        "other_nse_bse": 0,
-        "news": 0,
-        "social": 0,
-        "filings": 0,
-        "ai_analysis": 0,
+        "corporate_announcements": 0.0,
+        "other_nse_bse": 0.0,
+        "news": 0.0,
+        "social": 0.0,
+        "filings": 0.0,
+        "ai_analysis": 0.0,
     }
-    
+
     while True:
         try:
             config = get_intel_config()
             polling = config.polling
             now = asyncio.get_event_loop().time()
-            
+
             # Check if we're in market hours (affects polling frequency)
             market_hours = config.market_hours
             from datetime import time as dt_time
@@ -134,48 +153,41 @@ async def _intelligence_scheduler():
                 tz = zoneinfo.ZoneInfo(market_hours.get("timezone", "Asia/Kolkata"))
             except Exception:
                 tz = None
-            
+
             current_time = datetime.now(tz) if tz else datetime.now()
             market_open = dt_time(*map(int, market_hours.get("open", "09:00").split(":")))
             market_close = dt_time(*map(int, market_hours.get("close", "16:30").split(":")))
-            is_market_hours = market_open <= current_time.time() <= market_close
-            
-            multiplier = 1 if is_market_hours else polling.get("off_market_multiplier", 4)
-            
-            # Corporate Announcements Scraping (Every 1s for ultra real-time speed)
-            ann_interval = polling.get("nse_bse_announcements", 1) * multiplier
-            if now - last_run["corporate_announcements"] >= ann_interval:
-                last_run["corporate_announcements"] = now
+            is_weekday = current_time.weekday() < 5
+            is_market_hours = is_weekday and market_open <= current_time.time() <= market_close
+
+            multiplier = 1 if is_market_hours else polling.get("off_market_multiplier", 6)
+
+            def due(task: str, interval_key: str, default: int, scaled: bool = True) -> bool:
+                interval = polling.get(interval_key, default) * (multiplier if scaled else 1)
+                if now - last_run[task] >= interval:
+                    last_run[task] = now
+                    return True
+                return False
+
+            # Unified NSE+BSE corporate announcements (the real-time path)
+            if due("corporate_announcements", "nse_bse_announcements", 2):
                 asyncio.create_task(asyncio.to_thread(_run_corporate_announcements_scraper))
-            
-            # Other NSE/BSE Scraping (Every 1s)
-            other_nse_interval = polling.get("nse_bse_other", 1) * multiplier
-            if now - last_run["other_nse_bse"] >= other_nse_interval:
-                last_run["other_nse_bse"] = now
+
+            # Slow-moving NSE/BSE datasets: bulk deals, board meetings, insider, results index
+            if due("other_nse_bse", "nse_bse_other", 300):
                 asyncio.create_task(asyncio.to_thread(_run_other_nse_bse_scraper))
-            
-            # News Aggregation (Every 30s)
-            news_interval = polling.get("news_aggregator", 30) * multiplier
-            if now - last_run["news"] >= news_interval:
-                last_run["news"] = now
+
+            if due("news", "news_aggregator", 300):
                 asyncio.create_task(asyncio.to_thread(_run_news_aggregator))
-            
-            # Social Media (Every 30s)
-            social_interval = polling.get("social_media", 30) * multiplier
-            if now - last_run["social"] >= social_interval:
-                last_run["social"] = now
+
+            if due("social", "social_media", 900):
                 asyncio.create_task(asyncio.to_thread(_run_social_monitor))
-            
-            # Company Filings (Every 180s)
-            filings_interval = polling.get("company_filings", 180) * multiplier
-            if now - last_run["filings"] >= filings_interval:
-                last_run["filings"] = now
+
+            if due("filings", "company_filings", 1800):
                 asyncio.create_task(asyncio.to_thread(_run_filings_scraper))
-            
-            # AI Analysis (Every 30s)
-            ai_interval = polling.get("ai_analysis_queue", 30)
-            if now - last_run["ai_analysis"] >= ai_interval:
-                last_run["ai_analysis"] = now
+
+            # AI queue drains on its own cadence, independent of market hours
+            if due("ai_analysis", "ai_analysis_queue", 120, scaled=False):
                 asyncio.create_task(asyncio.to_thread(_run_ai_analysis))
 
             # Daily 6:00 AM IST Earnings Auto-Sync to Watchlist
@@ -189,14 +201,54 @@ async def _intelligence_scheduler():
                     await asyncio.to_thread(_run_earnings_sync)
             except Exception as e:
                 logger.error(f"6 AM IST earnings sync error: {e}")
-            
+
         except Exception as e:
             logger.error(f"Intelligence scheduler error: {e}")
-        
-        # Sleep for 1 second between loop iterations for 1-second polling responsiveness
-        await asyncio.sleep(1)
+
+        # Tick at the fastest configured cadence, but never faster than 1s.
+        try:
+            tick = max(1.0, float(get_intel_config().polling.get("nse_bse_announcements", 2)))
+        except Exception:
+            tick = 2.0
+        await asyncio.sleep(tick)
 
 
+import threading
+import functools
+
+_task_locks: Dict[str, threading.Lock] = {}
+_task_locks_guard = threading.Lock()
+
+
+def _single_flight(name: str):
+    """
+    Ensure at most one execution of a scraper is in flight at any time.
+
+    The scheduler ticks on a fixed cadence, but an upstream call can take far
+    longer than one tick (NSE routinely takes 8-15s and can hang to its timeout).
+    Without this guard each tick queues another worker, threads pile up without
+    bound, and the box saturates. A tick that arrives while the previous run is
+    still going is dropped — the next tick will pick up the fresh data anyway.
+    """
+    def decorator(fn):
+        with _task_locks_guard:
+            _task_locks.setdefault(name, threading.Lock())
+
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            lock = _task_locks[name]
+            if not lock.acquire(blocking=False):
+                logger.debug(f"[SKIP] '{name}' still running from a previous cycle")
+                return None
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                lock.release()
+        return wrapper
+    return decorator
+
+
+@_single_flight("earnings_sync")
 def _run_earnings_sync():
     """Thread-safe wrapper for daily 6 AM IST earnings watchlist sync."""
     try:
@@ -210,27 +262,39 @@ def _run_earnings_sync():
         logger.error(f"Daily earnings sync error: {e}")
 
 
+@_single_flight("corporate_announcements")
 def _run_corporate_announcements_scraper():
-    """Thread-safe wrapper for 1-second corporate announcements scraping."""
+    """
+    Thread-safe wrapper for the unified NSE+BSE corporate announcements hub.
+
+    This is the single owner of the corporate-announcements endpoints; the
+    trading engine consumes the same fetch rather than issuing its own.
+    """
     try:
-        from app.services.nse_bse_scraper import fetch_corporate_announcements
+        from app.services.exchange_hub import poll_exchange_announcements
         db = next(get_db())
         try:
-            fetch_corporate_announcements(db)
+            poll_exchange_announcements(db)
         finally:
             db.close()
     except Exception as e:
-        logger.error(f"Corporate announcements scraper error: {e}")
+        logger.error(f"Corporate announcements hub error: {e}")
 
 
+@_single_flight("other_nse_bse")
 def _run_other_nse_bse_scraper():
-    """Thread-safe wrapper for other NSE/BSE scraping."""
+    """
+    Thread-safe wrapper for the slow-moving NSE/BSE datasets.
+
+    BSE announcements are deliberately absent here — they are fetched once by the
+    unified hub above. Fetching them again in this cycle was duplicating every
+    BSE call and doubling the load on the proxy.
+    """
     try:
         from app.services.nse_bse_scraper import (
             fetch_bulk_block_deals,
             fetch_board_meetings,
             fetch_insider_trading,
-            fetch_bse_announcements,
             fetch_financial_results,
         )
         db = next(get_db())
@@ -238,7 +302,6 @@ def _run_other_nse_bse_scraper():
             fetch_bulk_block_deals(db)
             fetch_board_meetings(db)
             fetch_insider_trading(db)
-            fetch_bse_announcements(db)
             fetch_financial_results(db)
         finally:
             db.close()
@@ -246,6 +309,7 @@ def _run_other_nse_bse_scraper():
         logger.error(f"Other NSE/BSE scraper error: {e}")
 
 
+@_single_flight("news_aggregator")
 def _run_news_aggregator():
     """Thread-safe wrapper for news aggregation."""
     try:
@@ -259,6 +323,7 @@ def _run_news_aggregator():
         logger.error(f"News aggregator error: {e}")
 
 
+@_single_flight("social_monitor")
 def _run_social_monitor():
     """Thread-safe wrapper for social media monitoring."""
     try:
@@ -272,6 +337,7 @@ def _run_social_monitor():
         logger.error(f"Social monitor error: {e}")
 
 
+@_single_flight("filings_scraper")
 def _run_filings_scraper():
     """Thread-safe wrapper for filings scraping."""
     try:
@@ -285,6 +351,7 @@ def _run_filings_scraper():
         logger.error(f"Filings scraper error: {e}")
 
 
+@_single_flight("ai_analysis")
 def _run_ai_analysis():
     """Thread-safe wrapper for AI analysis."""
     try:

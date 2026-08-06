@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import (
-    get_db, TradeConfig, TradeOrder, TradeAILog,
+    get_db, TradeConfig, TradeOrder, TradeAILog, PendingResultOrder,
 )
 
 logger = logging.getLogger("app.trading_router")
@@ -62,6 +62,16 @@ class AutoTradingSettingsUpdate(BaseModel):
     custom_api_url: Optional[str] = None
     premium_openrouter_api_key: Optional[str] = None
     premium_openrouter_model: Optional[str] = None
+
+
+class PendingResultOrderRequest(BaseModel):
+    """Order details supplied from the results order screen."""
+    quantity: int = 1
+    order_type: str = "MARKET"
+    limit_price: Optional[float] = None
+    stoploss_pct: float = 2.0
+    stoploss_type: str = "software"
+    broker: str = "upstox"
 
 
 
@@ -540,6 +550,172 @@ def sync_upcoming_earnings_now(db: Session = Depends(get_db)):
     from app.services.earnings_sync import sync_earnings_to_watchlist
     res = sync_earnings_to_watchlist(db)
     return res
+
+
+# ─── Pending Financial-Result Order Prompts ─────────────────────────────────
+
+def _serialize_pending(p: PendingResultOrder, ai_log: Optional[TradeAILog] = None) -> dict:
+    return {
+        "id": p.id,
+        "symbol": p.symbol,
+        "instrument_key": p.instrument_key,
+        "isin": p.isin,
+        "exchange": p.exchange,
+        "title": p.title,
+        "description": p.description,
+        "attachment_url": p.attachment_url,
+        "event_time": p.event_time.isoformat() if p.event_time else None,
+        "status": p.status,
+        "ai_status": p.ai_status,
+        "ai_log_id": p.ai_log_id,
+        "config_id": p.config_id,
+        "created_at": p.created_at.isoformat() if p.created_at else None,
+        "resolved_at": p.resolved_at.isoformat() if p.resolved_at else None,
+        "ai_analysis": _serialize_ai_log(ai_log) if ai_log else None,
+    }
+
+
+@router.get("/pending-results")
+def list_pending_results(
+    status: Optional[str] = Query("pending"),
+    hours: int = Query(24, ge=1, le=168),
+    db: Session = Depends(get_db),
+):
+    """
+    Financial results awaiting an order decision.
+
+    These are results that landed for a stock with no armed config, so the user
+    is prompted to place an order. The AI earnings analysis is attached once it
+    finishes.
+    """
+    from datetime import timedelta
+
+    since = datetime.utcnow() - timedelta(hours=hours)
+    q = db.query(PendingResultOrder).filter(PendingResultOrder.created_at >= since)
+    if status and status != "all":
+        q = q.filter(PendingResultOrder.status == status)
+
+    pendings = q.order_by(PendingResultOrder.created_at.desc()).all()
+
+    log_ids = [p.ai_log_id for p in pendings if p.ai_log_id]
+    logs = {}
+    if log_ids:
+        for log in db.query(TradeAILog).filter(TradeAILog.id.in_(log_ids)).all():
+            logs[log.id] = log
+
+    return {
+        "pending": [_serialize_pending(p, logs.get(p.ai_log_id)) for p in pendings],
+        "total": len(pendings),
+    }
+
+
+@router.post("/pending-results/{pending_id}/order")
+def place_pending_result_order(
+    pending_id: int,
+    body: PendingResultOrderRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Place a BUY order for a financial result that arrived on an unarmed stock.
+
+    Creates the backing TradeConfig, places the order, and re-runs the earnings
+    AI with the new config attached so the analysis is linked to the position.
+    """
+    pending = db.query(PendingResultOrder).filter(PendingResultOrder.id == pending_id).first()
+    if not pending:
+        raise HTTPException(status_code=404, detail="Pending result not found")
+    if pending.status != "pending":
+        raise HTTPException(status_code=400, detail=f"Already '{pending.status}'")
+
+    from app.services.broker_gateway import get_broker
+
+    config = TradeConfig(
+        symbol=pending.symbol,
+        instrument_key=pending.instrument_key,
+        purchase_date=datetime.utcnow().strftime("%Y-%m-%d"),
+        quantity=body.quantity,
+        stoploss_pct=body.stoploss_pct,
+        stoploss_type=body.stoploss_type,
+        broker=body.broker,
+        order_type=body.order_type,
+        limit_price=body.limit_price,
+        status="triggered",
+        trigger_subject=pending.title[:200],
+        notes=f"Created from financial result #{pending.id}",
+        triggered_at=datetime.utcnow(),
+    )
+    db.add(config)
+    db.commit()
+    db.refresh(config)
+
+    broker = get_broker(body.broker)
+    result = broker.place_order(
+        symbol=pending.symbol,
+        instrument_key=pending.instrument_key or "",
+        side="BUY",
+        quantity=body.quantity,
+        order_type=body.order_type,
+        limit_price=body.limit_price,
+        stoploss_type=body.stoploss_type,
+        stoploss_pct=body.stoploss_pct,
+    )
+
+    order = TradeOrder(
+        config_id=config.id,
+        symbol=pending.symbol,
+        side="BUY",
+        quantity=body.quantity,
+        order_type=body.order_type,
+        limit_price=body.limit_price,
+        price=result.price,
+        broker=body.broker,
+        broker_order_id=result.broker_order_id,
+        broker_response=json.dumps(result.raw_response, default=str),
+        status=result.status,
+        error_message=result.message if not result.success else None,
+    )
+    db.add(order)
+
+    if result.success:
+        config.status = "bought"
+        config.buy_price = result.price
+        config.bought_at = datetime.utcnow()
+    else:
+        config.notes = f"Order from result prompt failed: {result.message}"
+
+    pending.status = "ordered"
+    pending.config_id = config.id
+    pending.resolved_at = datetime.utcnow()
+    db.commit()
+    db.refresh(config)
+
+    # Re-run the earnings analysis now that a position exists to attach it to.
+    try:
+        from app.services.results_router import run_ai_for_pending
+        run_ai_for_pending(pending.id, config_id=config.id)
+    except Exception as e:
+        logger.error(f"Failed to queue earnings AI for pending #{pending.id}: {e}")
+
+    return {
+        "success": result.success,
+        "message": result.message,
+        "pending": _serialize_pending(pending),
+        "config": _serialize_config(config),
+        "order": _serialize_order(order),
+    }
+
+
+@router.post("/pending-results/{pending_id}/dismiss")
+def dismiss_pending_result(pending_id: int, db: Session = Depends(get_db)):
+    """Dismiss a result prompt without placing an order."""
+    pending = db.query(PendingResultOrder).filter(PendingResultOrder.id == pending_id).first()
+    if not pending:
+        raise HTTPException(status_code=404, detail="Pending result not found")
+
+    pending.status = "dismissed"
+    pending.resolved_at = datetime.utcnow()
+    db.commit()
+    return {"status": "success", "pending": _serialize_pending(pending)}
 
 
 @router.get("/settings")

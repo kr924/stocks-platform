@@ -37,10 +37,43 @@ def _deep_set(d: dict, keys: list, value):
     d[keys[-1]] = value
 
 
+def _resolve_config_path(config: dict, parts: list) -> list:
+    """
+    Map the underscore-separated parts of an env var onto real config keys.
+
+    Config keys contain underscores themselves (`news_aggregator`,
+    `off_market_multiplier`, `bot_token`), so splitting on every underscore
+    produced a bogus nested path: INTEL_POLLING_NEWS_AGGREGATOR created
+    `polling.news.aggregator` and left `polling.news_aggregator` untouched, which
+    meant every documented override was silently ignored.
+
+    Walk the existing config instead, greedily matching the longest key that
+    exists at each level. Parts that match nothing become a single trailing key
+    so new values can still be introduced.
+    """
+    node = config
+    path = []
+    i = 0
+    while i < len(parts):
+        matched = False
+        for j in range(len(parts), i, -1):
+            candidate = "_".join(parts[i:j])
+            if isinstance(node, dict) and candidate in node:
+                path.append(candidate)
+                node = node[candidate]
+                i = j
+                matched = True
+                break
+        if not matched:
+            path.append("_".join(parts[i:]))
+            break
+    return path
+
+
 def _apply_env_overrides(config: dict, prefix: str = "INTEL"):
     """
     Override config values with environment variables.
-    
+
     Format: INTEL_SECTION_SUBSECTION_KEY=value
     Example: INTEL_POLLING_NEWS_AGGREGATOR=180
              INTEL_NEWS_SOURCES_NEWSDATA_IO_API_KEY=abc123
@@ -50,8 +83,9 @@ def _apply_env_overrides(config: dict, prefix: str = "INTEL"):
         if not env_key.startswith(f"{prefix}_"):
             continue
         # Convert env key to config path
-        parts = env_key[len(prefix) + 1:].lower().split("_")
-        
+        raw_parts = env_key[len(prefix) + 1:].lower().split("_")
+        parts = _resolve_config_path(config, raw_parts)
+
         # Try to convert value to appropriate type
         parsed_val: Any = env_val
         if env_val.lower() in ("true", "yes", "1"):
@@ -91,15 +125,16 @@ def _get_defaults() -> dict:
             "log_level": "INFO",
         },
         "polling": {
-            "nse_bse_announcements": 150,
-            "nse_bse_bulk_deals": 150,
-            "nse_bse_board_meetings": 150,
-            "nse_bse_insider_trading": 150,
-            "news_aggregator": 150,
-            "social_media": 150,
-            "company_filings": 900,
+            "nse_bse_announcements": 2,
+            "nse_bse_other": 300,
+            "nse_bse_bulk_deals": 300,
+            "nse_bse_board_meetings": 300,
+            "nse_bse_insider_trading": 300,
+            "news_aggregator": 300,
+            "social_media": 900,
+            "company_filings": 1800,
             "ai_analysis_queue": 120,
-            "off_market_multiplier": 4,
+            "off_market_multiplier": 6,
         },
         "market_hours": {
             "open": "09:00",
@@ -362,15 +397,10 @@ class IntelConfig:
         except Exception:
             pass
 
-        # 2. Attempt YAML persistence
-        config_path = Path(__file__).parent.parent.parent / "intelligence_config.yaml"
-        if HAS_YAML:
-            try:
-                with open(config_path, "w", encoding="utf-8") as f:
-                    yaml.safe_dump(self._config, f)
-                logger.info(f"Saved auto_trading_ai config to {config_path}")
-            except Exception as e:
-                logger.error(f"Error saving config YAML: {e}")
+        # NOTE: intentionally NOT written back to intelligence_config.yaml.
+        # yaml.safe_dump() rewrites the whole document, which strips every comment
+        # and re-serialises unrelated sections. The SQLite SystemSetting row above
+        # is the durable store; the YAML stays a hand-authored input file.
 
 
     @property

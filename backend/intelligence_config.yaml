@@ -17,18 +17,26 @@ general:
   bse_proxy_url: "https://bse-proxy.koushikreddy-work.workers.dev"
 
 # --- Polling Intervals (in seconds) ---
+# NOTE: NSE/BSE corporate announcements are served by the *unified exchange hub*
+# (app/services/exchange_hub.py). It performs ONE fetch per cycle and fans the
+# result out to both the trading engine and the intelligence pipeline, so the
+# same endpoint is never polled by more than one process.
 polling:
-  nse_bse_announcements: 1          # 1 second (ultra real-time exchange speed)
-  nse_bse_other: 1                  # 1 second
-  nse_bse_bulk_deals: 1             # 1 second
-  nse_bse_board_meetings: 1         # 1 second
-  nse_bse_insider_trading: 1        # 1 second
-  news_aggregator: 30               # 30 seconds (optimal for news RSS)
-  social_media: 30                  # 30 seconds
-  company_filings: 180              # 3 minutes
-  ai_analysis_queue: 30             # 30 seconds (optimal for AI API rate limits)
-  # Off-market hours multiplier
-  off_market_multiplier: 1          # 1x
+  # Unified NSE+BSE announcement hub — the real-time path.
+  # 2s during market hours is well inside exchange publication latency;
+  # the exchanges themselves do not update faster than this.
+  nse_bse_announcements: 2
+  # Slow-moving datasets (bulk deals, board meetings, insider trades, results index)
+  nse_bse_other: 300                # 5 minutes
+  nse_bse_bulk_deals: 300
+  nse_bse_board_meetings: 300
+  nse_bse_insider_trading: 300
+  news_aggregator: 300              # 5 minutes (RSS feeds do not update faster)
+  social_media: 900                 # 15 minutes
+  company_filings: 1800             # 30 minutes
+  ai_analysis_queue: 120            # 2 minutes (respects AI API rate limits)
+  # Off-market hours multiplier — everything backs off when markets are closed
+  off_market_multiplier: 6
 
 # --- Market Hours (IST) ---
 market_hours:

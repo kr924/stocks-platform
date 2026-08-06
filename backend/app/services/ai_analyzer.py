@@ -103,8 +103,11 @@ def _call_cloud_llm(prompt: str, event_info: str = ""):
                     pass
 
     # ── Phase 2: Ollama fallback ──
-    from app.services.intel_config import is_market_hours_ist
-    local_enabled = get_intel_config().local_llm_enabled and not is_market_hours_ist()
+    # IntelConfig.local_llm_enabled already encodes the whole policy: OFF during
+    # Mon-Fri 09:00-15:30 IST unless the AI Intelligence toggle was switched on
+    # for today's session. Re-checking market hours here would defeat that manual
+    # override, so the property is the single source of truth.
+    local_enabled = get_intel_config().local_llm_enabled
 
     if local_enabled and env.get("ollama_url"):
         try:
@@ -135,23 +138,29 @@ def _call_cloud_llm(prompt: str, event_info: str = ""):
 def _call_local_llm(prompt: str, event_info: str = ""):
     """
     Local-only LLM routing for STANDARD tier items.
-    1. Calls local Ollama if enabled in UI AND outside market hours (9am-3:30pm IST).
-    2. If market hours are active, fails, or disabled, falls back immediately to Rule Engine (0% CPU).
+
+    Ollama runs only when IntelConfig.local_llm_enabled says so. That property is
+    the single place the policy lives: OFF during Mon-Fri 09:00-15:30 IST to keep
+    the CPU free for the trading poller, ON outside those hours, and ON during
+    market hours only if the AI Intelligence toggle was switched on for today.
+    Anything else falls back to the 0% CPU rule engine.
     """
-    from app.services.intel_config import is_market_hours_ist
-    if is_market_hours_ist() or not get_intel_config().local_llm_enabled:
-        logger.info("⏸️ [LOCAL LLM DISABLED]: Market hours (9am-3:30pm IST) active or disabled from UI. Using Rule Engine (0% CPU).")
+    if not get_intel_config().local_llm_enabled:
+        logger.info(
+            "⏸️ [LOCAL LLM OFF]: Disabled for this session (market hours, or toggled off). "
+            "Using Rule Engine (0% CPU)."
+        )
         res = _smart_rule_analysis(prompt)
         return res, "rule_engine"
 
     from app.services.gemini import reload_env_vars, call_ollama
-    
+
     env = reload_env_vars()
     default_ollama = "http://host.docker.internal:11434" if os.path.exists('/.dockerenv') else "http://localhost:11434"
     ollama_url = env.get("ollama_url") or default_ollama
     ollama_model = env.get("ollama_model", "qwen2.5:3b")
     info_suffix = f" for {event_info}" if event_info else ""
-    
+
     try:
         logger.info(f"🦙 [LOCAL LLM]: Calling Ollama (15s limit){info_suffix}...")
         res = call_ollama(prompt, ollama_url, ollama_model, timeout=15)
@@ -165,15 +174,6 @@ def _call_local_llm(prompt: str, event_info: str = ""):
             pass
         res = _smart_rule_analysis(prompt)
         return res, "rule_engine"
-    
-    # Both attempts failed — return failure signal
-    logger.warning(f"🚫 [LOCAL LLM FAILED]: Ollama unavailable after 2 attempts{info_suffix}. Leaving unanalyzed for manual re-analysis.")
-    try:
-        from app.services.ai_log_tracker import record_ai_log
-        record_ai_log(f"🚫 Ollama failed after 2 attempts{info_suffix}. Awaiting manual re-analysis.", provider="ollama", tier="error", level="warning")
-    except Exception:
-        pass
-    return None, "ollama_failed"
 
 
 def _call_chosen_provider(prompt: str, provider_name: str, event_info: str = ""):
@@ -605,6 +605,89 @@ def apply_instant_tier_classification(event):
     # 'standard' tier: leave ai_analyzed_at = NULL → picked up by background queue
 
 
+def apply_news_impact_classification(event):
+    """
+    AI Intelligence scope: news-impact analysis only.
+
+    This is the classifier used by the unified exchange hub for everything that
+    is NOT a financial result. Its job is to score how a piece of news is likely
+    to move the stock — sentiment, impact score, one-line summary.
+
+    Deliberately excluded: financial-results deep analysis (PDF extraction,
+    Screener.in history, premium cloud LLM). Results are owned by the
+    auto-trading path (results_router), which already runs that analysis with the
+    trade context attached. Doing it here as well meant every result was analysed
+    twice, on the ingest thread, inside the scraper's commit loop.
+
+    Runs local Ollama or the rule engine only — never a cloud call — so it stays
+    cheap enough to execute inline during ingestion.
+    """
+    title_lower = (event.title or "").strip().lower()
+
+    # Routine filings never justify an AI call.
+    if (
+        title_lower in _SKIP_SUBJECTS
+        or any(kw in title_lower for kw in _SKIP_SUBJECT_CONTAINS)
+        or "intimation" in title_lower
+        or "notice of board meeting" in title_lower
+    ):
+        event.ai_sentiment = "neutral"
+        event.ai_impact_score = 0.0
+        event.ai_summary = f"Auto-skipped: '{event.title}' is a routine filing"
+        event.ai_affected_stocks = json.dumps([event.symbol] if event.symbol else [])
+        event.ai_provider = "auto_skip"
+        event.ai_analyzed_at = datetime.utcnow()
+        return
+
+    # Non-exchange sources stay on-demand only.
+    if (event.source or "").lower().strip() not in ("nse", "bse"):
+        event.ai_sentiment = "neutral"
+        event.ai_impact_score = 0.0
+        event.ai_summary = event.title or "Awaiting manual AI analysis"
+        event.ai_affected_stocks = json.dumps([event.symbol] if event.symbol else [])
+        event.ai_provider = "manual_pending"
+        event.ai_analyzed_at = datetime.utcnow()
+        return
+
+    try:
+        event_data = [{
+            "event_type": event.event_type,
+            "source": event.source,
+            "symbol": event.symbol,
+            "title": event.title,
+            "description": event.description or "",
+            "event_time": event.event_time.isoformat() if event.event_time else "",
+        }]
+        prompt = _build_event_analysis_prompt(event_data)
+        result, provider = _call_local_llm(
+            prompt, event_info=f"[{event.symbol or 'GENERAL'}] '{event.title}'"
+        )
+
+        if result and result.get("analyses"):
+            analysis = result["analyses"][0]
+            event.ai_sentiment = analysis.get("sentiment", "neutral")
+            event.ai_impact_score = analysis.get("impact_score", 0.0)
+            event.ai_summary = analysis.get("summary", "") or event.title
+            event.ai_affected_stocks = json.dumps(
+                analysis.get("affected_stocks") or ([event.symbol] if event.symbol else [])
+            )
+        else:
+            event.ai_sentiment = "neutral"
+            event.ai_impact_score = 0.0
+            event.ai_summary = event.title
+            event.ai_affected_stocks = json.dumps([event.symbol] if event.symbol else [])
+
+        event.ai_provider = provider
+        event.ai_analyzed_at = datetime.utcnow()
+    except Exception as e:
+        logger.error(f"News-impact analysis failed for [{event.symbol}]: {e}")
+        event.ai_sentiment = "neutral"
+        event.ai_impact_score = 0.0
+        event.ai_summary = event.title
+        event.ai_provider = "failed"
+        event.ai_analyzed_at = datetime.utcnow()
+
+
 def _auto_mark_skip(db, event, reason: str):
     """Mark an event as analyzed with neutral defaults (0 AI calls)."""
     logger.info(f"⏭️ [AI TIER: SKIP] Event #{event.id} [{event.symbol or 'GENERAL'}]: '{event.title}' — {reason}")
@@ -981,9 +1064,10 @@ def analyze_pending_events(db: Session) -> int:
                 count += 1
                 continue
             
-            # ── STANDARD — Local Ollama if enabled AND off-market, else Rule Engine ──
-            from app.services.intel_config import is_market_hours_ist
-            local_on = (not is_market_hours_ist()) and get_intel_config().local_llm_enabled
+            # ── STANDARD — Local Ollama when enabled, else Rule Engine ──
+            # local_llm_enabled already accounts for market hours and the manual
+            # AI Intelligence toggle; don't second-guess it here.
+            local_on = get_intel_config().local_llm_enabled
             prov_label = "ollama" if local_on else "rule_engine"
             tier_label = "Local Ollama" if local_on else "Rule Engine (Local LLM OFF - 0% CPU)"
             logger.info(f"⚡ [STANDARD → {tier_label}] Event #{event.id} [{event.symbol or 'GENERAL'}]: '{event.title}'")

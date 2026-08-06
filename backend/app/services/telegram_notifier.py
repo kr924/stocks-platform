@@ -32,7 +32,10 @@ def send_telegram_alert(
         try:
             from app.services.intel_config import get_intel_config
             cfg = get_intel_config()
-            telegram_cfg = cfg.raw_config.get("notifications", {}).get("telegram", {})
+            # IntelConfig exposes the parsed document as `.raw`; `.raw_config`
+            # never existed, so this fallback always raised and every alert was
+            # silently dropped whenever the env vars were unset.
+            telegram_cfg = cfg.raw.get("notifications", {}).get("telegram", {})
             bot_token = bot_token or telegram_cfg.get("bot_token", "").strip()
             chat_id = chat_id or str(telegram_cfg.get("chat_id", "")).strip()
         except Exception:

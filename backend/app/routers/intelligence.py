@@ -98,80 +98,48 @@ def get_intelligence_feed(
     if symbol:
         events_q = events_q.filter(MarketEvent.symbol == symbol.upper())
 
-    CLOUD_PROVIDERS = ["groq", "gemini", "openrouter", "openai", "anthropic", "cloud", "financial_results"]
-
-    # Define strict Finance News SQL condition according to user rules:
-    # 1. Subject contains "Outcome of Board Meeting" AND details contain "finan"
-    # 2. Subject contains "Updates" AND details contain "finan", "revenue", or "profit"
-    # 3. Subject or details contain "Acquisition", "Merger", "Dividend", "Bonus", "Split", "Financial Result", "Quarterly Result", "Audited Result"
-    # 4. Analyzed by Cloud Finance AI
-    finance_news_cond = or_(
-        and_(
-            MarketEvent.title.ilike("%Outcome of Board Meeting%"),
-            MarketEvent.description.ilike("%finan%")
-        ),
-        and_(
-            MarketEvent.title.ilike("%Update%"),
-            or_(
-                MarketEvent.description.ilike("%finan%"),
-                MarketEvent.description.ilike("%revenue%"),
-                MarketEvent.description.ilike("%profit%")
-            )
-        ),
-        MarketEvent.title.ilike("%Acquisition%"),
-        MarketEvent.title.ilike("%Merger%"),
-        MarketEvent.title.ilike("%Dividend%"),
-        MarketEvent.title.ilike("%Bonus%"),
-        MarketEvent.title.ilike("%Split%"),
-        MarketEvent.title.ilike("%Financial Result%"),
-        MarketEvent.title.ilike("%Quarterly Result%"),
-        MarketEvent.title.ilike("%Audited Result%"),
-        MarketEvent.description.ilike("%Acquisition%"),
-        MarketEvent.description.ilike("%Merger%"),
-        MarketEvent.description.ilike("%Dividend%"),
-        MarketEvent.description.ilike("%Bonus%"),
-        MarketEvent.description.ilike("%Split%"),
-        MarketEvent.category == "financial_results",
-        MarketEvent.ai_provider.in_(CLOUD_PROVIDERS)
-    )
-
     auto_skip_cond = or_(
         MarketEvent.ai_provider == "auto_skip",
         MarketEvent.category == "auto_skip",
         MarketEvent.ai_summary.ilike("Auto-skipped%")
     )
 
-    # Category handling (Strictly Mutually Exclusive across all 4 tabs)
+    # Financial results live on the Auto Trading panel, not here. The exchange
+    # hub tags them at ingestion, so this is an exact match rather than the
+    # keyword soup the feed used to re-derive on every request.
+    financial_results_cond = or_(
+        MarketEvent.category == "financial_results",
+        MarketEvent.ai_provider == "auto_trading",
+    )
+
+    # Category handling (strictly mutually exclusive across tabs)
     if category == "all_exchange":
-        # Category: All Live NSE/BSE Exchange Announcements
+        # All live NSE/BSE exchange announcements, minus results and skips
         events_q = events_q.filter(
             MarketEvent.source.in_(["nse", "bse"]),
-            ~auto_skip_cond
+            ~auto_skip_cond,
+            ~financial_results_cond,
         )
     elif category == "auto_skip":
-        # Category 4: NSE/BSE Auto-Skipped
+        # NSE/BSE auto-skipped
         events_q = events_q.filter(auto_skip_cond)
-    elif category in ("finance_ai", "all", None):
-        # Category 1: Finance News (Default View) — Strictly NSE & BSE exchange announcements
+    elif category in ("nse_bse_general", "nse_bse_active", "finance_ai", "all", None):
+        # Default view: NSE/BSE news impact, excluding financial results
         events_q = events_q.filter(
             MarketEvent.source.in_(["nse", "bse"]),
             ~auto_skip_cond,
-            finance_news_cond
-        )
-    elif category in ("nse_bse_general", "nse_bse_active"):
-        # Category 2: NSE/BSE General Updates
-        events_q = events_q.filter(
-            MarketEvent.source.in_(["nse", "bse"]),
-            ~auto_skip_cond,
-            ~finance_news_cond
+            ~financial_results_cond,
         )
     elif category == "other_news":
-        # Category 3: Other Market News (Media stories & web updates)
+        # Other market news (media stories & web updates)
         events_q = events_q.filter(
             MarketEvent.source.notin_(["nse", "bse"]),
             ~auto_skip_cond,
-            ~finance_news_cond
+            ~financial_results_cond,
         )
+    elif category == "financial_results":
+        # Explicit opt-in, used by the Auto Trading panel
+        events_q = events_q.filter(financial_results_cond)
     elif category not in ("news", "filing"):
         events_q = events_q.filter(MarketEvent.category == category)
     if search:
