@@ -13,6 +13,8 @@ general:
   database_url: "sqlite:///./market_tracker.db"
   # Log level: DEBUG, INFO, WARNING, ERROR
   log_level: "INFO"
+  # Cloudflare Worker proxy for BSE API to bypass geo-blocking
+  bse_proxy_url: "https://bse-proxy.koushikreddy-work.workers.dev"
 
 # --- Polling Intervals (in seconds) ---
 polling:

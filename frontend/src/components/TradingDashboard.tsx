@@ -338,7 +338,7 @@ export function TradingDashboard() {
         fetch(`${API_BASE}/api/trading/ai-logs`),
         fetch(`${API_BASE}/api/trading/poller/status`),
         fetch(`${API_BASE}/api/trading/settings`),
-        fetch(`${API_BASE}/api/intelligence/feed?hours=24&category=all_exchange`),
+        fetch(`${API_BASE}/api/intelligence/feed?hours=24&category=finance_news`),
       ]);
 
       if (configsRes.ok) {
@@ -368,8 +368,8 @@ export function TradingDashboard() {
       }
       if (feedRes.ok) {
         const data = await feedRes.json();
-        const filtered = (data.feed_items || []).filter((item: any) =>
-          item.source === "nse" && item.event_type === "announcement"
+        const filtered = (data.items || []).filter((item: any) =>
+          (item.source === "nse" || item.source === "bse") && item.event_type === "announcement"
         );
         setNseAnnouncements(filtered);
       }
@@ -2258,7 +2258,7 @@ export function TradingDashboard() {
           }}>
             <h3 style={{ fontSize: "14px", fontWeight: "700", color: "#f8fafc", marginBottom: "14px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <Sparkles size={16} className="text-blue-400" /> Live NSE Corporate Announcements ({nseAnnouncements.length})
+                <Sparkles size={16} className="text-blue-400" /> Live Results & Corporate Announcements ({nseAnnouncements.length})
               </span>
               <span style={{ fontSize: "10px", color: "#60a5fa", background: "rgba(59,130,246,0.1)", padding: "2px 8px", borderRadius: "12px" }}>
                 Real-Time AI
@@ -2292,6 +2292,19 @@ export function TradingDashboard() {
                           >
                             #{ann.symbol}
                           </span>
+                          {ann.source && (
+                            <span style={{ 
+                              fontSize: "9px", 
+                              color: ann.source === "nse" ? "#60a5fa" : "#f43f5e", 
+                              backgroundColor: ann.source === "nse" ? "rgba(96,165,250,0.15)" : "rgba(244,63,94,0.15)",
+                              padding: "1px 5px", 
+                              borderRadius: "3px",
+                              fontWeight: "800",
+                              textTransform: "uppercase"
+                            }}>
+                              {ann.source}
+                            </span>
+                          )}
                           {ann.time && (
                             <span style={{ fontSize: "10px", color: "#64748b", fontWeight: "600" }}>
                               🕒 {new Date(ann.time).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}

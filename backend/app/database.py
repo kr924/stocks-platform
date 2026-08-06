@@ -318,6 +318,13 @@ class TradeAILog(Base):
 # ─── Database Initialization ────────────────────────────────────────────────
 
 def init_db():
+    if "sqlite" in str(engine.url):
+        with engine.begin() as conn:
+            try:
+                conn.execute(text("PRAGMA journal_mode=WAL;"))
+                conn.execute(text("PRAGMA synchronous=NORMAL;"))
+            except Exception:
+                pass
     Base.metadata.create_all(bind=engine)
     # Safely alter table to add columns if migrating from an older database schema
     with engine.begin() as conn:

@@ -146,37 +146,37 @@ async def _intelligence_scheduler():
             ann_interval = polling.get("nse_bse_announcements", 1) * multiplier
             if now - last_run["corporate_announcements"] >= ann_interval:
                 last_run["corporate_announcements"] = now
-                await asyncio.to_thread(_run_corporate_announcements_scraper)
+                asyncio.create_task(asyncio.to_thread(_run_corporate_announcements_scraper))
             
             # Other NSE/BSE Scraping (Every 1s)
             other_nse_interval = polling.get("nse_bse_other", 1) * multiplier
             if now - last_run["other_nse_bse"] >= other_nse_interval:
                 last_run["other_nse_bse"] = now
-                await asyncio.to_thread(_run_other_nse_bse_scraper)
+                asyncio.create_task(asyncio.to_thread(_run_other_nse_bse_scraper))
             
             # News Aggregation (Every 30s)
             news_interval = polling.get("news_aggregator", 30) * multiplier
             if now - last_run["news"] >= news_interval:
                 last_run["news"] = now
-                await asyncio.to_thread(_run_news_aggregator)
+                asyncio.create_task(asyncio.to_thread(_run_news_aggregator))
             
             # Social Media (Every 30s)
             social_interval = polling.get("social_media", 30) * multiplier
             if now - last_run["social"] >= social_interval:
                 last_run["social"] = now
-                await asyncio.to_thread(_run_social_monitor)
+                asyncio.create_task(asyncio.to_thread(_run_social_monitor))
             
             # Company Filings (Every 180s)
             filings_interval = polling.get("company_filings", 180) * multiplier
             if now - last_run["filings"] >= filings_interval:
                 last_run["filings"] = now
-                await asyncio.to_thread(_run_filings_scraper)
+                asyncio.create_task(asyncio.to_thread(_run_filings_scraper))
             
             # AI Analysis (Every 30s)
             ai_interval = polling.get("ai_analysis_queue", 30)
             if now - last_run["ai_analysis"] >= ai_interval:
                 last_run["ai_analysis"] = now
-                await asyncio.to_thread(_run_ai_analysis)
+                asyncio.create_task(asyncio.to_thread(_run_ai_analysis))
 
             # Daily 6:00 AM IST Earnings Auto-Sync to Watchlist
             try:

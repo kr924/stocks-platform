@@ -18,6 +18,43 @@ from app.services.intel_config import get_intel_config
 from app.services.deduplication import event_hash, is_duplicate_event, to_iso_utc
 from app.services.sse_manager import sse_manager
 
+def resolve_bse_symbol(scrip_cd: str, slongname: str, isin_code: str, db: Session) -> str:
+    """Resolve BSE scrip_cd / long name / ISIN to the standard NSE symbol using cache mapping."""
+    from app.main import get_nse_equities
+    
+    scrip_cd = str(scrip_cd or "").strip().upper()
+    slongname = str(slongname or "").strip().upper()
+    isin_code = str(isin_code or "").strip().upper()
+    
+    # 1. Try mapping via ISIN first
+    if isin_code:
+        try:
+            equities = get_nse_equities()
+            for eq in equities:
+                eq_key = eq.get("key", "")
+                eq_isin = eq_key.split("|")[-1] if "|" in eq_key else eq_key
+                if eq_isin.upper() == isin_code:
+                    return eq.get("symbol").upper()
+        except Exception:
+            pass
+
+    # 2. Try mapping via long company name
+    if slongname:
+        try:
+            equities = get_nse_equities()
+            for eq in equities:
+                eq_name = str(eq.get("name") or "").strip().upper()
+                if eq_name and (slongname == eq_name or slongname.startswith(eq_name) or eq_name.startswith(slongname)):
+                    return eq.get("symbol").upper()
+        except Exception:
+            pass
+
+    # 3. Fallback: Parse from Scrip Code / Long Name directly
+    if scrip_cd and not scrip_cd.isdigit():
+        return scrip_cd
+        
+    return scrip_cd or slongname
+
 logger = logging.getLogger("app.nse_bse_scraper")
 
 
@@ -105,21 +142,64 @@ class NSESession:
 
 
 class BSESession:
-    """Simple session for BSE API calls."""
+    """Simple session for BSE API calls with Cloudflare worker proxy support."""
     
     def __init__(self):
         self.session = requests.Session()
+        self.config = get_intel_config()
         self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json, text/plain, */*",
             "Referer": "https://www.bseindia.com/",
         })
-    
-    def get(self, url: str, params: dict = None, timeout: int = 15) -> Optional[Any]:
-        """Make a GET request to BSE API."""
+        self._last_cookie_refresh = 0
+        
+    def _refresh_cookies(self):
+        """Visit BSE homepage first to establish session cookies if not using Cloudflare worker."""
+        now = time.time()
+        if now - self._last_cookie_refresh < 300:
+            return
         try:
-            resp = self.session.get(url, params=params, timeout=timeout)
+            self.session.get("https://www.bseindia.com/", timeout=10)
+            self._last_cookie_refresh = now
+        except Exception as e:
+            logger.debug(f"BSE homepage cookie refresh failed: {e}")
+
+    def get(self, url: str, params: dict = None, timeout: int = 15) -> Optional[Any]:
+        """Make a GET request to BSE API with browser cookie management and Cloudflare worker proxy support."""
+        try:
+            proxy_url = self.config.general.get("bse_proxy_url") or ""
+            proxy_url = proxy_url.strip()
+            
+            # If using Cloudflare worker proxy, rewrite the endpoint URL
+            if proxy_url and "workers.dev" in proxy_url:
+                if not proxy_url.startswith("http"):
+                    proxy_url = "https://" + proxy_url
+                
+                # Convert params to query string
+                import urllib.parse
+                query_str = urllib.parse.urlencode(params) if params else ""
+                
+                # Rebuild target URL to hit Cloudflare Worker directly
+                request_url = proxy_url.rstrip("/")
+                if "?" in request_url:
+                    request_url += "&" + query_str
+                else:
+                    request_url += "/?" + query_str
+                
+                resp = self.session.get(request_url, timeout=timeout)
+            else:
+                # Direct route (refresh cookies first)
+                self._refresh_cookies()
+                resp = self.session.get(url, params=params, timeout=timeout)
+                
             resp.raise_for_status()
+            
+            # Handle text responses like "No Record Found!"
+            text_data = resp.text.strip()
+            if text_data == '"No Record Found!"' or text_data == 'No Record Found!':
+                return {"Table": []}
+                
             return resp.json()
         except Exception as e:
             logger.error(f"BSE API error for {url}: {e}")
@@ -185,12 +265,16 @@ def _safe_datetime(date_str: str, formats: List[str] = None) -> datetime:
             
     return datetime.utcnow()
 
-
-def _classify_event_category(event_type: str, title: str) -> str:
-    """Auto-classify a market event into a category based on event_type and title keywords."""
+def _classify_event_category(event_type: str, title: str, description: str = "") -> str:
+    """Auto-classify a market event into a category based on event_type, title, and description."""
     t = title.lower()
+    desc = (description or "").lower()
     et = event_type.lower()
     
+    # 1. Subject contains "Outcome of Board Meeting" AND details contains "finan"
+    if "outcome of board meeting" in t and "finan" in desc:
+        return "earnings"
+        
     if et == "board_meeting":
         if any(kw in t for kw in ["financial result", "quarterly", "annual", "dividend"]):
             return "earnings"
@@ -210,8 +294,6 @@ def _classify_event_category(event_type: str, title: str) -> str:
     if any(kw in t for kw in ["board meeting", "board"]):
         return "board_meeting"
     return "general"
-
-
 # ─── Corporate Announcements ───────────────────────────────────────────────
 
 def fetch_corporate_announcements(db: Session) -> int:
@@ -266,8 +348,9 @@ def fetch_corporate_announcements(db: Session) -> int:
                     raw_data=json.dumps(ann, default=str),
                     event_hash=h,
                     event_time=evt_time,
-                    category=_classify_event_category("announcement", subject),
+                    category=_classify_event_category("announcement", subject, ann.get("attchmntText", ann.get("description", subject))),
                 )
+
                 if apply_instant_tier_classification:
                     apply_instant_tier_classification(event)
                 try:
@@ -311,7 +394,11 @@ def fetch_corporate_announcements(db: Session) -> int:
         if isinstance(bse_items, list):
             for ann in bse_items:
                 try:
-                    symbol = ann.get("SLONGNAME", ann.get("SCRIP_CD", ann.get("scrip_cd", ""))).strip().upper()
+                    bse_scrip = ann.get("SCRIP_CD", ann.get("scrip_cd", ""))
+                    bse_long_name = ann.get("SLONGNAME", "")
+                    bse_isin = ann.get("ISIN_CODE", "")
+                    symbol = resolve_bse_symbol(bse_scrip, bse_long_name, bse_isin, db)
+                    
                     subject = ann.get("NEWSSUB", ann.get("HEADLINE", ann.get("news_sub", ""))).strip()
                     if not subject:
                         continue
@@ -328,17 +415,21 @@ def fetch_corporate_announcements(db: Session) -> int:
                     except ImportError:
                         apply_instant_tier_classification = None
 
+                    attachment_url = ""
+                    if ann.get("ATTACHMENTNAME"):
+                        attachment_url = f"https://www.bseindia.com/xml-data/corpfiling/AttachLive/{ann['ATTACHMENTNAME']}"
+
                     event = MarketEvent(
                         event_type="announcement",
                         source="bse",
                         symbol=symbol or None,
                         title=subject[:500],
                         description=ann.get("MORE", ann.get("NEWS_BODY", subject)),
-                        url=ann.get("ATTACHMENTNAME", ""),
+                        url=attachment_url,
                         raw_data=json.dumps(ann, default=str),
                         event_hash=h,
                         event_time=evt_time,
-                        category=_classify_event_category("announcement", subject),
+                        category=_classify_event_category("announcement", subject, ann.get("MORE", ann.get("NEWS_BODY", subject))),
                     )
                     if apply_instant_tier_classification:
                         apply_instant_tier_classification(event)
@@ -676,7 +767,11 @@ def fetch_bse_announcements(db: Session) -> int:
     count = 0
     for ann in table:
         try:
-            symbol = ann.get("SLONGNAME", ann.get("SCRIP_CD", "")).strip()
+            bse_scrip = ann.get("SCRIP_CD", ann.get("scrip_cd", ""))
+            bse_long_name = ann.get("SLONGNAME", "")
+            bse_isin = ann.get("ISIN_CODE", "")
+            symbol = resolve_bse_symbol(bse_scrip, bse_long_name, bse_isin, db)
+            
             headline = ann.get("HEADLINE", ann.get("NEWS_SUBJECT", "")).strip()
             if not headline:
                 continue
@@ -702,6 +797,7 @@ def fetch_bse_announcements(db: Session) -> int:
                 raw_data=json.dumps(ann, default=str),
                 event_hash=h,
                 event_time=evt_time,
+                category=_classify_event_category("announcement", headline, ann.get("NEWSSUB", headline)),
             )
             try:
                 db.add(event)
