@@ -13,8 +13,14 @@ general:
   database_url: "sqlite:///./market_tracker.db"
   # Log level: DEBUG, INFO, WARNING, ERROR
   log_level: "INFO"
-  # Cloudflare Worker proxy for BSE API to bypass geo-blocking
-  bse_proxy_url: "https://bse-proxy.koushikreddy-work.workers.dev"
+  # Cloudflare Worker proxy for the BSE API.
+  # Disabled: the worker is hardcoded to the retired AnnGetData endpoint, so it
+  # answers HTTP 200 "No Record Found!" for every query — a success-shaped
+  # failure that silently starved the BSE feed. Direct calls to api.bseindia.com
+  # succeed from the Oracle VM in ~0.1s, so no proxy is needed. Set this again
+  # only if BSE starts geo-blocking, and point the worker at the current
+  # AnnSubCategoryGetData endpoint first.
+  bse_proxy_url: ""
 
 # --- Polling Intervals (in seconds) ---
 # NOTE: NSE/BSE corporate announcements are served by the *unified exchange hub*
@@ -63,7 +69,11 @@ nse_bse:
     corporate_announcements:
       enabled: true
       nse_url: "https://www.nseindia.com/api/corporate-announcements?index=equities"
-      bse_url: "https://api.bseindia.com/BseIndiaAPI/api/AnnGetData/w"
+      # AnnGetData was retired and now answers "No Record Found!" to every query.
+      # AnnSubCategoryGetData is the endpoint the BSE site itself calls, and it
+      # additionally returns SUBCATNAME, which classifies far better than the
+      # broad CATEGORYNAME.
+      bse_url: "https://api.bseindia.com/BseIndiaAPI/api/AnnSubCategoryGetData/w"
     bulk_block_deals:
       enabled: true
       nse_url: "https://www.nseindia.com/api/snapshot-capital-market-largedeal"

@@ -119,15 +119,23 @@ def _fetch_bse_raw() -> List[dict]:
 
     config = get_intel_config()
     source_config = config.nse_bse.get("sources", {}).get("corporate_announcements", {})
-    url = source_config.get("bse_url", "https://api.bseindia.com/BseIndiaAPI/api/AnnGetData/w")
+    url = source_config.get(
+        "bse_url", "https://api.bseindia.com/BseIndiaAPI/api/AnnSubCategoryGetData/w"
+    )
 
+    # BSE wants a same-day window here. A multi-day range (strPrevDate set to
+    # yesterday) makes this endpoint return zero rows rather than a superset,
+    # which is one of the reasons the feed looked dead.
     today = datetime.now().strftime("%Y%m%d")
-    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
-    # strCat=-1 pulls every category in a single call; we classify locally so a
-    # miscategorised filing is still caught (news_fetching_strategy.md §4).
+    # strCat=-1 / subcategory=-1 pull every category in a single call; we
+    # classify locally so a miscategorised filing is still caught
+    # (news_fetching_strategy.md §4). pageno=1 returns the newest 50, which is
+    # all a real-time poller needs.
     params = {
+        "pageno": "1",
         "strCat": "-1",
-        "strPrevDate": yesterday,
+        "subcategory": "-1",
+        "strPrevDate": today,
         "strScrip": "",
         "strSearch": "P",
         "strToDate": today,
@@ -179,18 +187,44 @@ def _normalize_nse(raw: dict) -> Optional[Announcement]:
     )
 
 
+def _strip_bse_subject_prefix(newssub: str, long_name: str, scrip_code: str) -> str:
+    """
+    Pull the actual subject out of BSE's NEWSSUB field.
+
+    BSE prefixes it with the company name and scrip code, e.g.
+    "Jindal Poly Investment and Finance Company Ltd - 536773 - Announcement
+    under Regulation 30". Only the tail is the subject, and leaving the prefix
+    in place skews keyword classification and makes feed titles unreadable.
+    """
+    subject = (newssub or "").strip()
+    if not subject:
+        return subject
+
+    # Drop a leading "<company> - <scrip> - " prefix when both parts match.
+    parts = [p.strip() for p in subject.split(" - ")]
+    if len(parts) >= 3:
+        name_matches = long_name and parts[0].lower().startswith(long_name.lower()[:20])
+        code_matches = scrip_code and parts[1] == str(scrip_code)
+        if name_matches or code_matches:
+            return " - ".join(parts[2:]).strip() or subject
+    return subject
+
+
 def _normalize_bse(raw: dict, db: Session) -> Optional[Announcement]:
     from app.services.nse_bse_scraper import _safe_datetime, resolve_bse_symbol
 
-    subject = str(
-        raw.get("NEWSSUB") or raw.get("HEADLINE") or raw.get("news_sub") or ""
-    ).strip()
+    scrip_code = str(raw.get("SCRIP_CD") or raw.get("scrip_cd") or "").strip()
+    long_name = str(raw.get("SLONGNAME") or "").strip()
+    # AnnSubCategoryGetData does not return ISIN_CODE, so the ticker resolved
+    # from the scrip code / company name is the identifier BSE and NSE share.
+    isin = str(raw.get("ISIN_CODE") or "").strip().upper()
+
+    subject = _strip_bse_subject_prefix(
+        str(raw.get("NEWSSUB") or raw.get("HEADLINE") or "").strip(), long_name, scrip_code
+    )
     if not subject:
         return None
 
-    scrip_code = str(raw.get("SCRIP_CD") or raw.get("scrip_cd") or "").strip()
-    long_name = str(raw.get("SLONGNAME") or "").strip()
-    isin = str(raw.get("ISIN_CODE") or "").strip().upper()
     symbol = resolve_bse_symbol(scrip_code, long_name, isin, db)
 
     attachment_name = str(raw.get("ATTACHMENTNAME") or "").strip()
@@ -199,18 +233,26 @@ def _normalize_bse(raw: dict, db: Session) -> Optional[Announcement]:
         if attachment_name else ""
     )
 
-    ann_date = str(raw.get("NEWS_DT") or raw.get("DT_TM") or raw.get("dissemdt") or "").strip()
+    ann_date = str(
+        raw.get("NEWS_DT") or raw.get("DissemDT") or raw.get("DT_TM") or ""
+    ).strip()
+
+    # SUBCATNAME ("Outcome of Board Meeting", "Change in Management") is far more
+    # specific than CATEGORYNAME ("Company Update") and maps directly onto the
+    # subcategory column in news_fetching_strategy.md.
+    subcat = str(raw.get("SUBCATNAME") or "").strip()
+    category_name = subcat or str(raw.get("CATEGORYNAME") or "").strip()
 
     return Announcement(
         exchange="bse",
         symbol=(symbol or "").strip().upper(),
         title=subject,
-        description=str(raw.get("MORE") or raw.get("NEWS_BODY") or subject),
+        description=str(raw.get("MORE") or raw.get("HEADLINE") or subject),
         url=attachment_url,
         pdf_filename=attachment_name,
         isin=isin,
         scrip_code=scrip_code,
-        category_name=str(raw.get("CATEGORYNAME") or raw.get("CategoryName") or "").strip(),
+        category_name=category_name,
         event_time=_safe_datetime(ann_date),
         raw=raw,
     )

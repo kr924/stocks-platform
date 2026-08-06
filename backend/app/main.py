@@ -3,6 +3,7 @@ import logging
 import html
 import email.utils
 import asyncio
+import os
 import sys
 import urllib.request
 import urllib.parse
@@ -18,6 +19,17 @@ for _stream in (sys.stdout, sys.stderr):
         _stream.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
+
+# Nothing ever called basicConfig, so every logger.info/error in this codebase
+# was discarded — only uvicorn's own access log reached the container output.
+# That is how a dead BSE endpoint stayed invisible: the handler logged the
+# failure on every cycle and none of it was ever written anywhere.
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
+    stream=sys.stdout,
+    force=True,
+)
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 from fastapi import FastAPI, Depends, HTTPException, Query

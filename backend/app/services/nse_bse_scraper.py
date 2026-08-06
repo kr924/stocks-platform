@@ -6,6 +6,7 @@ Stores results in the MarketEvent table with deduplication via event_hash.
 """
 import json
 import logging
+import re
 import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
@@ -25,8 +26,80 @@ _bse_isin_index: Optional[Dict[str, str]] = None
 _bse_name_index: Optional[Dict[str, str]] = None
 
 
+_COMPANY_SUFFIXES = (
+    "LIMITED", "LTD", "PRIVATE", "PVT", "CORPORATION", "CORP",
+    "INCORPORATED", "INC", "COMPANY",
+)
+
+
+def _norm_company_name(name: str) -> str:
+    """
+    Reduce a company name to a form that matches across exchanges.
+
+    BSE and NSE spell the same registrant differently — "Tata Consultancy
+    Services Ltd" versus "TATA CONSULTANCY SERVICES LIMITED" — so a literal
+    comparison misses dual-listed companies. Since BSE's current endpoint
+    returns no ISIN, the company name is the only join left, and a miss here
+    means the same financial result gets processed twice, once per exchange.
+    """
+    if not name:
+        return ""
+    collapsed = re.sub(r"[^A-Za-z0-9]+", "", name).upper()
+    # Strip trailing legal-form suffixes, repeatedly ("... PVT LTD").
+    changed = True
+    while changed:
+        changed = False
+        for suffix in _COMPANY_SUFFIXES:
+            if collapsed.endswith(suffix) and len(collapsed) > len(suffix) + 3:
+                collapsed = collapsed[: -len(suffix)]
+                changed = True
+    return collapsed
+
+
+# A shared prefix must be at least this long, and cover at least this much of
+# the shorter name, to count as the same company. Tuned so "TATACONSULTANCYSERV"
+# joins the two spellings of TCS while "BAJAJFIN" does not merge Bajaj Finance
+# with Bajaj Finserv.
+_PREFIX_MIN_CHARS = 10
+_PREFIX_MIN_RATIO = 0.85
+
+
+def _best_prefix_match(norm: str, name_index: Dict[str, str]) -> Optional[str]:
+    """
+    Find the NSE symbol whose normalised name shares the longest prefix with
+    `norm`, provided the overlap is decisive.
+
+    Exact and simple prefix matching is not enough because the NSE instrument
+    dump truncates names to roughly 24 characters and mangles the suffix in the
+    process: TCS is listed as "TATA CONSULTANCY SERV LT", which neither equals
+    nor prefixes BSE's "Tata Consultancy Services Ltd".
+    """
+    best_symbol = None
+    best_len = 0
+    best_gap = None
+    for eq_name, symbol in name_index.items():
+        limit = min(len(norm), len(eq_name))
+        if limit < _PREFIX_MIN_CHARS:
+            continue
+        i = 0
+        while i < limit and norm[i] == eq_name[i]:
+            i += 1
+        if i < _PREFIX_MIN_CHARS or i / limit < _PREFIX_MIN_RATIO:
+            continue
+        # Longest shared prefix wins; ties go to the closest overall length so
+        # the result does not depend on dict ordering. Without this, a parent and
+        # its demerged sibling ("TATA MOTORS LIMITED" vs "TATA MOTORS PASS VEH
+        # LTD") could resolve differently between runs.
+        gap = abs(len(eq_name) - len(norm))
+        if i > best_len or (i == best_len and best_gap is not None and gap < best_gap):
+            best_len = i
+            best_gap = gap
+            best_symbol = symbol
+    return best_symbol
+
+
 def _build_symbol_indexes() -> tuple:
-    """Build (isin -> symbol, upper_name -> symbol) indexes from the NSE equity list."""
+    """Build (isin -> symbol, normalised_name -> symbol) indexes from the NSE equity list."""
     global _bse_isin_index, _bse_name_index
     if _bse_isin_index is not None and _bse_name_index is not None:
         return _bse_isin_index, _bse_name_index
@@ -35,7 +108,10 @@ def _build_symbol_indexes() -> tuple:
     name_index: Dict[str, str] = {}
     try:
         from app.main import get_nse_equities
-        for eq in get_nse_equities():
+        equities = get_nse_equities()
+        if not equities:
+            return isin_index, name_index
+        for eq in equities:
             symbol = (eq.get("symbol") or "").strip().upper()
             if not symbol:
                 continue
@@ -43,9 +119,9 @@ def _build_symbol_indexes() -> tuple:
             isin = (key.split("|")[-1] if "|" in key else key).strip().upper()
             if isin:
                 isin_index.setdefault(isin, symbol)
-            name = (eq.get("name") or "").strip().upper()
-            if name:
-                name_index.setdefault(name, symbol)
+            norm_name = _norm_company_name(eq.get("name") or "")
+            if norm_name:
+                name_index.setdefault(norm_name, symbol)
     except Exception as e:
         logger.debug(f"Failed to build symbol indexes: {e}")
         # Leave the caches unset so a later call can retry once the list loads.
@@ -57,33 +133,40 @@ def _build_symbol_indexes() -> tuple:
 
 
 def resolve_bse_symbol(scrip_cd: str, slongname: str, isin_code: str, db: Session) -> str:
-    """Resolve BSE scrip_cd / long name / ISIN to the standard NSE symbol."""
+    """
+    Resolve BSE scrip_cd / long name / ISIN to the standard NSE symbol.
+
+    Returns the scrip code unchanged for BSE-only listings, which have no NSE
+    ticker to resolve to.
+    """
     scrip_cd = str(scrip_cd or "").strip().upper()
-    slongname = str(slongname or "").strip().upper()
+    slongname = str(slongname or "").strip()
     isin_code = str(isin_code or "").strip().upper()
 
     isin_index, name_index = _build_symbol_indexes()
 
-    # 1. ISIN is the authoritative join between the two exchanges.
+    # 1. ISIN is the authoritative join, when the endpoint provides one.
     if isin_code:
         hit = isin_index.get(isin_code)
         if hit:
             return hit
 
-    # 2. Exact company-name match, then prefix match in either direction.
+    # 2. Company name, normalised past punctuation and legal-form suffixes.
     if slongname:
-        hit = name_index.get(slongname)
-        if hit:
-            return hit
-        for eq_name, symbol in name_index.items():
-            if slongname.startswith(eq_name) or eq_name.startswith(slongname):
-                return symbol
+        norm = _norm_company_name(slongname)
+        if norm:
+            hit = name_index.get(norm)
+            if hit:
+                return hit
+            best = _best_prefix_match(norm, name_index)
+            if best:
+                return best
 
     # 3. Fallback: a non-numeric scrip code is already a ticker.
     if scrip_cd and not scrip_cd.isdigit():
         return scrip_cd
 
-    return scrip_cd or slongname
+    return scrip_cd or slongname.upper()
 
 logger = logging.getLogger("app.nse_bse_scraper")
 
@@ -244,11 +327,30 @@ class BSESession:
             return {"Table": []}
         return resp.json()
 
+    @staticmethod
+    def _is_empty(data: Any) -> bool:
+        """True when a parsed BSE response carries no rows."""
+        if data is None:
+            return True
+        if isinstance(data, dict):
+            table = data.get("Table", data.get("data"))
+            return not table
+        if isinstance(data, list):
+            return not data
+        return False
+
     def get(self, url: str, params: dict = None, timeout: int = 15) -> Optional[Any]:
         """
         GET a BSE endpoint, preferring the proxy and falling back to direct.
 
-        Returns parsed JSON, or None only when *both* routes fail.
+        An *empty* proxy response also falls through to the direct route. A proxy
+        pinned to a retired endpoint answers HTTP 200 "No Record Found!" to every
+        query — a success-shaped failure that is indistinguishable from a quiet
+        day, and that silently starved this feed for weeks. Verifying emptiness
+        against the origin costs one extra call on genuinely quiet cycles and
+        makes that failure mode impossible to miss.
+
+        Returns parsed JSON, or None only when every route fails.
         """
         import urllib.parse
 
@@ -261,11 +363,13 @@ class BSESession:
                 resp = self.session.get(request_url, timeout=self.PROXY_TIMEOUT)
                 data = self._parse(resp)
                 self._proxy_failures = 0
-                return data
+                if not self._is_empty(data):
+                    return data
+                logger.debug("BSE proxy returned no rows; confirming against the direct API.")
             except Exception as e:
                 self._record_proxy_failure(e)
 
-        # Direct route — either the proxy is unavailable or it just failed.
+        # Direct route — the proxy is unavailable, failed, or returned nothing.
         try:
             self._refresh_cookies()
             resp = self.session.get(url, params=params, timeout=timeout)

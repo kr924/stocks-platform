@@ -89,6 +89,30 @@ CHANNEL_BOARD_OUTCOME = "board_meeting_outcome"
 CHANNEL_DIRECT_RESULT = "direct_result"
 
 
+# BSE subcategories that are never a results filing, however much results
+# language their body carries. An investor presentation or an analyst-meet
+# intimation routinely discusses "the financial results for the quarter", and
+# treating that as the result itself both fires a false trade trigger and burns
+# the cross-channel dedup key that the real filing needs.
+_NON_RESULT_SUBCATEGORIES = (
+    "investor presentation",
+    "analyst",
+    "investor meet",
+    "press release",
+    "media release",
+    "newspaper",
+    "earnings call",
+    "transcript",
+    "audio",
+    "video",
+    "annual report",
+    "postal ballot",
+    "trading window",
+    "corporate governance",
+    "shareholding",
+)
+
+
 def is_financial_result(title: str, description: str = "", category_name: str = "") -> Tuple[bool, Optional[str]]:
     """
     Decide whether an announcement is a financial-results filing.
@@ -96,38 +120,41 @@ def is_financial_result(title: str, description: str = "", category_name: str = 
     Returns (is_result, channel) where channel is CHANNEL_BOARD_OUTCOME,
     CHANNEL_DIRECT_RESULT, or None.
 
-    The subject line carries the signal; the attachment/detail text is used as a
-    secondary source because many filers put "Financial Results" only in the body.
+    The decision rests on the *subject*, not the body. BSE's subject is often a
+    generic "Announcement under Regulation 30 (LODR)" with the real descriptor in
+    SUBCATNAME, so the subcategory is treated as part of the subject. The body is
+    consulted only to confirm a board-meeting outcome, because a body mentioning
+    "financial results" is far too common to be evidence on its own.
     """
     subject = (title or "").strip()
     body = (description or "").strip()
     cat = (category_name or "").strip().lower()
-    haystack = f"{subject} {body}"
+    # On BSE the subcategory carries the real subject, so classify on both.
+    subject_text = f"{subject} {cat}".strip()
 
     # A notice of an upcoming meeting is a calendar entry, not a result.
-    if _FORWARD_LOOKING.search(subject):
+    if _FORWARD_LOOKING.search(subject_text):
         return False, None
 
     # Hard negatives win — a board outcome about fundraising is not a result.
-    if _RESULT_NEGATIVE.search(subject):
+    if _RESULT_NEGATIVE.search(subject_text):
         return False, None
 
-    positive = bool(_RESULT_POSITIVE.search(haystack))
+    # Presentations, analyst meets and press releases discuss results without
+    # being one.
+    if any(nr in cat for nr in _NON_RESULT_SUBCATEGORIES):
+        return False, None
 
-    # Channel 2 — explicit result filing.
-    if cat.startswith("result") or _RESULT_POSITIVE.search(subject):
-        if positive:
-            return True, CHANNEL_DIRECT_RESULT
+    # Channel 2 — explicit result filing, declared in the subject/subcategory.
+    if cat.startswith("result") or _RESULT_POSITIVE.search(subject_text):
+        return True, CHANNEL_DIRECT_RESULT
 
-    # Channel 1 — board meeting outcome that mentions results.
-    if _BOARD_OUTCOME.search(subject) or cat.startswith("board meeting"):
-        if positive:
+    # Channel 1 — board-meeting outcome whose subject or body confirms results.
+    if _BOARD_OUTCOME.search(subject_text) or cat.startswith("board meeting"):
+        if _RESULT_POSITIVE.search(f"{subject_text} {body}"):
             return True, CHANNEL_BOARD_OUTCOME
         # "Outcome ... dividend" with no results language is a corporate action.
         return False, None
-
-    if positive:
-        return True, CHANNEL_DIRECT_RESULT
 
     return False, None
 
@@ -150,7 +177,7 @@ _CATEGORY_RULES = [
     ("joint_venture", 2, r"joint\s+venture|\bjv\b|collaboration\s+agreement"),
     ("expansion", 2, r"product\s+launch|capacity\s+addition|new\s+plant|commissioning|expansion"),
     ("regulatory", 2, r"fda\s+approval|\banda\b|regulatory\s+approval|rbi\s+approval|sebi\s+approval|\blicen[cs]e\b"),
-    ("investor_relations", 2, r"investor\s+presentation|earnings\s+call|analyst\s+meet|con\.?\s?call|conference\s+call"),
+    ("investor_relations", 2, r"investor\s+presentation|earnings\s+call|analyst[\s/]+(?:meet|investor)|investor\s+meet|con\.?\s?call|conference\s+call|earnings\s+transcript"),
     ("insider_trade", 2, r"\bpledge\b|encumbrance|\bsast\b|reg\.?\s?2[39]\b|reg\.?\s?31\b|insider"),
     ("disruption", 2, r"\bstrike\b|lock[\s-]?out|disruption|force\s+majeure|shutdown"),
     ("clarification", 2, r"clarification|response\s+to\s+query|media\s+report"),
@@ -182,8 +209,9 @@ def classify(title: str, description: str = "", category_name: str = "") -> dict
     """
     subject = (title or "").strip()
     body = (description or "").strip()
+    cat = (category_name or "").strip()
 
-    is_result, channel = is_financial_result(subject, body, category_name)
+    is_result, channel = is_financial_result(subject, body, cat)
     if is_result:
         return {
             "is_financial_result": True,
@@ -192,7 +220,11 @@ def classify(title: str, description: str = "", category_name: str = "") -> dict
             "priority": 1,
         }
 
-    haystack = f"{subject} {body}"
+    # The subcategory leads: BSE's subject is frequently the boilerplate
+    # "Announcement under Regulation 30 (LODR)" while SUBCATNAME holds the actual
+    # descriptor ("Award of Order / Receipt of Order"), which is exactly the
+    # column news_fetching_strategy.md keys its priority tiers off.
+    haystack = f"{cat} {subject} {body}"
     for category, priority, pattern in _COMPILED_RULES:
         if pattern.search(haystack):
             return {
