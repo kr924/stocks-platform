@@ -485,3 +485,12 @@ class IntelConfig:
 def get_intel_config() -> IntelConfig:
     """Get the global IntelConfig instance."""
     return IntelConfig()
+
+
+def is_market_hours_ist() -> bool:
+    """Helper to check if current time is within market hours (Mon-Fri 9:00 AM - 3:30 PM IST)."""
+    from datetime import datetime, timezone, timedelta
+    IST = timezone(timedelta(hours=5, minutes=30))
+    now = datetime.now(IST)
+    current_minutes = now.hour * 60 + now.minute
+    return (now.weekday() <= 4) and (9 * 60 <= current_minutes <= 15 * 60 + 30)
