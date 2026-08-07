@@ -32,8 +32,9 @@ const API_BASE = import.meta.env.VITE_API_BASE || (window.location.hostname === 
  */
 interface MetricCell {
   current_qtr: string;
-  yoy_change_pct: string;
   last_year_same_qtr: string;
+  yoy_change_pct: string;
+  qoq_change_pct: string;
   estimated: string;
 }
 
@@ -111,10 +112,14 @@ const METRIC_ROWS: { key: string; label: string }[] = [
   { key: "ebitda", label: "EBITDA" },
 ];
 
+// Column order mirrors the backend grid: the current print, the year-ago figure
+// it is measured against, the two changes, then the broker estimate. Estimates
+// exist only when a research house published one, so they usually read NA.
 const METRIC_COLS: { key: keyof MetricCell; label: string }[] = [
   { key: "current_qtr", label: "Current Qtr" },
+  { key: "last_year_same_qtr", label: "YoY" },
   { key: "yoy_change_pct", label: "YoY %" },
-  { key: "last_year_same_qtr", label: "LY Same Qtr" },
+  { key: "qoq_change_pct", label: "QoQ %" },
   { key: "estimated", label: "Estimated" },
 ];
 

@@ -130,7 +130,16 @@ import re
 
 # Row order is fixed so the table reads identically everywhere it is rendered.
 METRIC_ROWS = ("revenue", "expenses", "other_income", "pat", "ebitda")
-METRIC_COLS = ("current_qtr", "yoy_change_pct", "last_year_same_qtr", "estimated")
+# Column order: the current print, the year-ago figure it is measured against,
+# then the two changes, then the broker estimate. Estimates are optional — they
+# only exist when a research house has published one, so they usually read NA.
+METRIC_COLS = (
+    "current_qtr",
+    "last_year_same_qtr",
+    "yoy_change_pct",
+    "qoq_change_pct",
+    "estimated",
+)
 
 _ROW_LABELS = {
     "revenue": "Revenue",
@@ -141,8 +150,9 @@ _ROW_LABELS = {
 }
 _COL_LABELS = {
     "current_qtr": "Current Qtr",
+    "last_year_same_qtr": "YoY",
     "yoy_change_pct": "YoY %",
-    "last_year_same_qtr": "LY Same Qtr",
+    "qoq_change_pct": "QoQ %",
     "estimated": "Estimated",
 }
 
@@ -196,11 +206,13 @@ def metrics_are_usable(metrics: dict) -> bool:
 def _cell_summary(metrics: dict, row: str) -> str:
     """One-line rendering of a row, for the legacy single-string columns."""
     cells = metrics.get(row, {})
-    current = cells.get("current_qtr", "NA")
-    yoy = cells.get("yoy_change_pct", "NA")
-    last_year = cells.get("last_year_same_qtr", "NA")
-    est = cells.get("estimated", "NA")
-    return f"{current} | YoY: {yoy} | LY: {last_year} | Est: {est}"
+    return (
+        f"{cells.get('current_qtr', 'NA')}"
+        f" | YoY: {cells.get('last_year_same_qtr', 'NA')}"
+        f" ({cells.get('yoy_change_pct', 'NA')})"
+        f" | QoQ: {cells.get('qoq_change_pct', 'NA')}"
+        f" | Est: {cells.get('estimated', 'NA')}"
+    )
 
 
 def render_metrics_table(metrics: dict) -> str:
@@ -228,6 +240,53 @@ def render_metrics_table(metrics: dict) -> str:
     out = [line(headers), "-" * min(sum(widths) + 2 * len(widths), 80)]
     out += [line(r) for r in rows]
     return "\n".join(out)
+
+
+# Words that carry no identifying signal in an Indian company name.
+_NAME_STOPWORDS = {
+    "LIMITED", "LTD", "PRIVATE", "PVT", "COMPANY", "CORPORATION", "CORP",
+    "INDIA", "INDIAN", "INDUSTRIES", "INDUSTRY", "ENTERPRISES", "ENTERPRISE",
+    "HOLDINGS", "GROUP", "AND", "THE", "OF", "PRODUCTS", "SERVICES",
+    "TECHNOLOGIES", "TECHNOLOGY", "SOLUTIONS", "INTERNATIONAL", "GLOBAL",
+    "FINANCE", "FINANCIAL", "INVESTMENTS", "INVESTMENT", "ENGINEERING",
+}
+
+
+def response_matches_company(text: str, symbol: str, company_name: str = "") -> bool:
+    """
+    Check that an analysis actually describes the company we asked about.
+
+    The Gemini path drives a real browser session. When that session leaked
+    context between requests, analyses came back describing a completely
+    different company — a report filed under EMMESSA containing Carborundum's
+    figures. Nothing downstream could tell, because the numbers were internally
+    consistent and only the company was wrong.
+
+    This is deliberately permissive: it only rejects when the response mentions
+    neither the ticker nor any distinctive word from the registered name, which
+    is a strong signal the wrong document was analysed.
+    """
+    if not text:
+        return False
+
+    haystack = re.sub(r"[^A-Z0-9 ]+", " ", text.upper())
+    padded = f" {haystack} "
+
+    if symbol and f" {symbol.upper()} " in padded:
+        return True
+
+    if not company_name:
+        # Nothing to check against; do not block on an unknown name.
+        return True
+
+    distinctive = [
+        w for w in re.split(r"[^A-Za-z0-9]+", company_name.upper())
+        if len(w) >= 4 and w not in _NAME_STOPWORDS
+    ]
+    if not distinctive:
+        return True
+
+    return any(f" {w} " in padded for w in distinctive)
 
 
 def _extract_json_from_llm(text: str) -> dict:
@@ -359,15 +418,19 @@ Document Extract / Content snippet:
 
 1. Fill every cell of the grid below for these five rows:
      revenue, expenses, other_income, pat, ebitda
-   with these four columns:
+   with these five columns:
      current_qtr        - the reported figure for this quarter
-     yoy_change_pct     - % change versus the same quarter last year
-     last_year_same_qtr - the figure for the same quarter last year
-     estimated          - the broker/analyst estimate for this quarter
+     last_year_same_qtr - the figure for the SAME quarter one year earlier
+     yoy_change_pct     - % change of current_qtr versus last_year_same_qtr
+     qoq_change_pct     - % change versus the IMMEDIATELY PRECEDING quarter
+     estimated          - a published broker/analyst estimate for this quarter
 
 2. If a figure is NOT present in the document and cannot be reliably sourced,
    put the exact string "NA" in that cell. NEVER guess, interpolate, or carry a
    number across from a different line item.
+   Most filings carry no broker estimate at all — leave "estimated" as "NA"
+   unless a research house has actually published a number for this quarter.
+   Do not invent a consensus.
 
 3. ai_suggestion rules — this is critical:
      - Give "BEATS ESTIMATES" or "MISSES ESTIMATES" only when an estimate exists
@@ -385,11 +448,11 @@ CRITICAL: Output ONLY raw JSON. No prose, no markdown fences, no preamble.
 
 {{
   "metrics": {{
-    "revenue":      {{"current_qtr": "₹132.35 Cr", "yoy_change_pct": "+115.8%", "last_year_same_qtr": "₹61.32 Cr", "estimated": "₹120.00 Cr"}},
-    "expenses":     {{"current_qtr": "₹111.05 Cr", "yoy_change_pct": "+98.2%",  "last_year_same_qtr": "₹56.05 Cr", "estimated": "NA"}},
-    "other_income": {{"current_qtr": "₹2.10 Cr",   "yoy_change_pct": "+5.0%",   "last_year_same_qtr": "₹2.00 Cr",  "estimated": "NA"}},
-    "pat":          {{"current_qtr": "₹25.79 Cr",  "yoy_change_pct": "+170.1%", "last_year_same_qtr": "₹9.55 Cr",  "estimated": "₹20.00 Cr"}},
-    "ebitda":       {{"current_qtr": "₹35.81 Cr",  "yoy_change_pct": "+120.0%", "last_year_same_qtr": "₹16.28 Cr", "estimated": "NA"}}
+    "revenue":      {{"current_qtr": "₹132.35 Cr", "last_year_same_qtr": "₹61.32 Cr", "yoy_change_pct": "+115.8%", "qoq_change_pct": "-57.0%", "estimated": "₹120.00 Cr"}},
+    "expenses":     {{"current_qtr": "₹111.05 Cr", "last_year_same_qtr": "₹56.05 Cr", "yoy_change_pct": "+98.2%",  "qoq_change_pct": "-12.4%", "estimated": "NA"}},
+    "other_income": {{"current_qtr": "₹2.10 Cr",   "last_year_same_qtr": "₹2.00 Cr",  "yoy_change_pct": "+5.0%",   "qoq_change_pct": "NA",     "estimated": "NA"}},
+    "pat":          {{"current_qtr": "₹25.79 Cr",  "last_year_same_qtr": "₹9.55 Cr",  "yoy_change_pct": "+170.1%", "qoq_change_pct": "-24.1%", "estimated": "₹20.00 Cr"}},
+    "ebitda":       {{"current_qtr": "₹35.81 Cr",  "last_year_same_qtr": "₹16.28 Cr", "yoy_change_pct": "+120.0%", "qoq_change_pct": "+8.3%",  "estimated": "NA"}}
   }},
   "future_growth_outlook": "What management says about forward growth, or NA",
   "future_projected_numbers": "Specific forward guidance figures, or NA",
@@ -522,6 +585,24 @@ CRITICAL: Output ONLY raw JSON. No prose, no markdown fences, no preamble.
         str(result_raw)[:500] if result_raw else f"AI analysis pending for {symbol}"
     )
     ai_sentiment = str(parsed_json.get("sentiment", "neutral")).lower().strip()
+
+    # Guard against an analysis of the wrong company reaching the dashboard.
+    if parsed_json and not response_matches_company(ai_summary, symbol, company_name):
+        logger.error(
+            f"🚫 [WRONG COMPANY]: analysis for #{symbol} ({company_name or 'unknown'}) "
+            f"does not reference it — discarding. Summary began: {str(ai_summary)[:120]}"
+        )
+        metrics = normalize_metrics(None)
+        extraction_ok = False
+        ai_suggestion = "NA"
+        ai_summary = (
+            f"Discarded: the analysis returned did not reference {symbol}"
+            f"{f' ({company_name})' if company_name else ''}, so it described a different "
+            f"filing. Re-run the analysis."
+        )
+        revenue = expenses = other_income = operating_profit = pat_yoy = _cell_summary(metrics, "revenue")
+        future_growth_outlook = future_projected_numbers = "NA"
+
     if ai_suggestion == "NA":
         # Do not let a sentiment leak a directional view the numbers cannot support.
         ai_sentiment = "neutral"
