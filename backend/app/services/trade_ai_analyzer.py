@@ -252,6 +252,41 @@ _NAME_STOPWORDS = {
 }
 
 
+# Phrases a model uses when it was asked about a document it never received.
+# Deliberately anchored rather than loose substrings: a bare "no document"
+# also matches legitimate analysis wording such as "no document-level segment
+# breakdown was disclosed", which would discard a perfectly good result.
+_NO_DOCUMENT_RE = re.compile(
+    r"(?:"
+    r"no\s+(?:document|attachment|file|pdf)\s+(?:was\s+)?(?:provided|attached|received|uploaded|shared|available)"
+    r"|there\s+is\s+no\s+(?:document|attachment|file|pdf)\b"
+    r"|(?:do\s+not|don't|cannot|can't|could\s+not|couldn't)\s+(?:see|find|access|open|read)\s+"
+    r"(?:any\s+)?(?:the\s+)?(?:document|attachment|file|pdf|earnings\s+document)"
+    r"|(?:did\s+not|didn't)\s+receive\s+(?:any\s+)?(?:document|attachment|file|pdf)"
+    r"|please\s+(?:upload|provide|share|attach)\s+(?:the\s+|a\s+)?(?:document|attachment|file|pdf|earnings)"
+    r"|(?:document|attachment|file)\s+(?:was\s+)?not\s+(?:provided|attached|received|found)"
+    r"|(?:do\s+not|don't)\s+have\s+access\s+to\s+(?:the\s+)?(?:document|attachment|file|pdf)"
+    r"|unable\s+to\s+(?:access|read|open)\s+(?:the\s+)?(?:document|attachment|file|pdf)"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def response_indicates_missing_document(text: str) -> bool:
+    """
+    True when the model is telling us it had no document to read.
+
+    The browser-driven Gemini path can silently submit a prompt whose attachment
+    never landed. Gemini then answers from the prompt text alone — naming the
+    company because the prompt named it, which means the wrong-company guard
+    will not catch it. Storing that as a verdict would present invented figures
+    as extracted ones.
+    """
+    if not text:
+        return False
+    return bool(_NO_DOCUMENT_RE.search(text))
+
+
 def response_matches_company(text: str, symbol: str, company_name: str = "") -> bool:
     """
     Check that an analysis actually describes the company we asked about.
@@ -586,8 +621,26 @@ CRITICAL: Output ONLY raw JSON. No prose, no markdown fences, no preamble.
     )
     ai_sentiment = str(parsed_json.get("sentiment", "neutral")).lower().strip()
 
+    # Guard against a verdict built on a document the model never received.
+    if response_indicates_missing_document(str(result_raw or "") + " " + str(ai_summary or "")):
+        logger.error(
+            f"🚫 [NO DOCUMENT]: model reported it had no filing to read for #{symbol}. "
+            f"Discarding rather than storing figures it cannot have extracted."
+        )
+        metrics = normalize_metrics(None)
+        extraction_ok = False
+        ai_suggestion = "NA"
+        ai_sentiment = "neutral"
+        ai_summary = (
+            f"Discarded: the earnings document did not reach the model, so no figures "
+            f"were extracted for {symbol}. Check that the gemcall attachment upload "
+            f"succeeded, then re-run."
+        )
+        revenue = expenses = other_income = operating_profit = pat_yoy = _cell_summary(metrics, "revenue")
+        future_growth_outlook = future_projected_numbers = "NA"
+
     # Guard against an analysis of the wrong company reaching the dashboard.
-    if parsed_json and not response_matches_company(ai_summary, symbol, company_name):
+    elif parsed_json and not response_matches_company(ai_summary, symbol, company_name):
         logger.error(
             f"🚫 [WRONG COMPANY]: analysis for #{symbol} ({company_name or 'unknown'}) "
             f"does not reference it — discarding. Summary began: {str(ai_summary)[:120]}"
