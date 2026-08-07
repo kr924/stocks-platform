@@ -57,6 +57,10 @@ app.include_router(intelligence_router)
 from app.routers.trading import router as trading_router
 app.include_router(trading_router)
 
+# Register Telegram callback handler (inline order / sell buttons)
+from app.routers.telegram_webhook import router as telegram_router
+app.include_router(telegram_router)
+
 @app.exception_handler(UpstoxAuthError)
 def upstox_auth_error_handler(request, exc: UpstoxAuthError):
     """FastAPI exception handler to automatically clear invalid/expired Upstox sessions."""

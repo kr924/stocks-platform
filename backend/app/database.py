@@ -78,8 +78,10 @@ class MarketEvent(Base):
     event_type = Column(String(50), nullable=False, index=True)
     # Source exchange/platform: nse, bse, twitter, etc.
     source = Column(String(50), nullable=False, index=True)
-    # Stock symbol (e.g., RELIANCE)
+    # Stock symbol (e.g., RELIANCE) — NSE ticker, else BSE scrip id
     symbol = Column(String(50), index=True, nullable=True)
+    # Registered company name, resolved via the symbol registry
+    company_name = Column(String(250), nullable=True)
     # Upstox-style instrument key (e.g., NSE_EQ|INE002A01018)
     instrument_key = Column(String(100), index=True, nullable=True)
     title = Column(Text, nullable=False)
@@ -292,6 +294,7 @@ class TradeAILog(Base):
     id = Column(Integer, primary_key=True, index=True)
     config_id = Column(Integer, nullable=True, index=True)            # FK to TradeConfig.id
     symbol = Column(String(50), nullable=False, index=True)
+    company_name = Column(String(250), nullable=True)
     provider = Column(String(50), nullable=False)                     # "custom_rest_api", "openrouter_premium", etc.
     prompt_summary = Column(Text, nullable=True)                      # brief description of what was analyzed
     ai_sentiment = Column(String(20), nullable=True)
@@ -313,6 +316,14 @@ class TradeAILog(Base):
     ai_suggestion = Column(String(50), nullable=True)                  # "BEATS ESTIMATES", "MISSES ESTIMATES", "BUY", "SELL", "HOLD"
     attachment_url = Column(Text, nullable=True)
     flow_used = Column(String(50), nullable=True)                     # "custom_rest_api" or "openrouter_premium"
+    # Fixed metric grid as JSON: rows (revenue/expenses/other_income/pat/ebitda)
+    # x columns (current_qtr / yoy_change_pct / last_year_same_qtr / estimated).
+    # "NA" wherever a figure could not be extracted from the filing.
+    metrics_json = Column(Text, nullable=True)
+    future_growth_outlook = Column(Text, nullable=True)
+    future_projected_numbers = Column(Text, nullable=True)
+    # True when the filing yielded no usable figures — suppresses any verdict
+    extraction_ok = Column(Boolean, default=False)
 
 
 class ResultDedupKey(Base):
@@ -346,9 +357,12 @@ class PendingResultOrder(Base):
     __tablename__ = "pending_result_orders"
     id = Column(Integer, primary_key=True, autoincrement=True)
     symbol = Column(String(50), nullable=False, index=True)
+    company_name = Column(String(250), nullable=True)
     instrument_key = Column(String(100), nullable=True)
     isin = Column(String(30), nullable=True)
     exchange = Column(String(10), nullable=False)      # nse | bse
+    # Trading date (IST) this result belongs to, for the daily reset
+    trade_date = Column(String(20), index=True, nullable=True)
     title = Column(Text, nullable=False)
     description = Column(Text, nullable=True)
     attachment_url = Column(Text, nullable=True)
@@ -405,6 +419,16 @@ def init_db():
         _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN ai_suggestion VARCHAR(50)")
         _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN attachment_url TEXT")
         _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN flow_used VARCHAR(50)")
+
+        # Symbol registry + structured earnings grid
+        _safe_alter(conn, "ALTER TABLE market_events ADD COLUMN company_name VARCHAR(250)")
+        _safe_alter(conn, "ALTER TABLE pending_result_orders ADD COLUMN company_name VARCHAR(250)")
+        _safe_alter(conn, "ALTER TABLE pending_result_orders ADD COLUMN trade_date VARCHAR(20)")
+        _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN company_name VARCHAR(250)")
+        _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN metrics_json TEXT")
+        _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN future_growth_outlook TEXT")
+        _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN future_projected_numbers TEXT")
+        _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN extraction_ok BOOLEAN DEFAULT 0")
 
 
 def _safe_alter(conn, sql: str):

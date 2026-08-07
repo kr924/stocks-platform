@@ -46,14 +46,17 @@ logger = logging.getLogger("app.exchange_hub")
 class Announcement:
     """One corporate announcement, normalised across NSE and BSE field names."""
     exchange: str                       # "nse" | "bse"
-    symbol: str
+    symbol: str                         # display ticker (NSE symbol, else BSE scrip id)
     title: str
     description: str = ""
     url: str = ""
     pdf_filename: str = ""
     isin: str = ""
     scrip_code: str = ""
-    category_name: str = ""             # BSE CategoryName, when present
+    category_name: str = ""             # BSE SUBCATNAME / CategoryName, when present
+    company_name: str = ""
+    nse_symbol: str = ""
+    bse_scrip_id: str = ""
     event_time: datetime = field(default_factory=datetime.utcnow)
     raw: Dict[str, Any] = field(default_factory=dict)
 
@@ -171,17 +174,24 @@ def _normalize_nse(raw: dict) -> Optional[Announcement]:
         raw.get("an_dt") or raw.get("bcastDate") or raw.get("broadcastDate")
         or raw.get("date") or raw.get("dt") or ""
     ).strip()
+    isin = str(raw.get("isin") or "").strip().upper()
+
+    from app.services.symbol_registry import resolve
+    ident = resolve(nse_symbol=symbol, isin=isin)
 
     return Announcement(
         exchange="nse",
-        symbol=symbol,
+        symbol=ident["symbol"] or symbol,
         title=subject,
         description=str(raw.get("attchmntText") or raw.get("description") or subject),
         url=attachment,
         pdf_filename=attachment,
-        isin=str(raw.get("isin") or "").strip().upper(),
-        scrip_code="",
+        isin=ident["isin"] or isin,
+        scrip_code=ident["bse_scrip_cd"] or "",
         category_name=str(raw.get("category") or "").strip(),
+        company_name=ident["company_name"],
+        nse_symbol=ident["nse_symbol"] or symbol,
+        bse_scrip_id=ident["bse_scrip_id"] or "",
         event_time=_safe_datetime(ann_date),
         raw=raw,
     )
@@ -211,12 +221,13 @@ def _strip_bse_subject_prefix(newssub: str, long_name: str, scrip_code: str) -> 
 
 
 def _normalize_bse(raw: dict, db: Session) -> Optional[Announcement]:
-    from app.services.nse_bse_scraper import _safe_datetime, resolve_bse_symbol
+    from app.services.nse_bse_scraper import _safe_datetime
+    from app.services.symbol_registry import resolve
 
     scrip_code = str(raw.get("SCRIP_CD") or raw.get("scrip_cd") or "").strip()
     long_name = str(raw.get("SLONGNAME") or "").strip()
-    # AnnSubCategoryGetData does not return ISIN_CODE, so the ticker resolved
-    # from the scrip code / company name is the identifier BSE and NSE share.
+    # AnnSubCategoryGetData does not return ISIN_CODE; the registry supplies it
+    # (and the NSE ticker) from the scrip code.
     isin = str(raw.get("ISIN_CODE") or "").strip().upper()
 
     subject = _strip_bse_subject_prefix(
@@ -225,7 +236,8 @@ def _normalize_bse(raw: dict, db: Session) -> Optional[Announcement]:
     if not subject:
         return None
 
-    symbol = resolve_bse_symbol(scrip_code, long_name, isin, db)
+    ident = resolve(scrip_cd=scrip_code, isin=isin)
+    symbol = ident["symbol"]
 
     attachment_name = str(raw.get("ATTACHMENTNAME") or "").strip()
     attachment_url = (
@@ -250,9 +262,12 @@ def _normalize_bse(raw: dict, db: Session) -> Optional[Announcement]:
         description=str(raw.get("MORE") or raw.get("HEADLINE") or subject),
         url=attachment_url,
         pdf_filename=attachment_name,
-        isin=isin,
+        isin=ident["isin"] or isin,
         scrip_code=scrip_code,
         category_name=category_name,
+        company_name=ident["company_name"] or long_name,
+        nse_symbol=ident["nse_symbol"] or "",
+        bse_scrip_id=ident["bse_scrip_id"] or "",
         event_time=_safe_datetime(ann_date),
         raw=raw,
     )
@@ -315,6 +330,7 @@ def _broadcast_event(event: MarketEvent):
         "event_type": event.event_type,
         "source": event.source,
         "symbol": event.symbol,
+        "company_name": event.company_name,
         "title": event.title,
         "description": event.description,
         "url": event.url,
@@ -337,6 +353,7 @@ def _store_announcement(db: Session, ann: Announcement, classification: dict) ->
         event_type="announcement",
         source=ann.exchange,
         symbol=ann.symbol or None,
+        company_name=ann.company_name or None,
         title=ann.title[:500],
         description=ann.description,
         url=ann.url,
@@ -371,6 +388,13 @@ def poll_exchange_announcements(db: Session) -> Dict[str, int]:
         return {}
 
     stats = {"fetched": 0, "results": 0, "general": 0, "result_duplicates": 0}
+
+    # Retire yesterday's undecided prompts before adding today's.
+    try:
+        from app.services.results_router import expire_stale_pending
+        expire_stale_pending(db)
+    except Exception as e:
+        logger.debug(f"Pending-result expiry skipped: {e}")
 
     # ── 1. Fetch both exchanges ──
     try:

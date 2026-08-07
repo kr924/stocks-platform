@@ -126,6 +126,110 @@ def analyze_trade_event(
 
 import re
 
+# ─── Structured earnings metric grid ────────────────────────────────────────
+
+# Row order is fixed so the table reads identically everywhere it is rendered.
+METRIC_ROWS = ("revenue", "expenses", "other_income", "pat", "ebitda")
+METRIC_COLS = ("current_qtr", "yoy_change_pct", "last_year_same_qtr", "estimated")
+
+_ROW_LABELS = {
+    "revenue": "Revenue",
+    "expenses": "Expenses",
+    "other_income": "Other Income",
+    "pat": "Profit (PAT)",
+    "ebitda": "EBITDA",
+}
+_COL_LABELS = {
+    "current_qtr": "Current Qtr",
+    "yoy_change_pct": "YoY %",
+    "last_year_same_qtr": "LY Same Qtr",
+    "estimated": "Estimated",
+}
+
+# Anything a model emits to mean "I could not determine this".
+_NA_TOKENS = {"", "NA", "N/A", "NONE", "NULL", "-", "--", "UNKNOWN", "NOT AVAILABLE",
+              "NOT PROVIDED", "NOT DISCLOSED", "NIL", "TBD", "?"}
+
+
+def _clean_cell(value) -> str:
+    """Normalise one cell, collapsing every flavour of 'unknown' to ''."""
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if text.upper() in _NA_TOKENS:
+        return ""
+    return text
+
+
+def normalize_metrics(raw) -> dict:
+    """
+    Coerce whatever the model returned into the fixed row x column grid.
+
+    Missing cells become "NA" rather than being dropped, so the table always has
+    the same shape and a gap is visibly a gap.
+    """
+    raw = raw if isinstance(raw, dict) else {}
+    grid = {}
+    for row in METRIC_ROWS:
+        cells = raw.get(row)
+        cells = cells if isinstance(cells, dict) else {}
+        grid[row] = {
+            col: (_clean_cell(cells.get(col)) or "NA") for col in METRIC_COLS
+        }
+    return grid
+
+
+def metrics_are_usable(metrics: dict) -> bool:
+    """
+    True when the grid carries enough to justify a verdict.
+
+    Revenue and PAT for the current quarter are the minimum: without both, any
+    buy/sell/beat/miss call would be asserting more than the filing supports.
+    """
+    if not metrics:
+        return False
+    revenue = metrics.get("revenue", {}).get("current_qtr", "NA")
+    pat = metrics.get("pat", {}).get("current_qtr", "NA")
+    return bool(_clean_cell(revenue)) and bool(_clean_cell(pat))
+
+
+def _cell_summary(metrics: dict, row: str) -> str:
+    """One-line rendering of a row, for the legacy single-string columns."""
+    cells = metrics.get(row, {})
+    current = cells.get("current_qtr", "NA")
+    yoy = cells.get("yoy_change_pct", "NA")
+    last_year = cells.get("last_year_same_qtr", "NA")
+    est = cells.get("estimated", "NA")
+    return f"{current} | YoY: {yoy} | LY: {last_year} | Est: {est}"
+
+
+def render_metrics_table(metrics: dict) -> str:
+    """
+    Render the grid as fixed-width text.
+
+    Used inside Telegram's <pre> block and as a plain-text fallback, so column
+    widths are computed rather than hardcoded.
+    """
+    if not metrics:
+        return "No metrics extracted."
+
+    headers = [""] + [_COL_LABELS[c] for c in METRIC_COLS]
+    rows = [
+        [_ROW_LABELS[r]] + [metrics.get(r, {}).get(c, "NA") for c in METRIC_COLS]
+        for r in METRIC_ROWS
+    ]
+
+    widths = [
+        max(len(headers[i]), max((len(row[i]) for row in rows), default=0))
+        for i in range(len(headers))
+    ]
+    line = lambda cells: "  ".join(c.ljust(widths[i]) for i, c in enumerate(cells)).rstrip()
+
+    out = [line(headers), "-" * min(sum(widths) + 2 * len(widths), 80)]
+    out += [line(r) for r in rows]
+    return "\n".join(out)
+
+
 def _extract_json_from_llm(text: str) -> dict:
     """Robustly extract JSON dictionary from LLM output, handling conversational intros and code blocks."""
     if not text:
@@ -237,25 +341,62 @@ def _do_analyze_earnings_disclosure_2step(
     openrouter_key = auto_ai_cfg.get("premium_openrouter_api_key", "").strip() or os.getenv("OPENROUTER_PREMIUM_API_KEY", "").strip() or os.getenv("OPENROUTER_API_KEY", "").strip()
     openrouter_model = auto_ai_cfg.get("premium_openrouter_model", "anthropic/claude-3.5-sonnet").strip()
 
-    prompt = f"""stock symbol {symbol}   you are indian stock market research analyst. i have companies earnings document attached, please analyse this document for earnings and compare results with old earnings (for earnings refer to screener.in) and provide me info in json format of revenue, expenses, Operating Profit, Other Income,Interest,Depreciation,PBT, pat (yoy % , last quarter%, last year same quarter% ) and as per the document analyse how company is projecting future growth and also check how much is expected returns by brokers for this stock in websites and compare with actual and finally provide suggestion like beats estimates, misses estimates(if estimate exists) else give buy , sell, hold
+    company_name = ""
+    try:
+        from app.services.symbol_registry import company_name_for
+        company_name = company_name_for(symbol)
+    except Exception:
+        pass
+
+    prompt = f"""You are an Indian stock market research analyst. Analyse the attached quarterly earnings document for {symbol}{f' ({company_name})' if company_name else ''} and return a strict metric grid.
+
+Compare against the same quarter last year and against broker/analyst estimates (refer to screener.in and public broker research for historical and estimated figures).
 
 Document Extract / Content snippet:
 {pdf_text[:3500] if pdf_text else 'Refer to attachment document'}
 
-CRITICAL REQUIREMENT: Output ONLY valid, raw JSON with NO surrounding text, NO introductory conversational phrases like 'Here is the JSON:' or 'Gemini said:', and NO markdown formatting.
+=== EXTRACTION RULES — FOLLOW EXACTLY ===
 
-Format the JSON response precisely as follows:
+1. Fill every cell of the grid below for these five rows:
+     revenue, expenses, other_income, pat, ebitda
+   with these four columns:
+     current_qtr        - the reported figure for this quarter
+     yoy_change_pct     - % change versus the same quarter last year
+     last_year_same_qtr - the figure for the same quarter last year
+     estimated          - the broker/analyst estimate for this quarter
+
+2. If a figure is NOT present in the document and cannot be reliably sourced,
+   put the exact string "NA" in that cell. NEVER guess, interpolate, or carry a
+   number across from a different line item.
+
+3. ai_suggestion rules — this is critical:
+     - Give "BEATS ESTIMATES" or "MISSES ESTIMATES" only when an estimate exists
+       AND the corresponding actual was extracted.
+     - Give "BUY", "SELL" or "HOLD" only when the core figures (revenue and pat)
+       were extracted and the picture is conclusive.
+     - Otherwise return exactly "NA".
+   Do NOT return "HOLD", "NEUTRAL", "BUY" or "SELL" as a way of expressing
+   uncertainty. Uncertainty is always "NA".
+
+4. Set extraction_ok to true only if revenue.current_qtr AND pat.current_qtr are
+   both real numbers (not "NA"). Otherwise set it to false and ai_suggestion "NA".
+
+CRITICAL: Output ONLY raw JSON. No prose, no markdown fences, no preamble.
+
 {{
-  "revenue": "₹132.35 Cr (Consolidated). YoY: +115.8% vs Q1 FY26 (₹61.32 Cr), QoQ: -57.0% vs Q4 FY26 (₹307.50 Cr)",
-  "expenses": "₹111.05 Cr (Consolidated). Driven primarily by cost of construction and development (₹133.48 Cr) adjusted by changes in inventories.",
-  "operating_profit": "₹35.81 Cr (Estimated EBITDA). Operating Profit Margin (OPM): ~27.1%",
-  "pbt": "₹34.94 Cr (Consolidated)",
-  "other_income": "₹...",
-  "pat_yoy": "PAT at ₹25.79 Cr. YoY: +170.1%, Last quarter: -24.1%, Last year same quarter: ₹9.55 Cr",
-  "growth_projection": "Future growth projections by management or note if not provided",
-  "broker_estimates": "Broker expected returns/estimates vs actual performance or note if external",
-  "ai_suggestion": "buy",
-  "summary": "2-3 sentence executive summary of earnings report comparing YoY and QoQ changes",
+  "metrics": {{
+    "revenue":      {{"current_qtr": "₹132.35 Cr", "yoy_change_pct": "+115.8%", "last_year_same_qtr": "₹61.32 Cr", "estimated": "₹120.00 Cr"}},
+    "expenses":     {{"current_qtr": "₹111.05 Cr", "yoy_change_pct": "+98.2%",  "last_year_same_qtr": "₹56.05 Cr", "estimated": "NA"}},
+    "other_income": {{"current_qtr": "₹2.10 Cr",   "yoy_change_pct": "+5.0%",   "last_year_same_qtr": "₹2.00 Cr",  "estimated": "NA"}},
+    "pat":          {{"current_qtr": "₹25.79 Cr",  "yoy_change_pct": "+170.1%", "last_year_same_qtr": "₹9.55 Cr",  "estimated": "₹20.00 Cr"}},
+    "ebitda":       {{"current_qtr": "₹35.81 Cr",  "yoy_change_pct": "+120.0%", "last_year_same_qtr": "₹16.28 Cr", "estimated": "NA"}}
+  }},
+  "future_growth_outlook": "What management says about forward growth, or NA",
+  "future_projected_numbers": "Specific forward guidance figures, or NA",
+  "broker_estimates": "Broker expectations versus the actual print, or NA",
+  "extraction_ok": true,
+  "ai_suggestion": "BEATS ESTIMATES",
+  "summary": "2-3 sentence executive summary comparing YoY performance and estimates",
   "sentiment": "positive"
 }}"""
 
@@ -363,24 +504,36 @@ Format the JSON response precisely as follows:
     # --- Robust JSON Parsing ---
     parsed_json = _extract_json_from_llm(result_raw)
 
-    # Extract structured fields
-    revenue = parsed_json.get("revenue", "N/A")
-    expenses = parsed_json.get("expenses", "N/A")
-    operating_profit = parsed_json.get("operating_profit", "N/A")
-    pbt = parsed_json.get("pbt", "N/A")
-    other_income = parsed_json.get("other_income", "N/A")
-    pat_yoy = parsed_json.get("pat_yoy", "N/A")
-    growth_projection = parsed_json.get("growth_projection", "N/A")
-    broker_estimates = parsed_json.get("broker_estimates", "N/A")
-    
-    raw_suggestion = parsed_json.get("ai_suggestion")
-    if raw_suggestion and str(raw_suggestion).strip().upper() not in ("N/A", "NONE", "NULL", ""):
-        ai_suggestion = str(raw_suggestion).upper().strip()
-    else:
-        ai_suggestion = None  # DO NOT provide suggestion until values from AI are updated!
+    metrics = normalize_metrics(parsed_json.get("metrics"))
+    extraction_ok = metrics_are_usable(metrics)
 
-    ai_summary = parsed_json.get("summary", str(result_raw)[:500] if result_raw else f"AI analysis pending for {symbol}")
+    future_growth_outlook = _clean_cell(parsed_json.get("future_growth_outlook")) or "NA"
+    future_projected_numbers = _clean_cell(parsed_json.get("future_projected_numbers")) or "NA"
+    broker_estimates = _clean_cell(parsed_json.get("broker_estimates")) or "NA"
+
+    # A verdict is only meaningful when the numbers behind it were extracted.
+    # Anything uncertain must read "NA" rather than being dressed up as HOLD or
+    # NEUTRAL, which a reader would otherwise act on as a real call.
+    ai_suggestion = _clean_cell(parsed_json.get("ai_suggestion")).upper() or "NA"
+    if not extraction_ok or ai_suggestion in ("", "N/A", "NONE", "NULL", "UNKNOWN", "INCONCLUSIVE"):
+        ai_suggestion = "NA"
+
+    ai_summary = parsed_json.get("summary") or (
+        str(result_raw)[:500] if result_raw else f"AI analysis pending for {symbol}"
+    )
     ai_sentiment = str(parsed_json.get("sentiment", "neutral")).lower().strip()
+    if ai_suggestion == "NA":
+        # Do not let a sentiment leak a directional view the numbers cannot support.
+        ai_sentiment = "neutral"
+
+    # Legacy single-string columns, kept populated so existing views still render.
+    revenue = _cell_summary(metrics, "revenue")
+    expenses = _cell_summary(metrics, "expenses")
+    other_income = _cell_summary(metrics, "other_income")
+    operating_profit = _cell_summary(metrics, "ebitda")
+    pat_yoy = _cell_summary(metrics, "pat")
+    pbt = "NA"
+    growth_projection = future_growth_outlook
 
     # --- Save to TradeAILog ---
     try:
@@ -390,10 +543,16 @@ Format the JSON response precisely as follows:
             log_entry = TradeAILog(
                 config_id=config_id,
                 symbol=symbol,
+                company_name=company_name or None,
                 provider=used_provider,
                 prompt_summary=f"2-Step Earnings Analysis for {symbol}",
                 ai_sentiment=ai_sentiment,
-                ai_impact_score=0.9 if ai_suggestion and "BEAT" in ai_suggestion else 0.2 if ai_suggestion and "MISS" in ai_suggestion else 0.5,
+                ai_impact_score=(
+                    0.9 if "BEAT" in ai_suggestion
+                    else 0.2 if "MISS" in ai_suggestion
+                    else 0.0 if ai_suggestion == "NA"
+                    else 0.5
+                ),
                 ai_summary=ai_summary,
                 raw_response=json.dumps(parsed_json) if parsed_json else str(result_raw),
                 nse_event_title=title,
@@ -408,7 +567,11 @@ Format the JSON response precisely as follows:
                 broker_estimates=str(broker_estimates),
                 ai_suggestion=ai_suggestion,
                 attachment_url=attachment_url,
-                flow_used=used_flow
+                flow_used=used_flow,
+                metrics_json=json.dumps(metrics),
+                future_growth_outlook=future_growth_outlook,
+                future_projected_numbers=future_projected_numbers,
+                extraction_ok=extraction_ok,
             )
             db.add(log_entry)
             db.commit()
@@ -442,27 +605,53 @@ Format the JSON response precisely as follows:
         pass
 
     # --- Dispatch Telegram Alert ---
+    # Carries the metric grid, and SELL buttons when the stock is already held so
+    # an exit can be taken from the same message that delivers the verdict.
     try:
-        from app.services.telegram_notifier import send_telegram_alert
-        alert_body = f"""Revenue: {revenue}
-Expenses: {expenses}
-Operating Profit: {operating_profit}
-PAT (YoY/QoQ): {pat_yoy}
-Future Growth: {growth_projection}
-Broker Estimates: {broker_estimates}
-Verdict Suggestion: {ai_suggestion}
+        from app.services.telegram_notifier import send_earnings_verdict_alert
+        from app.database import SessionLocal as _SL, TradeConfig
 
-Summary: {ai_summary}"""
+        held_config_id, held_qty, buy_price, instrument_key = None, 0, None, ""
+        db_h = _SL()
+        try:
+            held = db_h.query(TradeConfig).filter(
+                TradeConfig.symbol == symbol,
+                TradeConfig.status == "bought",
+                TradeConfig.is_active == True,
+            ).order_by(TradeConfig.bought_at.desc()).first()
+            if held:
+                held_config_id = held.id
+                held_qty = held.quantity or 0
+                buy_price = held.buy_price
+                instrument_key = held.instrument_key or ""
+        finally:
+            db_h.close()
 
-        send_telegram_alert(
-            title=f"{symbol} Earnings Analysis ({ai_suggestion})",
+        last_price = None
+        if held_config_id:
+            try:
+                from app.services.results_router import get_ltp
+                last_price = get_ltp(instrument_key, symbol)
+            except Exception:
+                pass
+
+        table = render_metrics_table(metrics)
+        extra = f"\n\nOutlook: {future_growth_outlook}\nProjected: {future_projected_numbers}"
+        if not extraction_ok:
+            extra += "\n\nNote: key figures could not be extracted, so no directional call is given."
+
+        send_earnings_verdict_alert(
             symbol=symbol,
-            sentiment=ai_sentiment,
-            impact_score=0.8,
-            summary=alert_body,
-            provider=f"{used_flow.upper()}",
+            company_name=company_name,
+            verdict=ai_suggestion,
+            summary=(ai_summary or "") + extra,
+            metrics_table=table,
+            provider=used_flow.upper(),
             url=attachment_url,
-            alert_type=f"EARNINGS AI VERDICT: {ai_suggestion}"
+            held_config_id=held_config_id,
+            held_qty=held_qty,
+            buy_price=buy_price,
+            last_price=last_price,
         )
     except Exception as e:
         logger.error(f"Telegram alert error: {e}")

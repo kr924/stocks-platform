@@ -134,24 +134,31 @@ def _build_symbol_indexes() -> tuple:
 
 def resolve_bse_symbol(scrip_cd: str, slongname: str, isin_code: str, db: Session) -> str:
     """
-    Resolve BSE scrip_cd / long name / ISIN to the standard NSE symbol.
+    Resolve a BSE listing to its display ticker.
 
-    Returns the scrip code unchanged for BSE-only listings, which have no NSE
-    ticker to resolve to.
+    Delegates to the symbol registry (data/symbol_registry.csv), which maps every
+    BSE scrip code to its NSE symbol, BSE scrip id and company name. The previous
+    name-similarity matching against the Upstox dump is kept below only as a
+    fallback for listings the registry has not yet seen.
     """
-    scrip_cd = str(scrip_cd or "").strip().upper()
+    from app.services.symbol_registry import lookup
+
+    scrip_cd = str(scrip_cd or "").strip()
     slongname = str(slongname or "").strip()
     isin_code = str(isin_code or "").strip().upper()
 
+    rec = lookup(scrip_cd=scrip_cd, isin=isin_code)
+    if rec:
+        return rec.display_symbol
+
+    # ── Fallback: fuzzy match against the NSE instrument dump ──
     isin_index, name_index = _build_symbol_indexes()
 
-    # 1. ISIN is the authoritative join, when the endpoint provides one.
     if isin_code:
         hit = isin_index.get(isin_code)
         if hit:
             return hit
 
-    # 2. Company name, normalised past punctuation and legal-form suffixes.
     if slongname:
         norm = _norm_company_name(slongname)
         if norm:
@@ -162,9 +169,8 @@ def resolve_bse_symbol(scrip_cd: str, slongname: str, isin_code: str, db: Sessio
             if best:
                 return best
 
-    # 3. Fallback: a non-numeric scrip code is already a ticker.
     if scrip_cd and not scrip_cd.isdigit():
-        return scrip_cd
+        return scrip_cd.upper()
 
     return scrip_cd or slongname.upper()
 

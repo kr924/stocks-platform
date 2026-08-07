@@ -8,6 +8,7 @@ from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.database import (
@@ -126,10 +127,21 @@ def _serialize_order(o: TradeOrder) -> dict:
 
 
 def _serialize_ai_log(a: TradeAILog) -> dict:
+    metrics = None
+    if getattr(a, "metrics_json", None):
+        try:
+            metrics = json.loads(a.metrics_json)
+        except Exception:
+            metrics = None
     return {
         "id": a.id,
         "config_id": a.config_id,
         "symbol": a.symbol,
+        "company_name": getattr(a, "company_name", None),
+        "metrics": metrics,
+        "future_growth_outlook": getattr(a, "future_growth_outlook", None),
+        "future_projected_numbers": getattr(a, "future_projected_numbers", None),
+        "extraction_ok": bool(getattr(a, "extraction_ok", False)),
         "provider": a.provider,
         "prompt_summary": a.prompt_summary,
         "ai_sentiment": a.ai_sentiment,
@@ -439,16 +451,42 @@ def check_order_status(order_id: int, db: Session = Depends(get_db)):
 def list_ai_logs(
     config_id: Optional[int] = None,
     symbol: Optional[str] = None,
+    search: Optional[str] = Query(None, description="symbol, company or summary text"),
+    date_from: Optional[str] = Query(None, description="YYYY-MM-DD inclusive"),
+    date_to: Optional[str] = Query(None, description="YYYY-MM-DD inclusive"),
     page: int = 1,
     page_size: int = 50,
     db: Session = Depends(get_db),
 ):
     """List premium AI analysis logs (deduplicated by symbol + nse_event_title)."""
+    from datetime import timedelta
+
     q = db.query(TradeAILog).order_by(TradeAILog.created_at.desc())
     if config_id:
         q = q.filter(TradeAILog.config_id == config_id)
     if symbol:
         q = q.filter(TradeAILog.symbol == symbol.upper())
+    if search:
+        pattern = f"%{search.strip()}%"
+        q = q.filter(or_(
+            TradeAILog.symbol.ilike(pattern),
+            TradeAILog.company_name.ilike(pattern),
+            TradeAILog.ai_summary.ilike(pattern),
+            TradeAILog.nse_event_title.ilike(pattern),
+        ))
+    if date_from:
+        try:
+            q = q.filter(TradeAILog.created_at >= datetime.strptime(date_from, "%Y-%m-%d"))
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid date_from: '{date_from}'")
+    if date_to:
+        try:
+            # Inclusive of the whole day.
+            end = datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1)
+            q = q.filter(TradeAILog.created_at < end)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid date_to: '{date_to}'")
+
     raw_logs = q.all()
 
     # Deduplicate by (symbol, nse_event_title) to avoid duplicate UI cards
@@ -558,6 +596,8 @@ def _serialize_pending(p: PendingResultOrder, ai_log: Optional[TradeAILog] = Non
     return {
         "id": p.id,
         "symbol": p.symbol,
+        "company_name": p.company_name,
+        "trade_date": p.trade_date,
         "instrument_key": p.instrument_key,
         "isin": p.isin,
         "exchange": p.exchange,
@@ -579,6 +619,8 @@ def _serialize_pending(p: PendingResultOrder, ai_log: Optional[TradeAILog] = Non
 def list_pending_results(
     status: Optional[str] = Query("pending"),
     hours: int = Query(24, ge=1, le=168),
+    search: Optional[str] = Query(None),
+    trade_date: Optional[str] = Query(None, description="YYYY-MM-DD; defaults to today IST"),
     db: Session = Depends(get_db),
 ):
     """
@@ -588,12 +630,31 @@ def list_pending_results(
     is prompted to place an order. The AI earnings analysis is attached once it
     finishes.
     """
-    from datetime import timedelta
+    from datetime import timedelta, timezone as _tz
+
+    # Retire anything left from an earlier session before listing.
+    try:
+        from app.services.results_router import expire_stale_pending
+        expire_stale_pending(db)
+    except Exception:
+        pass
+
+    ist = _tz(timedelta(hours=5, minutes=30))
+    day = trade_date or datetime.now(ist).strftime("%Y-%m-%d")
 
     since = datetime.utcnow() - timedelta(hours=hours)
     q = db.query(PendingResultOrder).filter(PendingResultOrder.created_at >= since)
     if status and status != "all":
         q = q.filter(PendingResultOrder.status == status)
+    if day != "all":
+        q = q.filter(PendingResultOrder.trade_date == day)
+    if search:
+        pattern = f"%{search.strip()}%"
+        q = q.filter(or_(
+            PendingResultOrder.symbol.ilike(pattern),
+            PendingResultOrder.company_name.ilike(pattern),
+            PendingResultOrder.title.ilike(pattern),
+        ))
 
     pendings = q.order_by(PendingResultOrder.created_at.desc()).all()
 

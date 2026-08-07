@@ -30,9 +30,20 @@ const API_BASE = import.meta.env.VITE_API_BASE || (window.location.hostname === 
  * A financial result that landed for a stock with no armed config.
  * The user is prompted to place an order; AI analysis follows.
  */
+interface MetricCell {
+  current_qtr: string;
+  yoy_change_pct: string;
+  last_year_same_qtr: string;
+  estimated: string;
+}
+
+type MetricGrid = Record<string, MetricCell>;
+
 interface PendingResult {
   id: number;
   symbol: string;
+  company_name: string | null;
+  trade_date: string | null;
   instrument_key: string | null;
   exchange: string;
   title: string;
@@ -91,6 +102,22 @@ interface TradeOrder {
   filled_at: string | null;
 }
 
+// Row order is fixed so the grid reads the same everywhere it appears.
+const METRIC_ROWS: { key: string; label: string }[] = [
+  { key: "revenue", label: "Revenue" },
+  { key: "expenses", label: "Expenses" },
+  { key: "other_income", label: "Other Income" },
+  { key: "pat", label: "Profit (PAT)" },
+  { key: "ebitda", label: "EBITDA" },
+];
+
+const METRIC_COLS: { key: keyof MetricCell; label: string }[] = [
+  { key: "current_qtr", label: "Current Qtr" },
+  { key: "yoy_change_pct", label: "YoY %" },
+  { key: "last_year_same_qtr", label: "LY Same Qtr" },
+  { key: "estimated", label: "Estimated" },
+];
+
 interface TradeAILog {
   id: number;
   config_id: number | null;
@@ -113,6 +140,77 @@ interface TradeAILog {
   ai_suggestion?: string;
   attachment_url?: string;
   flow_used?: string;
+  company_name?: string | null;
+  metrics?: MetricGrid | null;
+  future_growth_outlook?: string | null;
+  future_projected_numbers?: string | null;
+  extraction_ok?: boolean;
+}
+
+/**
+ * The fixed earnings grid. Cells the model could not extract read "NA" rather
+ * than being blank, so a gap is visibly a gap rather than a rendering glitch.
+ */
+function MetricsTable({ metrics }: { metrics: MetricGrid | null | undefined }) {
+  if (!metrics) return null;
+  const na = (v: string | undefined) => !v || v.toUpperCase() === "NA";
+  return (
+    <div style={{ overflowX: "auto", marginTop: "8px" }}>
+      <table style={{ borderCollapse: "collapse", fontSize: "11px", minWidth: "480px", width: "100%" }}>
+        <thead>
+          <tr>
+            <th style={{ textAlign: "left", padding: "5px 8px", color: "#94a3b8", fontWeight: 600, borderBottom: "1px solid rgba(255,255,255,0.12)" }}></th>
+            {METRIC_COLS.map(c => (
+              <th key={c.key} style={{ textAlign: "right", padding: "5px 8px", color: "#94a3b8", fontWeight: 600, borderBottom: "1px solid rgba(255,255,255,0.12)", whiteSpace: "nowrap" }}>
+                {c.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {METRIC_ROWS.map(r => (
+            <tr key={r.key}>
+              <td style={{ padding: "5px 8px", color: "#e2e8f0", fontWeight: 600, whiteSpace: "nowrap", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                {r.label}
+              </td>
+              {METRIC_COLS.map(c => {
+                const val = metrics[r.key]?.[c.key];
+                return (
+                  <td key={c.key} style={{
+                    padding: "5px 8px", textAlign: "right", whiteSpace: "nowrap",
+                    borderBottom: "1px solid rgba(255,255,255,0.04)",
+                    color: na(val) ? "#64748b" : "#f1f5f9",
+                    fontStyle: na(val) ? "italic" : "normal",
+                  }}>
+                    {val || "NA"}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Verdict pill. "NA" is styled neutrally so it never reads as a call to act. */
+function VerdictBadge({ verdict }: { verdict?: string | null }) {
+  const v = (verdict || "NA").toUpperCase();
+  const isNA = v === "NA";
+  const positive = /BEAT|^BUY$/.test(v);
+  const negative = /MISS|^SELL$/.test(v);
+  const color = isNA ? "#94a3b8" : positive ? "#4ade80" : negative ? "#f87171" : "#fbbf24";
+  const bg = isNA ? "rgba(148,163,184,0.12)" : positive ? "rgba(34,197,94,0.15)"
+    : negative ? "rgba(248,113,113,0.15)" : "rgba(251,191,36,0.15)";
+  return (
+    <span
+      title={isNA ? "Figures could not be extracted — no directional call is given" : undefined}
+      style={{ fontSize: "10px", fontWeight: 800, padding: "2px 8px", borderRadius: "4px", color, background: bg, whiteSpace: "nowrap" }}
+    >
+      {v}
+    </span>
+  );
 }
 
 interface UpcomingEarningsItem {
@@ -149,6 +247,10 @@ export function TradingDashboard() {
   const [aiLogs, setAiLogs] = useState<TradeAILog[]>([]);
   const [nseAnnouncements, setNseAnnouncements] = useState<any[]>([]);
   const [pendingResults, setPendingResults] = useState<PendingResult[]>([]);
+  const [pendingSearch, setPendingSearch] = useState("");
+  const [aiLogSearch, setAiLogSearch] = useState("");
+  const [aiLogDateFrom, setAiLogDateFrom] = useState("");
+  const [aiLogDateTo, setAiLogDateTo] = useState("");
   // Per-prompt order form state, keyed by pending-result id
   const [resultOrderForm, setResultOrderForm] = useState<Record<number, {
     quantity: number; order_type: string; limit_price: string;
@@ -356,13 +458,35 @@ export function TradingDashboard() {
     }
   }, [chartPeriod, chartInstrumentKey, fetchChartCandles]);
 
+  // AI-log filters are applied server-side so the date range spans all history,
+  // not just the page currently loaded.
+  const aiLogParams = () => {
+    const p = new URLSearchParams();
+    if (aiLogSearch.trim()) p.set("search", aiLogSearch.trim());
+    if (aiLogDateFrom) p.set("date_from", aiLogDateFrom);
+    if (aiLogDateTo) p.set("date_to", aiLogDateTo);
+    return p.toString();
+  };
+
+  // Pending results are filtered client-side: the list is small and already
+  // scoped to today, so this keeps typing instant.
+  const visiblePendingResults = useMemo(() => {
+    const q = pendingSearch.trim().toLowerCase();
+    if (!q) return pendingResults;
+    return pendingResults.filter(p =>
+      p.symbol.toLowerCase().includes(q) ||
+      (p.company_name || "").toLowerCase().includes(q) ||
+      (p.title || "").toLowerCase().includes(q)
+    );
+  }, [pendingResults, pendingSearch]);
+
   // Fetch initial & fast status data
   const fetchData = async () => {
     try {
       const [configsRes, ordersRes, aiLogsRes, pollerRes, settingsRes, feedRes, pendingRes] = await Promise.all([
         fetch(`${API_BASE}/api/trading/configs`),
         fetch(`${API_BASE}/api/trading/orders`),
-        fetch(`${API_BASE}/api/trading/ai-logs`),
+        fetch(`${API_BASE}/api/trading/ai-logs?${aiLogParams()}`),
         fetch(`${API_BASE}/api/trading/poller/status`),
         fetch(`${API_BASE}/api/trading/settings`),
         // Financial results live here, not in the AI Intelligence feed
@@ -1005,17 +1129,48 @@ export function TradingDashboard() {
           padding: "18px",
           marginBottom: "20px"
         }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "14px" }}>
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "12px" }}>
             <h3 style={{ fontSize: "15px", fontWeight: 700, color: "#fbbf24", display: "flex", alignItems: "center", gap: "8px", margin: 0 }}>
-              <AlertTriangle size={18} /> Financial Results — Order Decision Required ({pendingResults.length})
+              <AlertTriangle size={18} /> Financial Results — Order Decision Required
+              {" "}({visiblePendingResults.length}{pendingSearch.trim() ? ` of ${pendingResults.length}` : ""})
             </h3>
-            <span style={{ fontSize: "11px", color: "#fcd34d", background: "rgba(251,191,36,0.12)", padding: "4px 10px", borderRadius: "20px" }}>
-              Results filed for stocks that are not armed
-            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <input
+                value={pendingSearch}
+                onChange={e => setPendingSearch(e.target.value)}
+                placeholder="Search symbol, company or filing…"
+                style={{
+                  padding: "6px 10px", minWidth: "240px", fontSize: "12px",
+                  background: "rgba(2,6,23,0.8)", border: "1px solid rgba(251,191,36,0.3)",
+                  borderRadius: "6px", color: "#f1f5f9",
+                }}
+              />
+              {pendingSearch && (
+                <button onClick={() => setPendingSearch("")}
+                  style={{ padding: "6px 10px", background: "transparent", border: "1px solid rgba(148,163,184,0.3)", borderRadius: "6px", color: "#94a3b8", fontSize: "11px", cursor: "pointer" }}>
+                  Clear
+                </button>
+              )}
+              <span style={{ fontSize: "11px", color: "#fcd34d", background: "rgba(251,191,36,0.12)", padding: "4px 10px", borderRadius: "20px", whiteSpace: "nowrap" }}>
+                Today only · not armed
+              </span>
+            </div>
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            {pendingResults.map(pending => {
+          {/* Capped height: a heavy results day can produce hundreds of prompts,
+              and the panel must not push the rest of the dashboard off-screen. */}
+          <div style={{
+            display: "flex", flexDirection: "column", gap: "12px",
+            maxHeight: "560px", overflowY: "auto", paddingRight: "6px",
+          }}>
+            {visiblePendingResults.length === 0 && (
+              <div style={{ padding: "18px", textAlign: "center", color: "#94a3b8", fontSize: "12px" }}>
+                {pendingSearch.trim()
+                  ? `No results match "${pendingSearch}".`
+                  : "No financial results awaiting a decision today."}
+              </div>
+            )}
+            {visiblePendingResults.map(pending => {
               const form = getResultForm(pending.id);
               const busy = !!actionLoading[`result_${pending.id}`];
               const ai = pending.ai_analysis;
@@ -1035,6 +1190,11 @@ export function TradingDashboard() {
                       background: pending.exchange === "nse" ? "rgba(59,130,246,0.15)" : "rgba(167,139,250,0.15)",
                       padding: "3px 8px", borderRadius: "4px"
                     }}>{pending.exchange.toUpperCase()}</span>
+                    {pending.company_name && (
+                      <span style={{ fontSize: "12px", color: "#94a3b8", fontWeight: 500 }}>
+                        {pending.company_name}
+                      </span>
+                    )}
                     <span style={{ fontSize: "12px", color: "#cbd5e1", flex: 1, minWidth: "200px" }}>{pending.title}</span>
                     {pending.event_time && (
                       <span style={{ fontSize: "11px", color: "#94a3b8" }}>
@@ -1113,23 +1273,24 @@ export function TradingDashboard() {
                   <div style={{ marginTop: "12px", paddingTop: "10px", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
                     {pending.ai_status === "done" && ai ? (
                       <div>
-                        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px", flexWrap: "wrap" }}>
                           <Sparkles size={13} style={{ color: "#a78bfa" }} />
                           <span style={{ fontSize: "11px", fontWeight: 700, color: "#a78bfa" }}>AI EARNINGS ANALYSIS</span>
-                          {ai.ai_suggestion && (
-                            <span style={{
-                              fontSize: "10px", fontWeight: 800, padding: "2px 8px", borderRadius: "4px",
-                              color: /BEAT|BUY/i.test(ai.ai_suggestion) ? "#4ade80" : /MISS|SELL/i.test(ai.ai_suggestion) ? "#f87171" : "#fbbf24",
-                              background: /BEAT|BUY/i.test(ai.ai_suggestion) ? "rgba(34,197,94,0.15)" : /MISS|SELL/i.test(ai.ai_suggestion) ? "rgba(248,113,113,0.15)" : "rgba(251,191,36,0.15)"
-                            }}>{ai.ai_suggestion}</span>
+                          <VerdictBadge verdict={ai.ai_suggestion} />
+                          {ai.extraction_ok === false && (
+                            <span style={{ fontSize: "10px", color: "#94a3b8", fontStyle: "italic" }}>
+                              figures not extractable — no directional call
+                            </span>
                           )}
                         </div>
-                        <div style={{ fontSize: "11px", color: "#cbd5e1", lineHeight: 1.55 }}>{ai.ai_summary}</div>
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: "12px", marginTop: "8px", fontSize: "10px", color: "#94a3b8" }}>
-                          {ai.revenue && ai.revenue !== "N/A" && <span><b style={{ color: "#e2e8f0" }}>Revenue:</b> {ai.revenue}</span>}
-                          {ai.pat_yoy && ai.pat_yoy !== "N/A" && <span><b style={{ color: "#e2e8f0" }}>PAT:</b> {ai.pat_yoy}</span>}
-                          {ai.operating_profit && ai.operating_profit !== "N/A" && <span><b style={{ color: "#e2e8f0" }}>OP:</b> {ai.operating_profit}</span>}
-                        </div>
+                        <MetricsTable metrics={ai.metrics} />
+                        <div style={{ fontSize: "11px", color: "#cbd5e1", lineHeight: 1.55, marginTop: "8px" }}>{ai.ai_summary}</div>
+                        {(ai.future_growth_outlook || ai.future_projected_numbers) && (
+                          <div style={{ display: "flex", flexDirection: "column", gap: "3px", marginTop: "8px", fontSize: "10px", color: "#94a3b8" }}>
+                            {ai.future_growth_outlook && <span><b style={{ color: "#e2e8f0" }}>Outlook:</b> {ai.future_growth_outlook}</span>}
+                            {ai.future_projected_numbers && <span><b style={{ color: "#e2e8f0" }}>Projected:</b> {ai.future_projected_numbers}</span>}
+                          </div>
+                        )}
                       </div>
                     ) : pending.ai_status === "failed" ? (
                       <span style={{ fontSize: "11px", color: "#f87171" }}>AI analysis failed — place the order on the filing itself.</span>
@@ -2616,24 +2777,49 @@ export function TradingDashboard() {
                 </span>
               </div>
             </h3>
-            <div style={{ maxHeight: "420px", overflowY: "auto" }}>
+
+            {/* Filters — applied server-side so the range covers all history,
+                not just the rows already loaded. */}
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px", marginBottom: "12px", padding: "8px 10px", background: "rgba(15,23,42,0.5)", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.05)" }}>
+              <input
+                value={aiLogSearch}
+                onChange={e => setAiLogSearch(e.target.value)}
+                placeholder="Search symbol, company or summary…"
+                style={{ flex: 1, minWidth: "170px", padding: "6px 10px", fontSize: "11px", background: "rgba(2,6,23,0.8)", border: "1px solid rgba(168,85,247,0.3)", borderRadius: "6px", color: "#f1f5f9" }}
+              />
+              <label style={{ fontSize: "10px", color: "#94a3b8", display: "flex", alignItems: "center", gap: "4px" }}>
+                From
+                <input type="date" value={aiLogDateFrom} onChange={e => setAiLogDateFrom(e.target.value)}
+                  style={{ padding: "5px 7px", fontSize: "11px", background: "rgba(2,6,23,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "#f1f5f9" }} />
+              </label>
+              <label style={{ fontSize: "10px", color: "#94a3b8", display: "flex", alignItems: "center", gap: "4px" }}>
+                To
+                <input type="date" value={aiLogDateTo} onChange={e => setAiLogDateTo(e.target.value)}
+                  style={{ padding: "5px 7px", fontSize: "11px", background: "rgba(2,6,23,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "#f1f5f9" }} />
+              </label>
+              {(aiLogSearch || aiLogDateFrom || aiLogDateTo) && (
+                <button onClick={() => { setAiLogSearch(""); setAiLogDateFrom(""); setAiLogDateTo(""); }}
+                  style={{ padding: "6px 10px", background: "transparent", border: "1px solid rgba(148,163,184,0.3)", borderRadius: "6px", color: "#94a3b8", fontSize: "11px", cursor: "pointer" }}>
+                  Reset
+                </button>
+              )}
+            </div>
+
+            <div style={{ maxHeight: "560px", overflowY: "auto" }}>
               {aiLogs.length === 0 ? (
                 <div style={{ color: "#64748b", fontSize: "12px", textAlign: "center", padding: "20px" }}>
-                  No earnings AI analysis logs yet. Auto-trading poller will populate AI results as soon as announcements arrive.
+                  {(aiLogSearch || aiLogDateFrom || aiLogDateTo)
+                    ? "No AI analysis matches these filters."
+                    : "No earnings AI analysis logs yet. Auto-trading poller will populate AI results as soon as announcements arrive."}
                 </div>
               ) : (
                 aiLogs.map((log) => {
-                  const hasValidAiSuggestion = Boolean(
-                    log.ai_suggestion &&
-                    log.ai_suggestion !== "PENDING" &&
-                    log.ai_suggestion !== "N/A" &&
-                    log.ai_suggestion !== "UNKNOWN" &&
-                    log.ai_suggestion !== "NULL" &&
-                    log.revenue && log.revenue !== "N/A"
-                  );
-                  const suggestion = (log.ai_suggestion || "").toUpperCase();
-                  const isBeat = suggestion.includes("BEAT") || suggestion.includes("BUY") || log.ai_sentiment === "positive";
-                  const isMiss = suggestion.includes("MISS") || suggestion.includes("SELL") || log.ai_sentiment === "negative";
+                  // "NA" means the figures could not be extracted, so the card
+                  // must not take on a directional (green/red) border either.
+                  const suggestion = (log.ai_suggestion || "NA").toUpperCase();
+                  const isNA = suggestion === "NA";
+                  const isBeat = !isNA && (suggestion.includes("BEAT") || suggestion === "BUY");
+                  const isMiss = !isNA && (suggestion.includes("MISS") || suggestion === "SELL");
 
                   return (
                     <div key={log.id} id={`ai-card-${(log.symbol || "").toUpperCase()}`} style={{
@@ -2647,29 +2833,10 @@ export function TradingDashboard() {
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                           <span style={{ fontSize: "15px", fontWeight: "800", color: "#f8fafc" }}>#{log.symbol}</span>
-                          {hasValidAiSuggestion ? (
-                            <span style={{
-                              padding: "3px 10px",
-                              borderRadius: "6px",
-                              fontSize: "11px",
-                              fontWeight: "800",
-                              backgroundColor: isBeat ? "#059669" : isMiss ? "#dc2626" : "#d97706",
-                              color: "white"
-                            }}>
-                              💡 {suggestion}
-                            </span>
-                          ) : (
-                            <span style={{
-                              padding: "3px 8px",
-                              borderRadius: "6px",
-                              fontSize: "10px",
-                              fontWeight: "600",
-                              backgroundColor: "rgba(100, 116, 139, 0.2)",
-                              color: "#94a3b8"
-                            }}>
-                              ⏳ AI Analysis Pending
-                            </span>
+                          {log.company_name && (
+                            <span style={{ fontSize: "11px", color: "#94a3b8", fontWeight: 500 }}>{log.company_name}</span>
                           )}
+                          <VerdictBadge verdict={log.ai_suggestion} />
                           {log.ai_sentiment && (
                             <span style={{
                               fontSize: "10px",
@@ -2708,30 +2875,26 @@ export function TradingDashboard() {
                         📢 {log.nse_event_title || "NSE Corporate Announcement"}
                       </div>
 
-                      <div style={{
-                        display: "grid",
-                        gridTemplateColumns: "1fr 1fr",
-                        gap: "8px",
-                        backgroundColor: "#161e2e",
-                        padding: "12px",
-                        borderRadius: "8px",
-                        marginBottom: "10px",
-                        fontSize: "11px"
-                      }}>
-                        <div><strong style={{ color: "#94a3b8" }}>📊 Revenue (YoY/QoQ):</strong> <div style={{ color: "#f1f5f9", marginTop: "2px", lineHeight: "1.3" }}>{log.revenue || "N/A"}</div></div>
-                        <div><strong style={{ color: "#94a3b8" }}>💸 Expenses:</strong> <div style={{ color: "#f1f5f9", marginTop: "2px", lineHeight: "1.3" }}>{log.expenses || "N/A"}</div></div>
-                        <div><strong style={{ color: "#94a3b8" }}>⚡ Op. Profit (OPM):</strong> <div style={{ color: "#f1f5f9", marginTop: "2px", lineHeight: "1.3" }}>{log.operating_profit || "N/A"}</div></div>
-                        <div><strong style={{ color: "#94a3b8" }}>🏛️ PBT:</strong> <div style={{ color: "#f1f5f9", marginTop: "2px", lineHeight: "1.3" }}>{log.pbt || "N/A"}</div></div>
-                        <div><strong style={{ color: "#94a3b8" }}>🪙 Other Income:</strong> <div style={{ color: "#f1f5f9", marginTop: "2px", lineHeight: "1.3" }}>{log.other_income || "N/A"}</div></div>
-                        <div><strong style={{ color: "#94a3b8" }}>📈 PAT (YoY/QoQ/Same Qtr):</strong> <div style={{ color: "#34d399", fontWeight: "700", marginTop: "2px", lineHeight: "1.3" }}>{log.pat_yoy || "N/A"}</div></div>
+                      <div style={{ backgroundColor: "#161e2e", padding: "10px 12px", borderRadius: "8px", marginBottom: "10px" }}>
+                        <MetricsTable metrics={log.metrics} />
+                        {!log.metrics && (
+                          <div style={{ fontSize: "11px", color: "#64748b", fontStyle: "italic" }}>
+                            No structured metrics on this analysis (recorded before the metric grid was introduced).
+                          </div>
+                        )}
                       </div>
 
-                      {log.growth_projection && log.growth_projection !== "N/A" && (
+                      {log.future_growth_outlook && log.future_growth_outlook !== "NA" && (
                         <div style={{ fontSize: "11px", color: "#cbd5e1", marginBottom: "6px", lineHeight: "1.4" }}>
-                          <strong style={{ color: "#38bdf8" }}>🔮 Growth Projection:</strong> {log.growth_projection}
+                          <strong style={{ color: "#38bdf8" }}>🔮 Future Growth Outlook:</strong> {log.future_growth_outlook}
                         </div>
                       )}
-                      {log.broker_estimates && log.broker_estimates !== "N/A" && (
+                      {log.future_projected_numbers && log.future_projected_numbers !== "NA" && (
+                        <div style={{ fontSize: "11px", color: "#cbd5e1", marginBottom: "6px", lineHeight: "1.4" }}>
+                          <strong style={{ color: "#818cf8" }}>📐 Future Projected Numbers:</strong> {log.future_projected_numbers}
+                        </div>
+                      )}
+                      {log.broker_estimates && !["NA", "N/A"].includes(log.broker_estimates) && (
                         <div style={{ fontSize: "11px", color: "#cbd5e1", marginBottom: "8px", lineHeight: "1.4" }}>
                           <strong style={{ color: "#fbbf24" }}>🎯 Broker Estimates:</strong> {log.broker_estimates}
                         </div>

@@ -17,6 +17,7 @@ the AI call can take minutes and the trading decision cannot wait for it.
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 from sqlalchemy.orm import Session
 
@@ -60,23 +61,43 @@ def _is_armed(db: Session, symbol: str) -> bool:
     ).first() is not None
 
 
-def _send_result_alert(ann, event):
-    """Immediate Telegram alert that a result has landed, ahead of the AI verdict."""
+def get_ltp(instrument_key: str, symbol: str = "") -> Optional[float]:
+    """Current traded price, or None when the feed cannot supply one."""
     try:
-        from app.services.telegram_notifier import send_telegram_alert
-        send_telegram_alert(
-            title=ann.title or "Financial Results",
+        from app.main import get_active_feed
+        feed = get_active_feed()
+        keys = []
+        if instrument_key:
+            keys += [instrument_key, instrument_key.replace("|", ":")]
+        if symbol:
+            keys.append(f"NSE_EQ|{symbol.upper()}")
+        quotes = feed.get_quotes([k for k in keys if k])
+        for q in quotes.values():
+            price = q.get("last_price")
+            if price:
+                return round(float(price), 2)
+    except Exception as e:
+        logger.debug(f"LTP lookup failed for {symbol or instrument_key}: {e}")
+    return None
+
+
+def _send_result_alert(ann, event, pending_id=None, instrument_key: str = ""):
+    """
+    Immediate Telegram alert that a result has landed, ahead of the AI verdict.
+
+    Carries symbol, company name and current price. When the stock is not armed
+    the alert also offers inline order buttons addressed to `pending_id`.
+    """
+    try:
+        from app.services.telegram_notifier import send_result_order_alert
+        send_result_order_alert(
             symbol=ann.symbol,
-            sentiment="neutral",
-            impact_score=0.0,
-            summary=(
-                f"Financial results filed on {ann.exchange.upper()}.\n"
-                f"{(ann.description or '')[:400]}\n\n"
-                f"AI earnings analysis is running — verdict follows."
-            ),
-            provider=ann.exchange.upper(),
+            company_name=ann.company_name,
+            exchange=ann.exchange,
+            title=ann.title or "Financial Results",
+            last_price=get_ltp(instrument_key, ann.symbol),
             url=ann.url,
-            alert_type="FINANCIAL RESULTS",
+            pending_id=pending_id,
         )
     except Exception as e:
         logger.debug(f"Telegram dispatch error for {ann.symbol}: {e}")
@@ -160,12 +181,11 @@ def route_financial_result(db: Session, ann, event, dedup_key: str):
 
     armed = _is_armed(db, symbol)
 
-    _send_result_alert(ann, event)
-
     if armed:
         # The trading poller matched this same fetch and is already executing;
         # it runs its own AI analysis with the real config_id attached.
         logger.info(f"📊 [RESULT] {symbol} is ARMED — trading engine owns execution.")
+        _send_result_alert(ann, event, instrument_key=_resolve_instrument_key(symbol))
         return
 
     # ── Not armed: raise an order prompt immediately ──
@@ -177,6 +197,8 @@ def route_financial_result(db: Session, ann, event, dedup_key: str):
 
     pending = PendingResultOrder(
         symbol=symbol,
+        company_name=ann.company_name or None,
+        trade_date=datetime.now(IST).strftime("%Y-%m-%d"),
         instrument_key=_resolve_instrument_key(symbol),
         isin=ann.isin or None,
         exchange=ann.exchange,
@@ -199,10 +221,14 @@ def route_financial_result(db: Session, ann, event, dedup_key: str):
 
     logger.info(f"🔔 [RESULT] {symbol} is NOT armed — order prompt raised (#{pending.id}).")
 
+    # Alert now that the pending row exists, so the inline buttons can address it.
+    _send_result_alert(ann, event, pending_id=pending.id, instrument_key=pending.instrument_key)
+
     # Push the order screen to the UI before AI work begins.
     sse_manager.broadcast("pending_result_order", {
         "id": pending.id,
         "symbol": pending.symbol,
+        "company_name": pending.company_name,
         "instrument_key": pending.instrument_key,
         "exchange": pending.exchange,
         "title": pending.title,
@@ -223,6 +249,42 @@ def route_financial_result(db: Session, ann, event, dedup_key: str):
         None,
         pending.id,
     )
+
+
+def expire_stale_pending(db: Session) -> int:
+    """
+    Retire result prompts left over from previous trading days.
+
+    An order decision on yesterday's print is meaningless once the market has
+    re-opened and repriced, so the panel starts each day clean rather than
+    accumulating a backlog the user has to scroll past.
+    """
+    today = datetime.now(IST).strftime("%Y-%m-%d")
+    try:
+        stale = db.query(PendingResultOrder).filter(
+            PendingResultOrder.status == "pending",
+            (PendingResultOrder.trade_date != today) | (PendingResultOrder.trade_date.is_(None)),
+        ).all()
+        if not stale:
+            return 0
+        for row in stale:
+            # Rows predating the trade_date column are dated from created_at.
+            if row.trade_date is None and row.created_at:
+                inferred = row.created_at.strftime("%Y-%m-%d")
+                row.trade_date = inferred
+                if inferred == today:
+                    continue
+            row.status = "expired"
+            row.resolved_at = datetime.utcnow()
+        db.commit()
+        expired = sum(1 for r in stale if r.status == "expired")
+        if expired:
+            logger.info(f"Expired {expired} result prompts from earlier trading days.")
+        return expired
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to expire stale pending results: {e}")
+        return 0
 
 
 def run_ai_for_pending(pending_id: int, config_id=None):
