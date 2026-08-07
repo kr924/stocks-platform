@@ -532,17 +532,25 @@ CRITICAL: Output ONLY raw JSON. No prose, no markdown fences, no preamble.
                     print(f"⚠️ [FLOW 1 PDF WARNING]: Could not download PDF for base64 encoding: {pdf_err}")
 
             # 2. Build Request Payload
-            payload = {"prompt": prompt}
+            #
+            # The generation budget must be sent in the BODY. `requests(timeout=)`
+            # only governs how long this client waits; gemcall reads its own
+            # budget from req.body.timeout and otherwise falls back to
+            # PAGE_TIMEOUT_MS (60s). That mismatch meant gemcall abandoned
+            # every PDF analysis at 60s while this side sat waiting for 180s,
+            # and the response came back empty.
+            gemcall_timeout_ms = 240000  # 4 min — Gemini needs 2-3 min on a PDF
+            payload = {"prompt": prompt, "timeout": gemcall_timeout_ms}
             if base64_pdf:
                 payload["images"] = [f"data:application/pdf;base64,{base64_pdf}"]
 
-            # 3. Post to gemcall / Custom REST API (timeout=180s)
-            #    Gemini with PDF attachments can take 2-3 minutes to process
+            # 3. Post to gemcall / Custom REST API. The HTTP timeout must exceed
+            #    the generation budget or the client hangs up on a live run.
             resp = requests.post(
                 custom_url,
                 json=payload,
                 headers={"Content-Type": "application/json"},
-                timeout=180
+                timeout=(gemcall_timeout_ms / 1000) + 60,
             )
             if resp.status_code == 200:
                 try:
