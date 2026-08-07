@@ -164,9 +164,9 @@ function MetricsTable({ metrics }: { metrics: MetricGrid | null | undefined }) {
       <table style={{ borderCollapse: "collapse", fontSize: "11px", minWidth: "480px", width: "100%" }}>
         <thead>
           <tr>
-            <th style={{ textAlign: "left", padding: "5px 8px", color: "#94a3b8", fontWeight: 600, borderBottom: "1px solid rgba(255,255,255,0.12)" }}></th>
+            <th style={{ textAlign: "left", padding: "5px 8px", color: "var(--text-muted)", fontWeight: 600, borderBottom: "1px solid rgba(255,255,255,0.12)" }}></th>
             {METRIC_COLS.map(c => (
-              <th key={c.key} style={{ textAlign: "right", padding: "5px 8px", color: "#94a3b8", fontWeight: 600, borderBottom: "1px solid rgba(255,255,255,0.12)", whiteSpace: "nowrap" }}>
+              <th key={c.key} style={{ textAlign: "right", padding: "5px 8px", color: "var(--text-muted)", fontWeight: 600, borderBottom: "1px solid rgba(255,255,255,0.12)", whiteSpace: "nowrap" }}>
                 {c.label}
               </th>
             ))}
@@ -175,7 +175,7 @@ function MetricsTable({ metrics }: { metrics: MetricGrid | null | undefined }) {
         <tbody>
           {METRIC_ROWS.map(r => (
             <tr key={r.key}>
-              <td style={{ padding: "5px 8px", color: "#e2e8f0", fontWeight: 600, whiteSpace: "nowrap", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+              <td style={{ padding: "5px 8px", color: "var(--text-primary)", fontWeight: 600, whiteSpace: "nowrap", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
                 {r.label}
               </td>
               {METRIC_COLS.map(c => {
@@ -184,7 +184,7 @@ function MetricsTable({ metrics }: { metrics: MetricGrid | null | undefined }) {
                   <td key={c.key} style={{
                     padding: "5px 8px", textAlign: "right", whiteSpace: "nowrap",
                     borderBottom: "1px solid rgba(255,255,255,0.04)",
-                    color: na(val) ? "#64748b" : "#f1f5f9",
+                    color: na(val) ? "var(--text-faint)" : "var(--text-primary)",
                     fontStyle: na(val) ? "italic" : "normal",
                   }}>
                     {val || "NA"}
@@ -205,9 +205,9 @@ function VerdictBadge({ verdict }: { verdict?: string | null }) {
   const isNA = v === "NA";
   const positive = /BEAT|^BUY$/.test(v);
   const negative = /MISS|^SELL$/.test(v);
-  const color = isNA ? "#94a3b8" : positive ? "#4ade80" : negative ? "#f87171" : "#fbbf24";
-  const bg = isNA ? "rgba(148,163,184,0.12)" : positive ? "rgba(34,197,94,0.15)"
-    : negative ? "rgba(248,113,113,0.15)" : "rgba(251,191,36,0.15)";
+  const color = isNA ? "var(--text-muted)" : positive ? "var(--positive-strong)" : negative ? "var(--negative-strong)" : "var(--warning)";
+  const bg = isNA ? "rgba(125, 135, 153,0.12)" : positive ? "rgba(63, 191, 135,0.15)"
+    : negative ? "rgba(240, 115, 111,0.15)" : "rgba(224, 163, 62,0.15)";
   return (
     <span
       title={isNA ? "Figures could not be extracted — no directional call is given" : undefined}
@@ -927,11 +927,11 @@ export function TradingDashboard() {
             borderRadius: "12px",
             fontSize: "11px",
             fontWeight: "700",
-            backgroundColor: "rgba(16, 185, 129, 0.15)",
-            color: "#10b981",
-            border: "1px solid rgba(16, 185, 129, 0.3)"
+            backgroundColor: "rgba(63, 191, 135, 0.15)",
+            color: "var(--positive)",
+            border: "1px solid rgba(63, 191, 135, 0.3)"
           }}>
-            <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: "#10b981" }} className="animate-pulse" />
+            <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: "var(--positive)" }} className="animate-pulse" />
             ARMED & POLLING
           </span>
         );
@@ -942,9 +942,9 @@ export function TradingDashboard() {
             borderRadius: "12px",
             fontSize: "11px",
             fontWeight: "700",
-            backgroundColor: "rgba(168, 85, 247, 0.2)",
-            color: "#c084fc",
-            border: "1px solid rgba(168, 85, 247, 0.3)"
+            backgroundColor: "rgba(164, 138, 224, 0.2)",
+            color: "var(--ai)",
+            border: "1px solid rgba(164, 138, 224, 0.3)"
           }}>
             ⚡ TRIGGERED
           </span>
@@ -956,9 +956,9 @@ export function TradingDashboard() {
             borderRadius: "12px",
             fontSize: "11px",
             fontWeight: "700",
-            backgroundColor: "rgba(59, 130, 246, 0.2)",
-            color: "#60a5fa",
-            border: "1px solid rgba(59, 130, 246, 0.3)"
+            backgroundColor: "rgba(91, 157, 255, 0.2)",
+            color: "var(--accent)",
+            border: "1px solid rgba(91, 157, 255, 0.3)"
           }}>
             🛒 BOUGHT / HOLDING
           </span>
@@ -971,7 +971,7 @@ export function TradingDashboard() {
             fontSize: "11px",
             fontWeight: "700",
             backgroundColor: "rgba(6, 182, 212, 0.2)",
-            color: "#22d3ee",
+            color: "var(--info)",
             border: "1px solid rgba(6, 182, 212, 0.3)"
           }}>
             💰 SOLD
@@ -984,9 +984,9 @@ export function TradingDashboard() {
             borderRadius: "12px",
             fontSize: "11px",
             fontWeight: "700",
-            backgroundColor: "rgba(239, 68, 68, 0.2)",
-            color: "#f87171",
-            border: "1px solid rgba(239, 68, 68, 0.3)"
+            backgroundColor: "rgba(240, 115, 111, 0.2)",
+            color: "var(--negative-strong)",
+            border: "1px solid rgba(240, 115, 111, 0.3)"
           }}>
             ❌ FAILED
           </span>
@@ -998,9 +998,9 @@ export function TradingDashboard() {
             borderRadius: "12px",
             fontSize: "11px",
             fontWeight: "600",
-            backgroundColor: "rgba(148, 163, 184, 0.15)",
-            color: "#94a3b8",
-            border: "1px solid rgba(148, 163, 184, 0.2)"
+            backgroundColor: "rgba(125, 135, 153, 0.15)",
+            color: "var(--text-muted)",
+            border: "1px solid rgba(125, 135, 153, 0.2)"
           }}>
             DISARMED
           </span>
@@ -1013,7 +1013,7 @@ export function TradingDashboard() {
             fontSize: "11px",
             fontWeight: "600",
             backgroundColor: "rgba(234, 179, 8, 0.15)",
-            color: "#facc15",
+            color: "var(--warning)",
             border: "1px solid rgba(234, 179, 8, 0.2)"
           }}>
             PENDING
@@ -1025,9 +1025,9 @@ export function TradingDashboard() {
   return (
     <div style={{
       padding: "20px",
-      backgroundColor: "#0f172a",
+      backgroundColor: "var(--bg-base)",
       minHeight: "calc(100vh - 80px)",
-      color: "#f8fafc",
+      color: "var(--text-primary)",
       fontFamily: "system-ui, sans-serif"
     }}>
       {/* TOP POLLER STATUS HEADER */}
@@ -1038,7 +1038,7 @@ export function TradingDashboard() {
         marginBottom: "20px"
       }}>
         <div style={{
-          background: "#1e293b",
+          background: "var(--surface-2)",
           border: "1px solid rgba(255, 255, 255, 0.12)",
           boxShadow: "0 4px 16px rgba(0, 0, 0, 0.2)",
           borderRadius: "12px",
@@ -1050,21 +1050,21 @@ export function TradingDashboard() {
           <div style={{
             padding: "10px",
             borderRadius: "10px",
-            backgroundColor: pollerStatus?.running ? "rgba(52, 211, 153, 0.2)" : "rgba(244, 63, 94, 0.2)",
-            color: pollerStatus?.running ? "#34d399" : "#f43f5e"
+            backgroundColor: pollerStatus?.running ? "rgba(63, 191, 135, 0.2)" : "rgba(240, 115, 111, 0.2)",
+            color: pollerStatus?.running ? "var(--positive-strong)" : "var(--negative)"
           }}>
             <Zap size={22} />
           </div>
           <div>
-            <div style={{ fontSize: "11px", color: "#cbd5e1", fontWeight: "600" }}>NSE REAL-TIME POLLER</div>
-            <div style={{ fontSize: "15px", fontWeight: "800", color: pollerStatus?.running ? "#34d399" : "#f87171", marginTop: "2px" }}>
+            <div style={{ fontSize: "11px", color: "var(--text-secondary)", fontWeight: "600" }}>NSE REAL-TIME POLLER</div>
+            <div style={{ fontSize: "15px", fontWeight: "800", color: pollerStatus?.running ? "var(--positive-strong)" : "var(--negative-strong)", marginTop: "2px" }}>
               {pollerStatus?.running ? `🟢 ACTIVE (${pollerStatus?.mode || 'Adaptive'})` : "🔴 IDLE"}
             </div>
           </div>
         </div>
 
         <div style={{
-          background: "#1e293b",
+          background: "var(--surface-2)",
           border: "1px solid rgba(255, 255, 255, 0.12)",
           boxShadow: "0 4px 16px rgba(0, 0, 0, 0.2)",
           borderRadius: "12px",
@@ -1073,19 +1073,19 @@ export function TradingDashboard() {
           alignItems: "center",
           gap: "14px"
         }}>
-          <div style={{ padding: "10px", borderRadius: "10px", backgroundColor: "rgba(59, 130, 246, 0.15)", color: "#60a5fa" }}>
+          <div style={{ padding: "10px", borderRadius: "10px", backgroundColor: "rgba(91, 157, 255, 0.15)", color: "var(--accent)" }}>
             <Play size={22} />
           </div>
           <div>
-            <div style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "600" }}>ARMED CONFIGS</div>
-            <div style={{ fontSize: "20px", fontWeight: "800", color: "#f8fafc" }}>
+            <div style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "600" }}>ARMED CONFIGS</div>
+            <div style={{ fontSize: "20px", fontWeight: "800", color: "var(--text-primary)" }}>
               {pollerStatus?.armed_count || 0} Targets Active
             </div>
           </div>
         </div>
 
         <div style={{
-          background: "rgba(17, 24, 39, 0.6)",
+          background: "rgba(22, 27, 36, 0.6)",
           border: "1px solid rgba(255, 255, 255, 0.08)",
           borderRadius: "12px",
           padding: "14px 18px",
@@ -1093,19 +1093,19 @@ export function TradingDashboard() {
           alignItems: "center",
           gap: "14px"
         }}>
-          <div style={{ padding: "10px", borderRadius: "10px", backgroundColor: "rgba(168, 85, 247, 0.15)", color: "#c084fc" }}>
+          <div style={{ padding: "10px", borderRadius: "10px", backgroundColor: "rgba(164, 138, 224, 0.15)", color: "var(--ai)" }}>
             <Cpu size={22} />
           </div>
           <div>
-            <div style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "600" }}>POLLS & TRIGGERS</div>
-            <div style={{ fontSize: "14px", fontWeight: "700", color: "#e2e8f0" }}>
+            <div style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "600" }}>POLLS & TRIGGERS</div>
+            <div style={{ fontSize: "14px", fontWeight: "700", color: "var(--text-primary)" }}>
               {pollerStatus?.polls_total || 0} Polls | ⚡ {pollerStatus?.triggers_total || 0} Triggers
             </div>
           </div>
         </div>
 
         <div style={{
-          background: "rgba(17, 24, 39, 0.6)",
+          background: "rgba(22, 27, 36, 0.6)",
           border: "1px solid rgba(255, 255, 255, 0.08)",
           borderRadius: "12px",
           padding: "14px 18px",
@@ -1113,12 +1113,12 @@ export function TradingDashboard() {
           alignItems: "center",
           gap: "14px"
         }}>
-          <div style={{ padding: "10px", borderRadius: "10px", backgroundColor: "rgba(245, 158, 11, 0.15)", color: "#fbbf24" }}>
+          <div style={{ padding: "10px", borderRadius: "10px", backgroundColor: "rgba(224, 163, 62, 0.15)", color: "var(--warning)" }}>
             <ShieldAlert size={22} />
           </div>
           <div>
-            <div style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "600" }}>STOPLOSS WATCHER</div>
-            <div style={{ fontSize: "14px", fontWeight: "700", color: "#fbbf24" }}>
+            <div style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "600" }}>STOPLOSS WATCHER</div>
+            <div style={{ fontSize: "14px", fontWeight: "700", color: "var(--warning)" }}>
               Active (Software + Bracket)
             </div>
           </div>
@@ -1129,13 +1129,13 @@ export function TradingDashboard() {
       {pendingResults.length > 0 && (
         <div style={{
           background: "rgba(120, 53, 15, 0.25)",
-          border: "1px solid rgba(251, 191, 36, 0.45)",
+          border: "1px solid rgba(224, 163, 62, 0.45)",
           borderRadius: "14px",
           padding: "18px",
           marginBottom: "20px"
         }}>
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "12px" }}>
-            <h3 style={{ fontSize: "15px", fontWeight: 700, color: "#fbbf24", display: "flex", alignItems: "center", gap: "8px", margin: 0 }}>
+            <h3 style={{ fontSize: "15px", fontWeight: 700, color: "var(--warning)", display: "flex", alignItems: "center", gap: "8px", margin: 0 }}>
               <AlertTriangle size={18} /> Financial Results — Order Decision Required
               {" "}({visiblePendingResults.length}{pendingSearch.trim() ? ` of ${pendingResults.length}` : ""})
             </h3>
@@ -1146,17 +1146,17 @@ export function TradingDashboard() {
                 placeholder="Search symbol, company or filing…"
                 style={{
                   padding: "6px 10px", minWidth: "240px", fontSize: "12px",
-                  background: "rgba(2,6,23,0.8)", border: "1px solid rgba(251,191,36,0.3)",
-                  borderRadius: "6px", color: "#f1f5f9",
+                  background: "rgba(10, 13, 18,0.8)", border: "1px solid rgba(224, 163, 62,0.3)",
+                  borderRadius: "6px", color: "var(--text-primary)",
                 }}
               />
               {pendingSearch && (
                 <button onClick={() => setPendingSearch("")}
-                  style={{ padding: "6px 10px", background: "transparent", border: "1px solid rgba(148,163,184,0.3)", borderRadius: "6px", color: "#94a3b8", fontSize: "11px", cursor: "pointer" }}>
+                  style={{ padding: "6px 10px", background: "transparent", border: "1px solid rgba(125, 135, 153,0.3)", borderRadius: "6px", color: "var(--text-muted)", fontSize: "11px", cursor: "pointer" }}>
                   Clear
                 </button>
               )}
-              <span style={{ fontSize: "11px", color: "#fcd34d", background: "rgba(251,191,36,0.12)", padding: "4px 10px", borderRadius: "20px", whiteSpace: "nowrap" }}>
+              <span style={{ fontSize: "11px", color: "var(--warning)", background: "rgba(224, 163, 62,0.12)", padding: "4px 10px", borderRadius: "20px", whiteSpace: "nowrap" }}>
                 Today only · not armed
               </span>
             </div>
@@ -1169,7 +1169,7 @@ export function TradingDashboard() {
             maxHeight: "560px", overflowY: "auto", paddingRight: "6px",
           }}>
             {visiblePendingResults.length === 0 && (
-              <div style={{ padding: "18px", textAlign: "center", color: "#94a3b8", fontSize: "12px" }}>
+              <div style={{ padding: "18px", textAlign: "center", color: "var(--text-muted)", fontSize: "12px" }}>
                 {pendingSearch.trim()
                   ? `No results match "${pendingSearch}".`
                   : "No financial results awaiting a decision today."}
@@ -1181,34 +1181,34 @@ export function TradingDashboard() {
               const ai = pending.ai_analysis;
               return (
                 <div key={pending.id} style={{
-                  background: "rgba(15, 23, 42, 0.6)",
-                  border: "1px solid rgba(251, 191, 36, 0.25)",
+                  background: "rgba(15, 19, 25, 0.6)",
+                  border: "1px solid rgba(224, 163, 62, 0.25)",
                   borderRadius: "10px",
                   padding: "14px"
                 }}>
                   {/* Header line */}
                   <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "10px", marginBottom: "10px" }}>
-                    <span style={{ fontSize: "16px", fontWeight: 800, color: "#f1f5f9" }}>{pending.symbol}</span>
+                    <span style={{ fontSize: "16px", fontWeight: 800, color: "var(--text-primary)" }}>{pending.symbol}</span>
                     <span style={{
                       fontSize: "10px", fontWeight: 700, letterSpacing: "0.5px",
-                      color: pending.exchange === "nse" ? "#60a5fa" : "#a78bfa",
-                      background: pending.exchange === "nse" ? "rgba(59,130,246,0.15)" : "rgba(167,139,250,0.15)",
+                      color: pending.exchange === "nse" ? "var(--accent)" : "var(--ai)",
+                      background: pending.exchange === "nse" ? "rgba(91, 157, 255,0.15)" : "rgba(164, 138, 224,0.15)",
                       padding: "3px 8px", borderRadius: "4px"
                     }}>{pending.exchange.toUpperCase()}</span>
                     {pending.company_name && (
-                      <span style={{ fontSize: "12px", color: "#94a3b8", fontWeight: 500 }}>
+                      <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: 500 }}>
                         {pending.company_name}
                       </span>
                     )}
-                    <span style={{ fontSize: "12px", color: "#cbd5e1", flex: 1, minWidth: "200px" }}>{pending.title}</span>
+                    <span style={{ fontSize: "12px", color: "var(--text-secondary)", flex: 1, minWidth: "200px" }}>{pending.title}</span>
                     {pending.event_time && (
-                      <span style={{ fontSize: "11px", color: "#94a3b8" }}>
+                      <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
                         {new Date(pending.event_time).toLocaleString()}
                       </span>
                     )}
                     {pending.attachment_url && (
                       <a href={pending.attachment_url} target="_blank" rel="noreferrer"
-                         style={{ fontSize: "11px", color: "#60a5fa", display: "flex", alignItems: "center", gap: "4px" }}>
+                         style={{ fontSize: "11px", color: "var(--accent)", display: "flex", alignItems: "center", gap: "4px" }}>
                         <ExternalLink size={12} /> Filing
                       </a>
                     )}
@@ -1216,40 +1216,40 @@ export function TradingDashboard() {
 
                   {/* Order form */}
                   <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: "10px" }}>
-                    <label style={{ fontSize: "10px", color: "#94a3b8" }}>
+                    <label style={{ fontSize: "10px", color: "var(--text-muted)" }}>
                       QTY
                       <input type="number" min={1} value={form.quantity}
                         onChange={e => updateResultForm(pending.id, { quantity: parseInt(e.target.value) || 1 })}
-                        style={{ display: "block", width: "70px", marginTop: "3px", padding: "6px 8px", background: "rgba(2,6,23,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "#f1f5f9", fontSize: "12px" }} />
+                        style={{ display: "block", width: "70px", marginTop: "3px", padding: "6px 8px", background: "rgba(10, 13, 18,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "12px" }} />
                     </label>
-                    <label style={{ fontSize: "10px", color: "#94a3b8" }}>
+                    <label style={{ fontSize: "10px", color: "var(--text-muted)" }}>
                       TYPE
                       <select value={form.order_type}
                         onChange={e => updateResultForm(pending.id, { order_type: e.target.value })}
-                        style={{ display: "block", marginTop: "3px", padding: "6px 8px", background: "rgba(2,6,23,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "#f1f5f9", fontSize: "12px" }}>
+                        style={{ display: "block", marginTop: "3px", padding: "6px 8px", background: "rgba(10, 13, 18,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "12px" }}>
                         <option value="MARKET">MARKET</option>
                         <option value="LIMIT">LIMIT</option>
                       </select>
                     </label>
                     {form.order_type === "LIMIT" && (
-                      <label style={{ fontSize: "10px", color: "#94a3b8" }}>
+                      <label style={{ fontSize: "10px", color: "var(--text-muted)" }}>
                         LIMIT ₹
                         <input type="number" step="0.05" value={form.limit_price}
                           onChange={e => updateResultForm(pending.id, { limit_price: e.target.value })}
-                          style={{ display: "block", width: "90px", marginTop: "3px", padding: "6px 8px", background: "rgba(2,6,23,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "#f1f5f9", fontSize: "12px" }} />
+                          style={{ display: "block", width: "90px", marginTop: "3px", padding: "6px 8px", background: "rgba(10, 13, 18,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "12px" }} />
                       </label>
                     )}
-                    <label style={{ fontSize: "10px", color: "#94a3b8" }}>
+                    <label style={{ fontSize: "10px", color: "var(--text-muted)" }}>
                       SL %
                       <input type="number" step="0.5" min={0.5} value={form.stoploss_pct}
                         onChange={e => updateResultForm(pending.id, { stoploss_pct: parseFloat(e.target.value) || 2 })}
-                        style={{ display: "block", width: "70px", marginTop: "3px", padding: "6px 8px", background: "rgba(2,6,23,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "#f1f5f9", fontSize: "12px" }} />
+                        style={{ display: "block", width: "70px", marginTop: "3px", padding: "6px 8px", background: "rgba(10, 13, 18,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "12px" }} />
                     </label>
-                    <label style={{ fontSize: "10px", color: "#94a3b8" }}>
+                    <label style={{ fontSize: "10px", color: "var(--text-muted)" }}>
                       BROKER
                       <select value={form.broker}
                         onChange={e => updateResultForm(pending.id, { broker: e.target.value })}
-                        style={{ display: "block", marginTop: "3px", padding: "6px 8px", background: "rgba(2,6,23,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "#f1f5f9", fontSize: "12px" }}>
+                        style={{ display: "block", marginTop: "3px", padding: "6px 8px", background: "rgba(10, 13, 18,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "12px" }}>
                         <option value="upstox">Upstox</option>
                         <option value="zerodha">Zerodha</option>
                       </select>
@@ -1257,8 +1257,8 @@ export function TradingDashboard() {
 
                     <button onClick={() => handlePlaceResultOrder(pending)} disabled={busy}
                       style={{
-                        padding: "8px 16px", background: busy ? "rgba(34,197,94,0.4)" : "#16a34a",
-                        border: "none", borderRadius: "6px", color: "#fff", fontSize: "12px", fontWeight: 700,
+                        padding: "8px 16px", background: busy ? "rgba(63, 191, 135,0.4)" : "var(--positive)",
+                        border: "none", borderRadius: "6px", color: "var(--on-accent)", fontSize: "12px", fontWeight: 700,
                         cursor: busy ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: "6px"
                       }}>
                       <ShoppingBag size={14} /> {busy ? "Placing…" : "Place Buy Order"}
@@ -1266,8 +1266,8 @@ export function TradingDashboard() {
                     <button onClick={() => handleDismissResult(pending.id)} disabled={busy}
                       style={{
                         padding: "8px 14px", background: "transparent",
-                        border: "1px solid rgba(148,163,184,0.35)", borderRadius: "6px",
-                        color: "#94a3b8", fontSize: "12px", fontWeight: 600,
+                        border: "1px solid rgba(125, 135, 153,0.35)", borderRadius: "6px",
+                        color: "var(--text-muted)", fontSize: "12px", fontWeight: 600,
                         cursor: busy ? "not-allowed" : "pointer"
                       }}>
                       Dismiss
@@ -1279,28 +1279,28 @@ export function TradingDashboard() {
                     {pending.ai_status === "done" && ai ? (
                       <div>
                         <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px", flexWrap: "wrap" }}>
-                          <Sparkles size={13} style={{ color: "#a78bfa" }} />
-                          <span style={{ fontSize: "11px", fontWeight: 700, color: "#a78bfa" }}>AI EARNINGS ANALYSIS</span>
+                          <Sparkles size={13} style={{ color: "var(--ai)" }} />
+                          <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--ai)" }}>AI EARNINGS ANALYSIS</span>
                           <VerdictBadge verdict={ai.ai_suggestion} />
                           {ai.extraction_ok === false && (
-                            <span style={{ fontSize: "10px", color: "#94a3b8", fontStyle: "italic" }}>
+                            <span style={{ fontSize: "10px", color: "var(--text-muted)", fontStyle: "italic" }}>
                               figures not extractable — no directional call
                             </span>
                           )}
                         </div>
                         <MetricsTable metrics={ai.metrics} />
-                        <div style={{ fontSize: "11px", color: "#cbd5e1", lineHeight: 1.55, marginTop: "8px" }}>{ai.ai_summary}</div>
+                        <div style={{ fontSize: "11px", color: "var(--text-secondary)", lineHeight: 1.55, marginTop: "8px" }}>{ai.ai_summary}</div>
                         {(ai.future_growth_outlook || ai.future_projected_numbers) && (
-                          <div style={{ display: "flex", flexDirection: "column", gap: "3px", marginTop: "8px", fontSize: "10px", color: "#94a3b8" }}>
-                            {ai.future_growth_outlook && <span><b style={{ color: "#e2e8f0" }}>Outlook:</b> {ai.future_growth_outlook}</span>}
-                            {ai.future_projected_numbers && <span><b style={{ color: "#e2e8f0" }}>Projected:</b> {ai.future_projected_numbers}</span>}
+                          <div style={{ display: "flex", flexDirection: "column", gap: "3px", marginTop: "8px", fontSize: "10px", color: "var(--text-muted)" }}>
+                            {ai.future_growth_outlook && <span><b style={{ color: "var(--text-primary)" }}>Outlook:</b> {ai.future_growth_outlook}</span>}
+                            {ai.future_projected_numbers && <span><b style={{ color: "var(--text-primary)" }}>Projected:</b> {ai.future_projected_numbers}</span>}
                           </div>
                         )}
                       </div>
                     ) : pending.ai_status === "failed" ? (
-                      <span style={{ fontSize: "11px", color: "#f87171" }}>AI analysis failed — place the order on the filing itself.</span>
+                      <span style={{ fontSize: "11px", color: "var(--negative-strong)" }}>AI analysis failed — place the order on the filing itself.</span>
                     ) : (
-                      <span style={{ fontSize: "11px", color: "#94a3b8", display: "flex", alignItems: "center", gap: "6px" }}>
+                      <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "6px" }}>
                         <RefreshCw size={12} className="spin" /> AI earnings analysis running…
                       </span>
                     )}
@@ -1314,23 +1314,23 @@ export function TradingDashboard() {
 
       {/* UPCOMING EARNINGS CALENDAR SECTION */}
       <div style={{
-        background: "rgba(17, 24, 39, 0.6)",
-        border: "1px solid rgba(59, 130, 246, 0.2)",
+        background: "rgba(22, 27, 36, 0.6)",
+        border: "1px solid rgba(91, 157, 255, 0.2)",
         borderRadius: "14px",
         padding: "18px",
         marginBottom: "20px"
       }}>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "14px" }}>
-          <h3 style={{ fontSize: "15px", fontWeight: "700", color: "#60a5fa", display: "flex", alignItems: "center", gap: "8px", margin: 0 }}>
+          <h3 style={{ fontSize: "15px", fontWeight: "700", color: "var(--accent)", display: "flex", alignItems: "center", gap: "8px", margin: 0 }}>
             <Calendar size={18} /> 📊 Upcoming Earnings Calendar ({processedUpcomingEarnings.length})
           </h3>
-          <span style={{ fontSize: "11px", color: "#94a3b8", background: "rgba(59,130,246,0.1)", padding: "4px 10px", borderRadius: "20px" }}>
+          <span style={{ fontSize: "11px", color: "var(--text-muted)", background: "rgba(91, 157, 255,0.1)", padding: "4px 10px", borderRadius: "20px" }}>
             Real-Time Corporate Earnings Disclosures
           </span>
         </div>
 
         {/* Toolbar: Search, Date Filter, Quick Filter Pills & Sort */}
-        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "14px", backgroundColor: "rgba(15, 23, 42, 0.5)", padding: "10px 12px", borderRadius: "10px", border: "1px solid rgba(255, 255, 255, 0.05)" }}>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "14px", backgroundColor: "rgba(15, 19, 25, 0.5)", padding: "10px 12px", borderRadius: "10px", border: "1px solid rgba(255, 255, 255, 0.05)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
             {/* Search Input */}
             <input
@@ -1339,10 +1339,10 @@ export function TradingDashboard() {
               value={earningsSearch}
               onChange={(e) => setEarningsSearch(e.target.value)}
               style={{
-                backgroundColor: "rgba(15, 23, 42, 0.9)",
-                border: "1px solid rgba(59, 130, 246, 0.3)",
+                backgroundColor: "rgba(15, 19, 25, 0.9)",
+                border: "1px solid rgba(91, 157, 255, 0.3)",
                 borderRadius: "8px",
-                color: "#f8fafc",
+                color: "var(--text-primary)",
                 fontSize: "12px",
                 padding: "6px 12px",
                 width: "130px",
@@ -1352,16 +1352,16 @@ export function TradingDashboard() {
 
             {/* Calendar Date Picker Filter */}
             <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-              <span style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "600" }}>Date:</span>
+              <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "600" }}>Date:</span>
               <input
                 type="date"
                 value={earningsDateFilter}
                 onChange={(e) => setEarningsDateFilter(e.target.value)}
                 style={{
-                  backgroundColor: "#0f172a",
-                  border: "1px solid rgba(59, 130, 246, 0.4)",
+                  backgroundColor: "var(--bg-base)",
+                  border: "1px solid rgba(91, 157, 255, 0.4)",
                   borderRadius: "8px",
-                  color: "#38bdf8",
+                  color: "var(--info)",
                   fontSize: "11px",
                   fontWeight: "700",
                   padding: "5px 8px",
@@ -1375,9 +1375,9 @@ export function TradingDashboard() {
             <button
               onClick={() => setEarningsDateFilter(todayStr)}
               style={{
-                backgroundColor: earningsDateFilter === todayStr ? "rgba(56, 189, 248, 0.25)" : "rgba(15, 23, 42, 0.6)",
-                border: earningsDateFilter === todayStr ? "1px solid #38bdf8" : "1px solid rgba(255, 255, 255, 0.1)",
-                color: earningsDateFilter === todayStr ? "#38bdf8" : "#94a3b8",
+                backgroundColor: earningsDateFilter === todayStr ? "rgba(79, 184, 217, 0.25)" : "rgba(15, 19, 25, 0.6)",
+                border: earningsDateFilter === todayStr ? "1px solid var(--info)" : "1px solid rgba(255, 255, 255, 0.1)",
+                color: earningsDateFilter === todayStr ? "var(--info)" : "var(--text-muted)",
                 fontSize: "11px",
                 fontWeight: "700",
                 padding: "5px 10px",
@@ -1392,9 +1392,9 @@ export function TradingDashboard() {
             <button
               onClick={() => setEarningsDateFilter("")}
               style={{
-                backgroundColor: earningsDateFilter === "" ? "rgba(59, 130, 246, 0.25)" : "rgba(15, 23, 42, 0.6)",
-                border: earningsDateFilter === "" ? "1px solid #3b82f6" : "1px solid rgba(255, 255, 255, 0.1)",
-                color: earningsDateFilter === "" ? "#60a5fa" : "#94a3b8",
+                backgroundColor: earningsDateFilter === "" ? "rgba(91, 157, 255, 0.25)" : "rgba(15, 19, 25, 0.6)",
+                border: earningsDateFilter === "" ? "1px solid var(--accent)" : "1px solid rgba(255, 255, 255, 0.1)",
+                color: earningsDateFilter === "" ? "var(--accent)" : "var(--text-muted)",
                 fontSize: "11px",
                 fontWeight: "700",
                 padding: "5px 10px",
@@ -1411,9 +1411,9 @@ export function TradingDashboard() {
               disabled={syncingQuotes}
               title="Click to manually register all earnings stocks into Upstox live streaming quote feed"
               style={{
-                backgroundColor: "rgba(16, 185, 129, 0.2)",
-                border: "1px solid #10b981",
-                color: "#34d399",
+                backgroundColor: "rgba(63, 191, 135, 0.2)",
+                border: "1px solid var(--positive)",
+                color: "var(--positive-strong)",
                 fontSize: "11px",
                 fontWeight: "700",
                 padding: "5px 12px",
@@ -1423,7 +1423,7 @@ export function TradingDashboard() {
                 alignItems: "center",
                 gap: "5px",
                 transition: "all 0.15s",
-                boxShadow: "0 2px 8px rgba(16, 185, 129, 0.25)"
+                boxShadow: "0 2px 8px rgba(63, 191, 135, 0.25)"
               }}
             >
               <RefreshCw size={12} className={syncingQuotes ? "animate-spin" : ""} />
@@ -1433,14 +1433,14 @@ export function TradingDashboard() {
 
           {/* Sort By Dropdown */}
           <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-            <span style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "600" }}>Sort By:</span>
+            <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "600" }}>Sort By:</span>
             <select
               value={earningsSortBy}
               onChange={(e: any) => setEarningsSortBy(e.target.value)}
               style={{
-                backgroundColor: "#0f172a",
-                border: "1px solid rgba(59, 130, 246, 0.3)",
-                color: "#f8fafc",
+                backgroundColor: "var(--bg-base)",
+                border: "1px solid rgba(91, 157, 255, 0.3)",
+                color: "var(--text-primary)",
                 fontSize: "11px",
                 fontWeight: "700",
                 padding: "5px 10px",
@@ -1459,18 +1459,18 @@ export function TradingDashboard() {
         </div>
 
         {loading && upcomingEarnings.length === 0 ? (
-          <div style={{ color: "#60a5fa", fontSize: "12px", textAlign: "center", padding: "20px", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+          <div style={{ color: "var(--accent)", fontSize: "12px", textAlign: "center", padding: "20px", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
             <RefreshCw size={14} className="animate-spin" /> Loading upcoming earnings calendar...
           </div>
         ) : processedUpcomingEarnings.length === 0 ? (
-          <div style={{ color: "#64748b", fontSize: "12px", textAlign: "center", padding: "16px" }}>
+          <div style={{ color: "var(--text-faint)", fontSize: "12px", textAlign: "center", padding: "16px" }}>
             No earnings disclosures match the selected date ({earningsDateFilter || 'All Dates'}) / search filter.
           </div>
         ) : (
           <div style={{ maxHeight: "420px", overflowY: "auto", border: "1px solid rgba(255, 255, 255, 0.08)", borderRadius: "10px" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: "11px" }}>
               <thead>
-                <tr style={{ background: "rgba(15, 23, 42, 0.95)", borderBottom: "1px solid rgba(255, 255, 255, 0.1)", color: "#94a3b8" }}>
+                <tr style={{ background: "rgba(15, 19, 25, 0.95)", borderBottom: "1px solid rgba(255, 255, 255, 0.1)", color: "var(--text-muted)" }}>
                   <th style={{ padding: "10px 12px" }}>SYMBOL</th>
                   <th style={{ padding: "10px 12px" }}>COMPANY</th>
                   <th style={{ padding: "10px 12px", textAlign: "right" }}>LTP</th>
@@ -1481,7 +1481,7 @@ export function TradingDashboard() {
                   <th style={{ padding: "10px 12px", textAlign: "center", width: "110px" }}>BUY/SELL QTY</th>
                   <th style={{ padding: "10px 12px", textAlign: "center", width: "115px" }}>
                     2M SIGNAL
-                    <span title="Short-term (2 min) trend calculated from order book depth sentiment and quantity dynamics." style={{ cursor: "help", fontSize: "10px", color: "#64748b", marginLeft: "4px" }}>ⓘ</span>
+                    <span title="Short-term (2 min) trend calculated from order book depth sentiment and quantity dynamics." style={{ cursor: "help", fontSize: "10px", color: "var(--text-faint)", marginLeft: "4px" }}>ⓘ</span>
                   </th>
                   <th style={{ padding: "10px 12px", textAlign: "center" }}>MEETING DATE</th>
                   <th style={{ padding: "10px 12px", textAlign: "right" }}>ACTIONS</th>
@@ -1535,19 +1535,19 @@ export function TradingDashboard() {
                   // 2m Signal Logic
                   const sigRec = changePct > 1.0 ? "BUY" : changePct < -1.0 ? "SELL" : (hash % 2 === 0 ? "HOLD" : "BUY");
                   const sigConf = Math.abs(changePct) > 1.5 ? "HIGH" : Math.abs(changePct) > 0.5 ? "MEDIUM" : "LOW";
-                  const sigColor = sigRec === "BUY" ? "#34d399" : sigRec === "SELL" ? "#f87171" : "#fbbf24";
-                  const sigBg = sigRec === "BUY" ? "rgba(52, 211, 153, 0.12)" : sigRec === "SELL" ? "rgba(248, 113, 113, 0.12)" : "rgba(251, 191, 36, 0.12)";
-                  const sigBorder = sigRec === "BUY" ? "rgba(52, 211, 153, 0.3)" : sigRec === "SELL" ? "rgba(248, 113, 113, 0.3)" : "rgba(251, 191, 36, 0.3)";
+                  const sigColor = sigRec === "BUY" ? "var(--positive-strong)" : sigRec === "SELL" ? "var(--negative-strong)" : "var(--warning)";
+                  const sigBg = sigRec === "BUY" ? "rgba(63, 191, 135, 0.12)" : sigRec === "SELL" ? "rgba(240, 115, 111, 0.12)" : "rgba(224, 163, 62, 0.12)";
+                  const sigBorder = sigRec === "BUY" ? "rgba(63, 191, 135, 0.3)" : sigRec === "SELL" ? "rgba(240, 115, 111, 0.3)" : "rgba(224, 163, 62, 0.3)";
 
                   return (
-                    <tr key={item.id || item.symbol} style={{ borderBottom: "1px solid rgba(255, 255, 255, 0.05)", background: "#0d131f" }}>
+                    <tr key={item.id || item.symbol} style={{ borderBottom: "1px solid rgba(255, 255, 255, 0.05)", background: "var(--surface-1)" }}>
                       {/* 1. SYMBOL */}
-                      <td style={{ padding: "10px 12px", fontWeight: "800", color: "white", fontSize: "12px" }}>
+                      <td style={{ padding: "10px 12px", fontWeight: "800", color: "var(--text-primary)", fontSize: "12px" }}>
                         <span
                           onClick={() => openEarningsChart(item.symbol, item.instrument_key)}
-                          style={{ cursor: "pointer", color: "#60a5fa", textDecoration: "none", transition: "color 0.2s" }}
-                          onMouseEnter={(e) => (e.currentTarget.style.color = "#93c5fd")}
-                          onMouseLeave={(e) => (e.currentTarget.style.color = "#60a5fa")}
+                          style={{ cursor: "pointer", color: "var(--accent)", textDecoration: "none", transition: "color 0.2s" }}
+                          onMouseEnter={(e) => (e.currentTarget.style.color = "var(--accent-strong)")}
+                          onMouseLeave={(e) => (e.currentTarget.style.color = "var(--accent)")}
                           title={`Click to view ${item.symbol} chart`}
                         >
                           {item.symbol}
@@ -1555,29 +1555,29 @@ export function TradingDashboard() {
                       </td>
 
                       {/* 2. COMPANY */}
-                      <td style={{ padding: "10px 12px", color: "#94a3b8", fontSize: "11px", maxWidth: "160px" }}>
+                      <td style={{ padding: "10px 12px", color: "var(--text-muted)", fontSize: "11px", maxWidth: "160px" }}>
                         <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {item.title || item.symbol}
                         </div>
                       </td>
 
                       {/* 3. LTP */}
-                      <td style={{ padding: "10px 12px", textAlign: "right", fontWeight: "700", color: "white", fontSize: "12px" }}>
+                      <td style={{ padding: "10px 12px", textAlign: "right", fontWeight: "700", color: "var(--text-primary)", fontSize: "12px" }}>
                         {ltp > 0 ? `₹${ltp.toFixed(2)}` : "—"}
                       </td>
 
                       {/* 4. CHANGE */}
-                      <td style={{ padding: "10px 12px", textAlign: "right", fontWeight: "700", fontSize: "11px", color: isUp ? "#34d399" : "#f87171" }}>
+                      <td style={{ padding: "10px 12px", textAlign: "right", fontWeight: "700", fontSize: "11px", color: isUp ? "var(--positive-strong)" : "var(--negative-strong)" }}>
                         {isUp ? "+" : ""}{changePct.toFixed(2)}%
                       </td>
 
                       {/* 5. PREV CLOSE */}
-                      <td style={{ padding: "10px 12px", textAlign: "right", color: "#94a3b8", fontSize: "11px" }}>
+                      <td style={{ padding: "10px 12px", textAlign: "right", color: "var(--text-muted)", fontSize: "11px" }}>
                         {prevClose > 0 ? `₹${prevClose.toFixed(2)}` : "—"}
                       </td>
 
                       {/* 6. DAY HIGH */}
-                      <td style={{ padding: "10px 12px", textAlign: "right", color: "#34d399", fontWeight: "600", fontSize: "11px" }}>
+                      <td style={{ padding: "10px 12px", textAlign: "right", color: "var(--positive-strong)", fontWeight: "600", fontSize: "11px" }}>
                         {dayHigh > 0 ? `₹${dayHigh.toFixed(2)}` : "—"}
                       </td>
 
@@ -1589,13 +1589,13 @@ export function TradingDashboard() {
                       >
                         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2px", width: "85px", margin: "0 auto" }}>
                           <div style={{ display: "flex", justifyContent: "space-between", width: "100%", fontSize: "9px", fontWeight: "800" }}>
-                            <span style={{ color: "#10b981", display: "flex", alignItems: "center", gap: "2px" }}>
+                            <span style={{ color: "var(--positive)", display: "flex", alignItems: "center", gap: "2px" }}>
                               {buyPct}% B {buyPct >= 50 ? "▲" : "▼"}
                             </span>
-                            <span style={{ color: "#ef4444" }}>{sellPct}% S</span>
+                            <span style={{ color: "var(--negative)" }}>{sellPct}% S</span>
                           </div>
-                          <div style={{ width: "100%", height: "4px", backgroundColor: "#ef4444", borderRadius: "2px", overflow: "hidden", display: "flex" }}>
-                            <div style={{ width: `${buyPct}%`, height: "100%", backgroundColor: "#10b981" }} />
+                          <div style={{ width: "100%", height: "4px", backgroundColor: "var(--negative)", borderRadius: "2px", overflow: "hidden", display: "flex" }}>
+                            <div style={{ width: `${buyPct}%`, height: "100%", backgroundColor: "var(--positive)" }} />
                           </div>
                         </div>
                       </td>
@@ -1608,13 +1608,13 @@ export function TradingDashboard() {
                       >
                         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2px", width: "95px", margin: "0 auto" }}>
                           <div style={{ display: "flex", justifyContent: "space-between", width: "100%", fontSize: "9px", fontWeight: "700" }}>
-                            <span style={{ color: "#10b981" }}>{fmtQty(buyQty)}</span>
-                            <span style={{ color: "#ef4444" }}>{fmtQty(sellQty)}</span>
+                            <span style={{ color: "var(--positive)" }}>{fmtQty(buyQty)}</span>
+                            <span style={{ color: "var(--negative)" }}>{fmtQty(sellQty)}</span>
                           </div>
-                          <div style={{ width: "100%", height: "4px", backgroundColor: "#ef4444", borderRadius: "2px", overflow: "hidden", display: "flex" }}>
-                            <div style={{ width: `${(buyQty / totalQty) * 100}%`, height: "100%", backgroundColor: "#10b981" }} />
+                          <div style={{ width: "100%", height: "4px", backgroundColor: "var(--negative)", borderRadius: "2px", overflow: "hidden", display: "flex" }}>
+                            <div style={{ width: `${(buyQty / totalQty) * 100}%`, height: "100%", backgroundColor: "var(--positive)" }} />
                           </div>
-                          <div style={{ fontSize: "8px", color: "#64748b", fontWeight: "600" }}>
+                          <div style={{ fontSize: "8px", color: "var(--text-faint)", fontWeight: "600" }}>
                             Σ {fmtQty(totalQty)}
                           </div>
                         </div>
@@ -1646,7 +1646,7 @@ export function TradingDashboard() {
 
                       {/* 10. MEETING DATE */}
                       <td style={{ padding: "10px 12px", textAlign: "center" }}>
-                        <span style={{ fontSize: "11px", fontWeight: "700", color: "#38bdf8", background: "rgba(56, 189, 248, 0.12)", padding: "3px 8px", borderRadius: "6px" }}>
+                        <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--info)", background: "rgba(79, 184, 217, 0.12)", padding: "3px 8px", borderRadius: "6px" }}>
                           📅 {item.display_date || item.meeting_date}
                         </span>
                       </td>
@@ -1661,9 +1661,9 @@ export function TradingDashboard() {
                               fontSize: "10px",
                               fontWeight: "700",
                               borderRadius: "6px",
-                              backgroundColor: "rgba(59, 130, 246, 0.15)",
-                              color: "#60a5fa",
-                              border: "1px solid rgba(59, 130, 246, 0.3)",
+                              backgroundColor: "rgba(91, 157, 255, 0.15)",
+                              color: "var(--accent)",
+                              border: "1px solid rgba(91, 157, 255, 0.3)",
                               cursor: "pointer",
                               display: "flex",
                               alignItems: "center",
@@ -1679,14 +1679,14 @@ export function TradingDashboard() {
                               fontSize: "10px",
                               fontWeight: "700",
                               borderRadius: "6px",
-                              backgroundColor: "#10b981",
-                              color: "white",
+                              backgroundColor: "var(--positive)",
+                              color: "var(--on-accent)",
                               border: "none",
                               cursor: "pointer",
                               display: "flex",
                               alignItems: "center",
                               gap: "3px",
-                              boxShadow: "0 2px 6px rgba(16, 185, 129, 0.3)"
+                              boxShadow: "0 2px 6px rgba(63, 191, 135, 0.3)"
                             }}
                           >
                             <Zap size={11} /> Add &amp; Arm
@@ -1726,7 +1726,7 @@ export function TradingDashboard() {
             }).join(" ");
 
             const isUp = displayHist[displayHist.length - 1] >= displayHist[0];
-            const strokeColor = isUp ? "#10b981" : "#ef4444";
+            const strokeColor = isUp ? "var(--positive)" : "var(--negative)";
 
             return (
               <svg width={width} height={height} style={{ overflow: "visible" }}>
@@ -1743,10 +1743,10 @@ export function TradingDashboard() {
               top: `${hoveredSentiment.y}px`,
               width: "360px",
               zIndex: 99999,
-              background: "linear-gradient(135deg, rgba(20, 24, 45, 0.98) 0%, rgba(12, 15, 29, 0.99) 100%)",
+              background: "linear-gradient(135deg, rgba(28, 34, 45, 0.98) 0%, rgba(15, 19, 25, 0.99) 100%)",
               border: "1px solid rgba(255, 255, 255, 0.15)",
               borderRadius: "12px",
-              boxShadow: "0 20px 50px rgba(0, 0, 0, 0.9), 0 0 30px rgba(56, 189, 248, 0.15)",
+              boxShadow: "0 20px 50px rgba(0, 0, 0, 0.9), 0 0 30px rgba(79, 184, 217, 0.15)",
               padding: "16px",
               pointerEvents: "none",
               backdropFilter: "blur(20px)"
@@ -1754,10 +1754,10 @@ export function TradingDashboard() {
               {/* Popover Header */}
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid rgba(255, 255, 255, 0.08)", paddingBottom: "10px", marginBottom: "12px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <span style={{ padding: "3px 8px", borderRadius: "6px", background: "#38bdf8", color: "#0f172a", fontWeight: "800", fontSize: "12px" }}>
+                  <span style={{ padding: "3px 8px", borderRadius: "6px", background: "var(--info)", color: "var(--bg-base)", fontWeight: "800", fontSize: "12px" }}>
                     {hoveredSentiment.symbol}
                   </span>
-                  <span style={{ fontSize: "13px", fontWeight: "700", color: "white" }}>
+                  <span style={{ fontSize: "13px", fontWeight: "700", color: "var(--text-primary)" }}>
                     Sentiment &amp; Trend Analyzer
                   </span>
                 </div>
@@ -1765,34 +1765,34 @@ export function TradingDashboard() {
 
               {/* Big Buyers vs Sellers percentage */}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "6px" }}>
-                <span style={{ fontSize: "20px", fontWeight: "900", color: "#10b981" }}>
+                <span style={{ fontSize: "20px", fontWeight: "900", color: "var(--positive)" }}>
                   {compositeBuyPct}% <span style={{ fontSize: "11px", fontWeight: "700", opacity: 0.8 }}>BUYERS</span>
                 </span>
-                <span style={{ fontSize: "20px", fontWeight: "900", color: "#ef4444" }}>
+                <span style={{ fontSize: "20px", fontWeight: "900", color: "var(--negative)" }}>
                   {compositeSellPct}% <span style={{ fontSize: "11px", fontWeight: "700", opacity: 0.8 }}>SELLERS</span>
                 </span>
               </div>
 
               {/* Visual sentiment bar */}
-              <div style={{ width: "100%", height: "6px", backgroundColor: "#ef4444", borderRadius: "3px", overflow: "hidden", display: "flex", marginBottom: "14px" }}>
-                <div style={{ width: `${compositeBuyPct}%`, height: "100%", backgroundColor: "#10b981", transition: "width 0.3s ease" }} />
+              <div style={{ width: "100%", height: "6px", backgroundColor: "var(--negative)", borderRadius: "3px", overflow: "hidden", display: "flex", marginBottom: "14px" }}>
+                <div style={{ width: `${compositeBuyPct}%`, height: "100%", backgroundColor: "var(--positive)", transition: "width 0.3s ease" }} />
               </div>
 
               {/* Metrics Grid: Daily Range vs Order Book */}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "14px" }}>
                 <div style={{ backgroundColor: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: "8px", padding: "8px 10px" }}>
-                  <div style={{ fontSize: "9px", color: "#94a3b8", fontWeight: "700", marginBottom: "2px" }}>DAILY RANGE (15% WT)</div>
-                  <div style={{ fontSize: "12px", fontWeight: "800", color: "white" }}>{priceBuyPct}% B / {100 - priceBuyPct}% S</div>
+                  <div style={{ fontSize: "9px", color: "var(--text-muted)", fontWeight: "700", marginBottom: "2px" }}>DAILY RANGE (15% WT)</div>
+                  <div style={{ fontSize: "12px", fontWeight: "800", color: "var(--text-primary)" }}>{priceBuyPct}% B / {100 - priceBuyPct}% S</div>
                 </div>
                 <div style={{ backgroundColor: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: "8px", padding: "8px 10px" }}>
-                  <div style={{ fontSize: "9px", color: "#94a3b8", fontWeight: "700", marginBottom: "2px" }}>ORDER BOOK (85% WT)</div>
-                  <div style={{ fontSize: "12px", fontWeight: "800", color: "white" }}>{depthBuyPct}% B / {100 - depthBuyPct}% S</div>
+                  <div style={{ fontSize: "9px", color: "var(--text-muted)", fontWeight: "700", marginBottom: "2px" }}>ORDER BOOK (85% WT)</div>
+                  <div style={{ fontSize: "12px", fontWeight: "800", color: "var(--text-primary)" }}>{depthBuyPct}% B / {100 - depthBuyPct}% S</div>
                 </div>
               </div>
 
               {/* Buyer Sentiment Sparkline Chart */}
               <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: "10px" }}>
-                <div style={{ fontSize: "9px", color: "#64748b", fontWeight: "700", letterSpacing: "0.5px", marginBottom: "6px" }}>
+                <div style={{ fontSize: "9px", color: "var(--text-faint)", fontWeight: "700", letterSpacing: "0.5px", marginBottom: "6px" }}>
                   BUYER SENTIMENT SPARKLINE (LAST 15 UPDATES)
                 </div>
                 {drawSparkline(history)}
@@ -1816,8 +1816,8 @@ export function TradingDashboard() {
           padding: "20px"
         }}>
           <div style={{
-            backgroundColor: "#0f172a",
-            border: "1px solid rgba(168, 85, 247, 0.3)",
+            backgroundColor: "var(--bg-base)",
+            border: "1px solid rgba(164, 138, 224, 0.3)",
             borderRadius: "16px",
             width: "100%",
             maxWidth: "540px",
@@ -1825,12 +1825,12 @@ export function TradingDashboard() {
             boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.5)"
           }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "18px" }}>
-              <h3 style={{ fontSize: "16px", fontWeight: "800", color: "#f8fafc", display: "flex", alignItems: "center", gap: "8px" }}>
+              <h3 style={{ fontSize: "16px", fontWeight: "800", color: "var(--text-primary)", display: "flex", alignItems: "center", gap: "8px" }}>
                 <Settings size={18} className="text-purple-400" /> 2-Step AI Earnings Pipeline Settings
               </h3>
               <button
                 onClick={() => setShowSettingsModal(false)}
-                style={{ background: "none", border: "none", color: "#94a3b8", cursor: "pointer", fontSize: "18px" }}
+                style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: "18px" }}
               >
                 ✕
               </button>
@@ -1838,7 +1838,7 @@ export function TradingDashboard() {
 
             <form onSubmit={handleSaveSettings} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
               <div>
-                <label style={{ display: "block", fontSize: "12px", fontWeight: "700", color: "#cbd5e1", marginBottom: "6px" }}>
+                <label style={{ display: "block", fontSize: "12px", fontWeight: "700", color: "var(--text-secondary)", marginBottom: "6px" }}>
                   Flow 1: Custom REST API Endpoint URL (POST /api/generate)
                 </label>
                 <input
@@ -1850,20 +1850,20 @@ export function TradingDashboard() {
                     width: "100%",
                     padding: "10px 12px",
                     borderRadius: "8px",
-                    backgroundColor: "#1e293b",
+                    backgroundColor: "var(--surface-2)",
                     border: "1px solid rgba(255, 255, 255, 0.1)",
-                    color: "#f8fafc",
+                    color: "var(--text-primary)",
                     fontSize: "12px",
                     fontFamily: "monospace"
                   }}
                 />
-                <span style={{ fontSize: "11px", color: "#64748b", marginTop: "4px", display: "block" }}>
+                <span style={{ fontSize: "11px", color: "var(--text-faint)", marginTop: "4px", display: "block" }}>
                   Primary REST endpoint called dynamically when an announcement is detected.
                 </span>
               </div>
 
               <div>
-                <label style={{ display: "block", fontSize: "12px", fontWeight: "700", color: "#cbd5e1", marginBottom: "6px" }}>
+                <label style={{ display: "block", fontSize: "12px", fontWeight: "700", color: "var(--text-secondary)", marginBottom: "6px" }}>
                   Flow 2 (Fallback): Premium OpenRouter API Key
                 </label>
                 <input
@@ -1875,20 +1875,20 @@ export function TradingDashboard() {
                     width: "100%",
                     padding: "10px 12px",
                     borderRadius: "8px",
-                    backgroundColor: "#1e293b",
+                    backgroundColor: "var(--surface-2)",
                     border: "1px solid rgba(255, 255, 255, 0.1)",
-                    color: "#f8fafc",
+                    color: "var(--text-primary)",
                     fontSize: "12px",
                     fontFamily: "monospace"
                   }}
                 />
-                <span style={{ fontSize: "11px", color: "#64748b", marginTop: "4px", display: "block" }}>
+                <span style={{ fontSize: "11px", color: "var(--text-faint)", marginTop: "4px", display: "block" }}>
                   Dedicated key used if Custom REST API is unreachable or returns an error.
                 </span>
               </div>
 
               <div>
-                <label style={{ display: "block", fontSize: "12px", fontWeight: "700", color: "#cbd5e1", marginBottom: "6px" }}>
+                <label style={{ display: "block", fontSize: "12px", fontWeight: "700", color: "var(--text-secondary)", marginBottom: "6px" }}>
                   Flow 2 Model Selector (Premium Models)
                 </label>
                 <select
@@ -1898,9 +1898,9 @@ export function TradingDashboard() {
                     width: "100%",
                     padding: "10px 12px",
                     borderRadius: "8px",
-                    backgroundColor: "#1e293b",
+                    backgroundColor: "var(--surface-2)",
                     border: "1px solid rgba(255, 255, 255, 0.1)",
-                    color: "#f8fafc",
+                    color: "var(--text-primary)",
                     fontSize: "12px"
                   }}
                 >
@@ -1919,8 +1919,8 @@ export function TradingDashboard() {
                   style={{
                     padding: "8px 16px",
                     borderRadius: "8px",
-                    backgroundColor: "#334155",
-                    color: "#f8fafc",
+                    backgroundColor: "var(--surface-3)",
+                    color: "var(--text-primary)",
                     border: "none",
                     cursor: "pointer",
                     fontSize: "12px"
@@ -1934,8 +1934,8 @@ export function TradingDashboard() {
                   style={{
                     padding: "8px 20px",
                     borderRadius: "8px",
-                    backgroundColor: "#9333ea",
-                    color: "white",
+                    backgroundColor: "var(--ai)",
+                    color: "var(--on-accent)",
                     border: "none",
                     cursor: "pointer",
                     fontSize: "12px",
@@ -1959,13 +1959,13 @@ export function TradingDashboard() {
           alignItems: "center",
           justifyContent: "space-between",
           marginBottom: "16px",
-          background: "rgba(17, 24, 39, 0.4)",
+          background: "rgba(22, 27, 36, 0.4)",
           padding: "12px 18px",
           borderRadius: "12px",
           border: "1px solid rgba(255, 255, 255, 0.05)"
         }}
       >
-        <h2 style={{ fontSize: "16px", fontWeight: "700", color: "#f8fafc", display: "flex", alignItems: "center", gap: "8px" }}>
+        <h2 style={{ fontSize: "16px", fontWeight: "700", color: "var(--text-primary)", display: "flex", alignItems: "center", gap: "8px" }}>
           ⚡ Auto-Trading Target Stock Configurations
         </h2>
         <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
@@ -1979,9 +1979,9 @@ export function TradingDashboard() {
               fontSize: "12px",
               fontWeight: "700",
               borderRadius: "8px",
-              backgroundColor: "rgba(168, 85, 247, 0.15)",
-              color: "#c084fc",
-              border: "1px solid rgba(168, 85, 247, 0.3)",
+              backgroundColor: "rgba(164, 138, 224, 0.15)",
+              color: "var(--ai)",
+              border: "1px solid rgba(164, 138, 224, 0.3)",
               cursor: "pointer"
             }}
           >
@@ -1999,9 +1999,9 @@ export function TradingDashboard() {
               fontSize: "12px",
               fontWeight: "700",
               borderRadius: "8px",
-              backgroundColor: "rgba(59, 130, 246, 0.2)",
-              color: "#60a5fa",
-              border: "1px solid rgba(59, 130, 246, 0.3)",
+              backgroundColor: "rgba(91, 157, 255, 0.2)",
+              color: "var(--accent)",
+              border: "1px solid rgba(91, 157, 255, 0.3)",
               cursor: "pointer",
               transition: "all 0.2s"
             }}
@@ -2019,11 +2019,11 @@ export function TradingDashboard() {
               fontSize: "12px",
               fontWeight: "700",
               borderRadius: "8px",
-              backgroundColor: showAddForm ? "#475569" : "#2563eb",
-              color: "white",
+              backgroundColor: showAddForm ? "var(--text-faint)" : "var(--accent)",
+              color: "var(--on-accent)",
               border: "none",
               cursor: "pointer",
-              boxShadow: "0 2px 8px rgba(37,99,235,0.3)"
+              boxShadow: "0 2px 8px rgba(91, 157, 255,0.3)"
             }}
           >
             <Plus size={15} />
@@ -2035,7 +2035,7 @@ export function TradingDashboard() {
               padding: "8px 12px",
               borderRadius: "8px",
               backgroundColor: "rgba(255, 255, 255, 0.05)",
-              color: "#94a3b8",
+              color: "var(--text-muted)",
               border: "1px solid rgba(255, 255, 255, 0.08)",
               cursor: "pointer"
             }}
@@ -2049,8 +2049,8 @@ export function TradingDashboard() {
       {/* ADD TARGET STOCK FORM */}
       {showAddForm && (
         <form onSubmit={handleAddConfig} style={{
-          background: "rgba(17, 24, 39, 0.8)",
-          border: "1px solid rgba(59, 130, 246, 0.3)",
+          background: "rgba(22, 27, 36, 0.8)",
+          border: "1px solid rgba(91, 157, 255, 0.3)",
           borderRadius: "12px",
           padding: "20px",
           marginBottom: "20px",
@@ -2060,7 +2060,7 @@ export function TradingDashboard() {
         }}>
           {/* Symbol Search */}
           <div style={{ position: "relative" }}>
-            <label style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "600", display: "block", marginBottom: "4px" }}>Stock Symbol *</label>
+            <label style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "600", display: "block", marginBottom: "4px" }}>Stock Symbol *</label>
             <input
               type="text"
               placeholder="e.g. RELIANCE, TCS"
@@ -2073,8 +2073,8 @@ export function TradingDashboard() {
                 fontSize: "12px",
                 borderRadius: "6px",
                 border: "1px solid rgba(255, 255, 255, 0.1)",
-                backgroundColor: "#0d131f",
-                color: "#f8fafc"
+                backgroundColor: "var(--surface-1)",
+                color: "var(--text-primary)"
               }}
             />
             {searchResults.length > 0 && (
@@ -2083,7 +2083,7 @@ export function TradingDashboard() {
                 top: "100%",
                 left: 0,
                 right: 0,
-                backgroundColor: "#0f172a",
+                backgroundColor: "var(--bg-base)",
                 border: "1px solid rgba(255, 255, 255, 0.1)",
                 borderRadius: "6px",
                 maxHeight: "150px",
@@ -2100,9 +2100,9 @@ export function TradingDashboard() {
                       fontSize: "12px",
                       cursor: "pointer",
                       borderBottom: "1px solid rgba(255, 255, 255, 0.05)",
-                      color: "#e2e8f0"
+                      color: "var(--text-primary)"
                     }}
-                    onMouseOver={(e) => e.currentTarget.style.backgroundColor = "rgba(59, 130, 246, 0.2)"}
+                    onMouseOver={(e) => e.currentTarget.style.backgroundColor = "rgba(91, 157, 255, 0.2)"}
                     onMouseOut={(e) => e.currentTarget.style.backgroundColor = "transparent"}
                   >
                     <strong>{item.symbol}</strong> — {item.name}
@@ -2114,7 +2114,7 @@ export function TradingDashboard() {
 
           {/* Purchase Date */}
           <div>
-            <label style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "600", display: "block", marginBottom: "4px" }}>Purchase Date *</label>
+            <label style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "600", display: "block", marginBottom: "4px" }}>Purchase Date *</label>
             <input
               type="date"
               value={formData.purchase_date}
@@ -2126,15 +2126,15 @@ export function TradingDashboard() {
                 fontSize: "12px",
                 borderRadius: "6px",
                 border: "1px solid rgba(255, 255, 255, 0.1)",
-                backgroundColor: "#0d131f",
-                color: "#f8fafc"
+                backgroundColor: "var(--surface-1)",
+                color: "var(--text-primary)"
               }}
             />
           </div>
 
           {/* Quantity */}
           <div>
-            <label style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "600", display: "block", marginBottom: "4px" }}>Quantity *</label>
+            <label style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "600", display: "block", marginBottom: "4px" }}>Quantity *</label>
             <input
               type="number"
               min="1"
@@ -2147,15 +2147,15 @@ export function TradingDashboard() {
                 fontSize: "12px",
                 borderRadius: "6px",
                 border: "1px solid rgba(255, 255, 255, 0.1)",
-                backgroundColor: "#0d131f",
-                color: "#f8fafc"
+                backgroundColor: "var(--surface-1)",
+                color: "var(--text-primary)"
               }}
             />
           </div>
 
           {/* Stoploss % */}
           <div>
-            <label style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "600", display: "block", marginBottom: "4px" }}>Stoploss % *</label>
+            <label style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "600", display: "block", marginBottom: "4px" }}>Stoploss % *</label>
             <input
               type="number"
               step="0.5"
@@ -2170,15 +2170,15 @@ export function TradingDashboard() {
                 fontSize: "12px",
                 borderRadius: "6px",
                 border: "1px solid rgba(255, 255, 255, 0.1)",
-                backgroundColor: "#0d131f",
-                color: "#f8fafc"
+                backgroundColor: "var(--surface-1)",
+                color: "var(--text-primary)"
               }}
             />
           </div>
 
           {/* Broker Choice */}
           <div>
-            <label style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "600", display: "block", marginBottom: "4px" }}>Broker Account *</label>
+            <label style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "600", display: "block", marginBottom: "4px" }}>Broker Account *</label>
             <select
               value={formData.broker}
               onChange={(e) => setFormData(prev => ({ ...prev, broker: e.target.value }))}
@@ -2188,8 +2188,8 @@ export function TradingDashboard() {
                 fontSize: "12px",
                 borderRadius: "6px",
                 border: "1px solid rgba(255, 255, 255, 0.1)",
-                backgroundColor: "#0d131f",
-                color: "#f8fafc"
+                backgroundColor: "var(--surface-1)",
+                color: "var(--text-primary)"
               }}
             >
               <option value="upstox">Upstox (Active OAuth)</option>
@@ -2199,7 +2199,7 @@ export function TradingDashboard() {
 
           {/* Order Type */}
           <div>
-            <label style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "600", display: "block", marginBottom: "4px" }}>Order Type *</label>
+            <label style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "600", display: "block", marginBottom: "4px" }}>Order Type *</label>
             <select
               value={formData.order_type}
               onChange={(e) => setFormData(prev => ({ ...prev, order_type: e.target.value }))}
@@ -2209,8 +2209,8 @@ export function TradingDashboard() {
                 fontSize: "12px",
                 borderRadius: "6px",
                 border: "1px solid rgba(255, 255, 255, 0.1)",
-                backgroundColor: "#0d131f",
-                color: "#f8fafc"
+                backgroundColor: "var(--surface-1)",
+                color: "var(--text-primary)"
               }}
             >
               <option value="MARKET">Market Order (Instant Fill)</option>
@@ -2221,7 +2221,7 @@ export function TradingDashboard() {
           {/* Limit Price (if order_type === LIMIT) */}
           {formData.order_type === "LIMIT" && (
             <div>
-              <label style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "600", display: "block", marginBottom: "4px" }}>Limit Price (₹)</label>
+              <label style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "600", display: "block", marginBottom: "4px" }}>Limit Price (₹)</label>
               <input
                 type="number"
                 step="0.05"
@@ -2234,8 +2234,8 @@ export function TradingDashboard() {
                   fontSize: "12px",
                   borderRadius: "6px",
                   border: "1px solid rgba(255, 255, 255, 0.1)",
-                  backgroundColor: "#0d131f",
-                  color: "#f8fafc"
+                  backgroundColor: "var(--surface-1)",
+                  color: "var(--text-primary)"
                 }}
               />
             </div>
@@ -2243,7 +2243,7 @@ export function TradingDashboard() {
 
           {/* Premium AI Provider */}
           <div>
-            <label style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "600", display: "block", marginBottom: "4px" }}>Premium AI Engine *</label>
+            <label style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "600", display: "block", marginBottom: "4px" }}>Premium AI Engine *</label>
             <select
               value={formData.ai_provider}
               onChange={(e) => setFormData(prev => ({ ...prev, ai_provider: e.target.value }))}
@@ -2253,8 +2253,8 @@ export function TradingDashboard() {
                 fontSize: "12px",
                 borderRadius: "6px",
                 border: "1px solid rgba(255, 255, 255, 0.1)",
-                backgroundColor: "#0d131f",
-                color: "#f8fafc"
+                backgroundColor: "var(--surface-1)",
+                color: "var(--text-primary)"
               }}
             >
               <option value="groq">Groq (Llama 3.3 70B - Fastest)</option>
@@ -2267,14 +2267,14 @@ export function TradingDashboard() {
 
           {/* Submit Button with Auto-Arm Toggle */}
           <div style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "flex-end", alignItems: "center", marginTop: "10px", gap: "16px" }}>
-            <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontSize: "12px", color: "#94a3b8" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontSize: "12px", color: "var(--text-muted)" }}>
               <input
                 type="checkbox"
                 checked={autoArmOnSave}
                 onChange={(e) => setAutoArmOnSave(e.target.checked)}
-                style={{ width: "16px", height: "16px", accentColor: "#10b981", cursor: "pointer" }}
+                style={{ width: "16px", height: "16px", accentColor: "var(--positive)", cursor: "pointer" }}
               />
-              <span style={{ fontWeight: "600", color: autoArmOnSave ? "#34d399" : "#94a3b8" }}>
+              <span style={{ fontWeight: "600", color: autoArmOnSave ? "var(--positive-strong)" : "var(--text-muted)" }}>
                 <Zap size={12} style={{ display: "inline", verticalAlign: "middle", marginRight: "4px" }} />
                 Auto-Arm on Save
               </span>
@@ -2286,11 +2286,11 @@ export function TradingDashboard() {
                 fontSize: "13px",
                 fontWeight: "700",
                 borderRadius: "8px",
-                backgroundColor: "#10b981",
-                color: "white",
+                backgroundColor: "var(--positive)",
+                color: "var(--on-accent)",
                 border: "none",
                 cursor: "pointer",
-                boxShadow: "0 2px 10px rgba(16, 185, 129, 0.3)"
+                boxShadow: "0 2px 10px rgba(63, 191, 135, 0.3)"
               }}
             >
               Save Target Config
@@ -2301,7 +2301,7 @@ export function TradingDashboard() {
 
       {/* CONFIGS TABLE */}
       <div style={{
-        background: "rgba(17, 24, 39, 0.6)",
+        background: "rgba(22, 27, 36, 0.6)",
         border: "1px solid rgba(255, 255, 255, 0.08)",
         borderRadius: "12px",
         overflow: "hidden",
@@ -2309,7 +2309,7 @@ export function TradingDashboard() {
       }}>
         <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: "12px" }}>
           <thead>
-            <tr style={{ background: "rgba(15, 23, 42, 0.8)", borderBottom: "1px solid rgba(255, 255, 255, 0.08)", color: "#94a3b8" }}>
+            <tr style={{ background: "rgba(15, 19, 25, 0.8)", borderBottom: "1px solid rgba(255, 255, 255, 0.08)", color: "var(--text-muted)" }}>
               <th style={{ padding: "12px 16px" }}>Stock Symbol</th>
               <th style={{ padding: "12px 16px" }}>Target Date</th>
               <th style={{ padding: "12px 16px" }}>Qty</th>
@@ -2324,23 +2324,23 @@ export function TradingDashboard() {
           <tbody>
             {configs.length === 0 ? (
               <tr>
-                <td colSpan={9} style={{ padding: "30px", textAlign: "center", color: "#64748b" }}>
+                <td colSpan={9} style={{ padding: "30px", textAlign: "center", color: "var(--text-faint)" }}>
                   No auto-trade targets configured yet. Click <strong>Add Target Stock</strong> to configure one.
                 </td>
               </tr>
             ) : (
               configs.map((c) => (
                 <tr key={c.id} style={{ borderBottom: "1px solid rgba(255, 255, 255, 0.05)" }}>
-                  <td style={{ padding: "14px 16px", fontWeight: "700", color: "#f8fafc" }}>
+                  <td style={{ padding: "14px 16px", fontWeight: "700", color: "var(--text-primary)" }}>
                     {c.symbol}
-                    {c.buy_price && <div style={{ fontSize: "10px", color: "#34d399" }}>Bought @ ₹{c.buy_price}</div>}
+                    {c.buy_price && <div style={{ fontSize: "10px", color: "var(--positive-strong)" }}>Bought @ ₹{c.buy_price}</div>}
                   </td>
-                  <td style={{ padding: "14px 16px", color: "#cbd5e1" }}>{c.purchase_date}</td>
-                  <td style={{ padding: "14px 16px", color: "#cbd5e1" }}>{c.quantity}</td>
-                  <td style={{ padding: "14px 16px", color: "#f87171" }}>{c.stoploss_pct}%</td>
-                  <td style={{ padding: "14px 16px", textTransform: "uppercase", fontWeight: "600", color: "#94a3b8" }}>{c.broker}</td>
-                  <td style={{ padding: "14px 16px", color: "#cbd5e1" }}>{c.order_type}</td>
-                  <td style={{ padding: "14px 16px", textTransform: "uppercase", color: "#c084fc", fontWeight: "600" }}>{c.ai_provider}</td>
+                  <td style={{ padding: "14px 16px", color: "var(--text-secondary)" }}>{c.purchase_date}</td>
+                  <td style={{ padding: "14px 16px", color: "var(--text-secondary)" }}>{c.quantity}</td>
+                  <td style={{ padding: "14px 16px", color: "var(--negative-strong)" }}>{c.stoploss_pct}%</td>
+                  <td style={{ padding: "14px 16px", textTransform: "uppercase", fontWeight: "600", color: "var(--text-muted)" }}>{c.broker}</td>
+                  <td style={{ padding: "14px 16px", color: "var(--text-secondary)" }}>{c.order_type}</td>
+                  <td style={{ padding: "14px 16px", textTransform: "uppercase", color: "var(--ai)", fontWeight: "600" }}>{c.ai_provider}</td>
                   <td style={{ padding: "14px 16px" }}>{getStatusBadge(c.status)}</td>
                   <td style={{ padding: "14px 16px", textAlign: "right" }}>
                     <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>
@@ -2353,8 +2353,8 @@ export function TradingDashboard() {
                             fontSize: "11px",
                             fontWeight: "700",
                             borderRadius: "6px",
-                            backgroundColor: "#10b981",
-                            color: "white",
+                            backgroundColor: "var(--positive)",
+                            color: "var(--on-accent)",
                             border: "none",
                             cursor: "pointer"
                           }}
@@ -2370,8 +2370,8 @@ export function TradingDashboard() {
                             fontSize: "11px",
                             fontWeight: "600",
                             borderRadius: "6px",
-                            backgroundColor: "#64748b",
-                            color: "white",
+                            backgroundColor: "var(--text-faint)",
+                            color: "var(--text-primary)",
                             border: "none",
                             cursor: "pointer"
                           }}
@@ -2389,8 +2389,8 @@ export function TradingDashboard() {
                             fontSize: "11px",
                             fontWeight: "700",
                             borderRadius: "6px",
-                            backgroundColor: "#2563eb",
-                            color: "white",
+                            backgroundColor: "var(--accent)",
+                            color: "var(--on-accent)",
                             border: "none",
                             cursor: "pointer"
                           }}
@@ -2408,8 +2408,8 @@ export function TradingDashboard() {
                             fontSize: "11px",
                             fontWeight: "700",
                             borderRadius: "6px",
-                            backgroundColor: "#ef4444",
-                            color: "white",
+                            backgroundColor: "var(--negative)",
+                            color: "var(--on-accent)",
                             border: "none",
                             cursor: "pointer"
                           }}
@@ -2423,8 +2423,8 @@ export function TradingDashboard() {
                         style={{
                           padding: "5px 8px",
                           borderRadius: "6px",
-                          backgroundColor: "rgba(239, 68, 68, 0.1)",
-                          color: "#f87171",
+                          backgroundColor: "rgba(240, 115, 111, 0.1)",
+                          color: "var(--negative-strong)",
                           border: "none",
                           cursor: "pointer"
                         }}
@@ -2444,17 +2444,17 @@ export function TradingDashboard() {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
         {/* Executed Broker Orders */}
         <div style={{
-          background: "rgba(17, 24, 39, 0.6)",
+          background: "rgba(22, 27, 36, 0.6)",
           border: "1px solid rgba(255, 255, 255, 0.08)",
           borderRadius: "12px",
           padding: "16px"
         }}>
-          <h3 style={{ fontSize: "14px", fontWeight: "700", color: "#f8fafc", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
+          <h3 style={{ fontSize: "14px", fontWeight: "700", color: "var(--text-primary)", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
             <ShoppingBag size={16} className="text-blue-400" /> Executed Broker Orders ({orders.length})
           </h3>
           <div style={{ maxHeight: "350px", overflowY: "auto" }}>
             {orders.length === 0 ? (
-              <div style={{ color: "#64748b", fontSize: "12px", textAlign: "center", padding: "20px" }}>
+              <div style={{ color: "var(--text-faint)", fontSize: "12px", textAlign: "center", padding: "20px" }}>
                 No broker orders executed yet.
               </div>
             ) : (
@@ -2468,8 +2468,8 @@ export function TradingDashboard() {
                       const el = document.getElementById(`ai-card-${o.symbol.toUpperCase()}`);
                       if (el) {
                         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        el.style.border = "1px solid #c084fc";
-                        el.style.boxShadow = "0 0 20px rgba(168, 85, 247, 0.8)";
+                        el.style.border = "1px solid var(--ai)";
+                        el.style.boxShadow = "0 0 20px rgba(164, 138, 224, 0.8)";
                         setTimeout(() => {
                           el.style.border = "1px solid rgba(255, 255, 255, 0.08)";
                           el.style.boxShadow = "";
@@ -2479,7 +2479,7 @@ export function TradingDashboard() {
                     style={{
                       padding: "10px 12px",
                       borderRadius: "8px",
-                      backgroundColor: "#0d131f",
+                      backgroundColor: "var(--surface-1)",
                       border: "1px solid rgba(255, 255, 255, 0.08)",
                       marginBottom: "8px",
                       fontSize: "12px",
@@ -2488,7 +2488,7 @@ export function TradingDashboard() {
                       position: "relative" as const
                     }}
                     onMouseEnter={(e) => {
-                      e.currentTarget.style.borderColor = "rgba(59, 130, 246, 0.5)";
+                      e.currentTarget.style.borderColor = "rgba(91, 157, 255, 0.5)";
                       const rect = e.currentTarget.getBoundingClientRect();
                       setHoveredOrder({ order: o, x: rect.right + 8, y: rect.top });
                     }}
@@ -2498,28 +2498,28 @@ export function TradingDashboard() {
                     }}
                   >
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <span style={{ fontSize: "14px", fontWeight: "800", color: "#f8fafc" }}>#{o.symbol}</span>
+                      <span style={{ fontSize: "14px", fontWeight: "800", color: "var(--text-primary)" }}>#{o.symbol}</span>
                       <span style={{
                         fontSize: "10px",
                         fontWeight: "700",
                         padding: "2px 8px",
                         borderRadius: "4px",
-                        backgroundColor: o.status === "filled" || o.status === "placed" ? "rgba(52, 211, 153, 0.15)" : "rgba(248, 113, 113, 0.15)",
-                        color: o.status === "filled" || o.status === "placed" ? "#34d399" : "#f87171",
-                        border: o.status === "filled" || o.status === "placed" ? "1px solid rgba(52, 211, 153, 0.3)" : "1px solid rgba(248, 113, 113, 0.3)"
+                        backgroundColor: o.status === "filled" || o.status === "placed" ? "rgba(63, 191, 135, 0.15)" : "rgba(240, 115, 111, 0.15)",
+                        color: o.status === "filled" || o.status === "placed" ? "var(--positive-strong)" : "var(--negative-strong)",
+                        border: o.status === "filled" || o.status === "placed" ? "1px solid rgba(63, 191, 135, 0.3)" : "1px solid rgba(240, 115, 111, 0.3)"
                       }}>
                         {o.status.toUpperCase()}
                       </span>
                     </div>
 
-                    <div style={{ fontSize: "11px", color: "#94a3b8", marginTop: "4px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "4px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <span>{o.side} {o.quantity}x @ {o.price ? `₹${o.price}` : "Market"} ({o.broker.toUpperCase()})</span>
-                      <span style={{ color: "#64748b", fontSize: "10px" }}>
+                      <span style={{ color: "var(--text-faint)", fontSize: "10px" }}>
                         {o.created_at ? new Date(o.created_at).toLocaleTimeString() : ""}
                       </span>
                     </div>
 
-                    <div style={{ fontSize: "10px", color: "#60a5fa", marginTop: "4px", display: "flex", alignItems: "center", gap: "4px", fontWeight: "600" }}>
+                    <div style={{ fontSize: "10px", color: "var(--accent)", marginTop: "4px", display: "flex", alignItems: "center", gap: "4px", fontWeight: "600" }}>
                       <ChevronRight size={12} /> Hover for execution log | Click to view AI analysis
                     </div>
                   </div>
@@ -2552,10 +2552,10 @@ export function TradingDashboard() {
               top: `${popY}px`,
               width: `${popWidth}px`,
               zIndex: 99999,
-              background: "linear-gradient(135deg, rgba(20, 24, 45, 0.98) 0%, rgba(12, 15, 29, 0.99) 100%)",
-              border: "1px solid rgba(59, 130, 246, 0.3)",
+              background: "linear-gradient(135deg, rgba(28, 34, 45, 0.98) 0%, rgba(15, 19, 25, 0.99) 100%)",
+              border: "1px solid rgba(91, 157, 255, 0.3)",
               borderRadius: "12px",
-              boxShadow: "0 20px 50px rgba(0, 0, 0, 0.9), 0 0 30px rgba(59, 130, 246, 0.15)",
+              boxShadow: "0 20px 50px rgba(0, 0, 0, 0.9), 0 0 30px rgba(91, 157, 255, 0.15)",
               padding: "16px",
               pointerEvents: "none" as const,
               backdropFilter: "blur(20px)",
@@ -2565,30 +2565,30 @@ export function TradingDashboard() {
               {/* Header */}
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid rgba(255,255,255,0.08)", paddingBottom: "10px", marginBottom: "10px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <span style={{ padding: "3px 8px", borderRadius: "6px", background: o.status === "filled" || o.status === "placed" ? "#10b981" : "#ef4444", color: "white", fontWeight: "800", fontSize: "11px" }}>
+                  <span style={{ padding: "3px 8px", borderRadius: "6px", background: o.status === "filled" || o.status === "placed" ? "var(--positive)" : "var(--negative)", color: "var(--on-accent)", fontWeight: "800", fontSize: "11px" }}>
                     {o.symbol}
                   </span>
-                  <span style={{ fontSize: "12px", fontWeight: "700", color: "white" }}>
+                  <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--text-primary)" }}>
                     Execution Log
                   </span>
                 </div>
-                <span style={{ fontSize: "10px", color: "#64748b" }}>
+                <span style={{ fontSize: "10px", color: "var(--text-faint)" }}>
                   {o.created_at ? new Date(o.created_at).toLocaleString() : ""}
                 </span>
               </div>
 
               {/* Order Details */}
-              <div style={{ fontSize: "11px", color: "#94a3b8", marginBottom: "8px" }}>
+              <div style={{ fontSize: "11px", color: "var(--text-muted)", marginBottom: "8px" }}>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 12px" }}>
-                  <span>Side: <b style={{ color: o.side === "BUY" ? "#34d399" : "#f87171" }}>{o.side}</b></span>
-                  <span>Qty: <b style={{ color: "white" }}>{o.quantity}</b></span>
-                  <span>Price: <b style={{ color: "white" }}>{o.price ? `₹${o.price}` : "Market"}</b></span>
-                  <span>Type: <b style={{ color: "white" }}>{o.order_type}</b></span>
-                  <span>Broker: <b style={{ color: "#38bdf8" }}>{o.broker.toUpperCase()}</b></span>
-                  <span>Status: <b style={{ color: o.status === "filled" || o.status === "placed" ? "#34d399" : "#f87171" }}>{o.status.toUpperCase()}</b></span>
+                  <span>Side: <b style={{ color: o.side === "BUY" ? "var(--positive-strong)" : "var(--negative-strong)" }}>{o.side}</b></span>
+                  <span>Qty: <b style={{ color: "var(--text-primary)" }}>{o.quantity}</b></span>
+                  <span>Price: <b style={{ color: "var(--text-primary)" }}>{o.price ? `₹${o.price}` : "Market"}</b></span>
+                  <span>Type: <b style={{ color: "var(--text-primary)" }}>{o.order_type}</b></span>
+                  <span>Broker: <b style={{ color: "var(--info)" }}>{o.broker.toUpperCase()}</b></span>
+                  <span>Status: <b style={{ color: o.status === "filled" || o.status === "placed" ? "var(--positive-strong)" : "var(--negative-strong)" }}>{o.status.toUpperCase()}</b></span>
                 </div>
                 {o.broker_order_id && (
-                  <div style={{ marginTop: "4px", fontSize: "10px", color: "#64748b" }}>
+                  <div style={{ marginTop: "4px", fontSize: "10px", color: "var(--text-faint)" }}>
                     Order ID: {o.broker_order_id}
                   </div>
                 )}
@@ -2596,7 +2596,7 @@ export function TradingDashboard() {
 
               {/* Error Message */}
               {o.error_message && (
-                <div style={{ background: "rgba(239, 68, 68, 0.1)", border: "1px solid rgba(239, 68, 68, 0.3)", borderRadius: "6px", padding: "8px", marginBottom: "8px", fontSize: "10px", color: "#f87171", fontWeight: "600" }}>
+                <div style={{ background: "rgba(240, 115, 111, 0.1)", border: "1px solid rgba(240, 115, 111, 0.3)", borderRadius: "6px", padding: "8px", marginBottom: "8px", fontSize: "10px", color: "var(--negative-strong)", fontWeight: "600" }}>
                   ⚠️ {o.error_message}
                 </div>
               )}
@@ -2604,31 +2604,31 @@ export function TradingDashboard() {
               {/* AI Analysis Summary (if available) */}
               {matchingAiLog && (
                 <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: "8px" }}>
-                  <div style={{ fontSize: "10px", fontWeight: "800", color: "#a78bfa", marginBottom: "6px", letterSpacing: "0.5px" }}>
+                  <div style={{ fontSize: "10px", fontWeight: "800", color: "var(--ai)", marginBottom: "6px", letterSpacing: "0.5px" }}>
                     🤖 AI ANALYSIS
                   </div>
                   {matchingAiLog.ai_sentiment && (
                     <div style={{ fontSize: "11px", marginBottom: "4px" }}>
-                      Sentiment: <b style={{ color: matchingAiLog.ai_sentiment === "positive" ? "#34d399" : matchingAiLog.ai_sentiment === "negative" ? "#f87171" : "#fbbf24" }}>
+                      Sentiment: <b style={{ color: matchingAiLog.ai_sentiment === "positive" ? "var(--positive-strong)" : matchingAiLog.ai_sentiment === "negative" ? "var(--negative-strong)" : "var(--warning)" }}>
                         {matchingAiLog.ai_sentiment.toUpperCase()}
                       </b>
                       {matchingAiLog.ai_impact_score !== null && matchingAiLog.ai_impact_score !== undefined && (
-                        <span style={{ marginLeft: "8px", color: "#94a3b8" }}>Impact: <b style={{ color: "white" }}>{matchingAiLog.ai_impact_score}/10</b></span>
+                        <span style={{ marginLeft: "8px", color: "var(--text-muted)" }}>Impact: <b style={{ color: "var(--text-primary)" }}>{matchingAiLog.ai_impact_score}/10</b></span>
                       )}
                     </div>
                   )}
                   {matchingAiLog.ai_suggestion && (
-                    <div style={{ fontSize: "10px", color: "#cbd5e1", marginBottom: "4px" }}>
+                    <div style={{ fontSize: "10px", color: "var(--text-secondary)", marginBottom: "4px" }}>
                       💡 {matchingAiLog.ai_suggestion}
                     </div>
                   )}
                   {matchingAiLog.ai_summary && (
-                    <div style={{ fontSize: "10px", color: "#94a3b8", lineHeight: "1.4", maxHeight: "60px", overflow: "hidden" }}>
+                    <div style={{ fontSize: "10px", color: "var(--text-muted)", lineHeight: "1.4", maxHeight: "60px", overflow: "hidden" }}>
                       {matchingAiLog.ai_summary.substring(0, 200)}{matchingAiLog.ai_summary.length > 200 ? "..." : ""}
                     </div>
                   )}
                   {matchingAiLog.flow_used && (
-                    <div style={{ fontSize: "9px", color: "#64748b", marginTop: "4px" }}>
+                    <div style={{ fontSize: "9px", color: "var(--text-faint)", marginTop: "4px" }}>
                       Flow: {matchingAiLog.flow_used === "custom_rest_api" ? "🔵 Local LLM" : "🟣 Groq/OpenRouter"}
                     </div>
                   )}
@@ -2638,8 +2638,8 @@ export function TradingDashboard() {
               {/* Broker Raw Response (if no AI log) */}
               {!matchingAiLog && brokerResp && (
                 <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: "8px" }}>
-                  <div style={{ fontSize: "10px", fontWeight: "800", color: "#38bdf8", marginBottom: "4px" }}>BROKER RESPONSE</div>
-                  <div style={{ fontSize: "10px", color: "#94a3b8", lineHeight: "1.3", maxHeight: "60px", overflow: "hidden" }}>
+                  <div style={{ fontSize: "10px", fontWeight: "800", color: "var(--info)", marginBottom: "4px" }}>BROKER RESPONSE</div>
+                  <div style={{ fontSize: "10px", color: "var(--text-muted)", lineHeight: "1.3", maxHeight: "60px", overflow: "hidden" }}>
                     {JSON.stringify(brokerResp, null, 1).substring(0, 200)}
                   </div>
                 </div>
@@ -2653,22 +2653,22 @@ export function TradingDashboard() {
           
           {/* Real-Time NSE Corporate Announcements */}
           <div style={{
-            background: "rgba(17, 24, 39, 0.6)",
-            border: "1px solid rgba(59, 130, 246, 0.2)",
+            background: "rgba(22, 27, 36, 0.6)",
+            border: "1px solid rgba(91, 157, 255, 0.2)",
             borderRadius: "12px",
             padding: "16px"
           }}>
-            <h3 style={{ fontSize: "14px", fontWeight: "700", color: "#f8fafc", marginBottom: "14px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <h3 style={{ fontSize: "14px", fontWeight: "700", color: "var(--text-primary)", marginBottom: "14px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                 <Sparkles size={16} className="text-blue-400" /> Live Results & Corporate Announcements ({nseAnnouncements.length})
               </span>
-              <span style={{ fontSize: "10px", color: "#60a5fa", background: "rgba(59,130,246,0.1)", padding: "2px 8px", borderRadius: "12px" }}>
+              <span style={{ fontSize: "10px", color: "var(--accent)", background: "rgba(91, 157, 255,0.1)", padding: "2px 8px", borderRadius: "12px" }}>
                 Real-Time AI
               </span>
             </h3>
             <div style={{ maxHeight: "300px", overflowY: "auto" }}>
               {nseAnnouncements.length === 0 ? (
-                <div style={{ color: "#64748b", fontSize: "12px", textAlign: "center", padding: "20px" }}>
+                <div style={{ color: "var(--text-faint)", fontSize: "12px", textAlign: "center", padding: "20px" }}>
                   No corporate announcements received today.
                 </div>
               ) : (
@@ -2681,8 +2681,8 @@ export function TradingDashboard() {
                     <div key={ann.id} style={{
                       padding: "12px",
                       borderRadius: "8px",
-                      backgroundColor: "#0d131f",
-                      border: isPendingArm ? "1px dashed rgba(168, 85, 247, 0.4)" : isBeat ? "1px solid rgba(16, 185, 129, 0.25)" : isMiss ? "1px solid rgba(239, 68, 68, 0.25)" : "1px solid rgba(255,255,255,0.06)",
+                      backgroundColor: "var(--surface-1)",
+                      border: isPendingArm ? "1px dashed rgba(164, 138, 224, 0.4)" : isBeat ? "1px solid rgba(63, 191, 135, 0.25)" : isMiss ? "1px solid rgba(240, 115, 111, 0.25)" : "1px solid rgba(255,255,255,0.06)",
                       marginBottom: "10px",
                       fontSize: "12px"
                     }}>
@@ -2690,15 +2690,15 @@ export function TradingDashboard() {
                         <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                           <span 
                             onClick={() => openEarningsChart(ann.symbol, ann.instrument_key)}
-                            style={{ fontSize: "13px", fontWeight: "800", color: "#60a5fa", cursor: "pointer", textDecoration: "underline" }}
+                            style={{ fontSize: "13px", fontWeight: "800", color: "var(--accent)", cursor: "pointer", textDecoration: "underline" }}
                           >
                             #{ann.symbol}
                           </span>
                           {ann.source && (
                             <span style={{ 
                               fontSize: "9px", 
-                              color: ann.source === "nse" ? "#60a5fa" : "#f43f5e", 
-                              backgroundColor: ann.source === "nse" ? "rgba(96,165,250,0.15)" : "rgba(244,63,94,0.15)",
+                              color: ann.source === "nse" ? "var(--accent)" : "var(--negative)", 
+                              backgroundColor: ann.source === "nse" ? "rgba(91, 157, 255,0.15)" : "rgba(240, 115, 111,0.15)",
                               padding: "1px 5px", 
                               borderRadius: "3px",
                               fontWeight: "800",
@@ -2708,37 +2708,37 @@ export function TradingDashboard() {
                             </span>
                           )}
                           {ann.time && (
-                            <span style={{ fontSize: "10px", color: "#64748b", fontWeight: "600" }}>
+                            <span style={{ fontSize: "10px", color: "var(--text-faint)", fontWeight: "600" }}>
                               🕒 {new Date(ann.time).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}
                             </span>
                           )}
                         </div>
                         {isPendingArm ? (
-                          <span style={{ fontSize: "10px", fontWeight: "700", color: "#c084fc", background: "rgba(168, 85, 247, 0.15)", padding: "2px 6px", borderRadius: "4px" }}>
+                          <span style={{ fontSize: "10px", fontWeight: "700", color: "var(--ai)", background: "rgba(164, 138, 224, 0.15)", padding: "2px 6px", borderRadius: "4px" }}>
                             ⏳ Awaiting Arm AI
                           </span>
                         ) : ann.ai_sentiment ? (
                           <span style={{
                             fontSize: "10px",
                             fontWeight: "800",
-                            color: isBeat ? "#34d399" : isMiss ? "#f87171" : "#fbbf24",
+                            color: isBeat ? "var(--positive-strong)" : isMiss ? "var(--negative-strong)" : "var(--warning)",
                             textTransform: "uppercase"
                           }}>
                             {ann.ai_sentiment}
                           </span>
                         ) : null}
                       </div>
-                      <div style={{ fontWeight: "600", color: "#e2e8f0", marginBottom: "6px" }}>
+                      <div style={{ fontWeight: "600", color: "var(--text-primary)", marginBottom: "6px" }}>
                         {ann.title}
                       </div>
                       {ann.ai_summary && (
-                        <div style={{ fontSize: "11px", color: "#94a3b8", fontStyle: "italic", borderTop: "1px dashed rgba(255,255,255,0.06)", paddingTop: "6px", marginTop: "6px" }}>
+                        <div style={{ fontSize: "11px", color: "var(--text-muted)", fontStyle: "italic", borderTop: "1px dashed rgba(255,255,255,0.06)", paddingTop: "6px", marginTop: "6px" }}>
                           💡 {ann.ai_summary}
                         </div>
                       )}
                       {ann.url && ann.url.startsWith("http") && (
                         <div style={{ marginTop: "6px", textAlign: "right" }}>
-                          <a href={ann.url} target="_blank" rel="noreferrer" style={{ fontSize: "10px", color: "#60a5fa", textDecoration: "none" }}>
+                          <a href={ann.url} target="_blank" rel="noreferrer" style={{ fontSize: "10px", color: "var(--accent)", textDecoration: "none" }}>
                             View PDF Link <ExternalLink size={10} style={{ display: "inline" }} />
                           </a>
                         </div>
@@ -2752,12 +2752,12 @@ export function TradingDashboard() {
 
           {/* Premium 2-Step AI Earnings Analysis Logs */}
           <div style={{
-            background: "rgba(17, 24, 39, 0.6)",
-            border: "1px solid rgba(168, 85, 247, 0.2)",
+            background: "rgba(22, 27, 36, 0.6)",
+            border: "1px solid rgba(164, 138, 224, 0.2)",
             borderRadius: "12px",
             padding: "16px"
           }}>
-            <h3 style={{ fontSize: "14px", fontWeight: "700", color: "#f8fafc", marginBottom: "14px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <h3 style={{ fontSize: "14px", fontWeight: "700", color: "var(--text-primary)", marginBottom: "14px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                 <Cpu size={16} className="text-purple-400" /> 2-Step AI Earnings Analysis ({aiLogs.length})
               </span>
@@ -2766,9 +2766,9 @@ export function TradingDashboard() {
                   onClick={handleClearAiLogs}
                   style={{
                     fontSize: "11px",
-                    color: "#f87171",
-                    background: "rgba(239, 68, 68, 0.12)",
-                    border: "1px solid rgba(239, 68, 68, 0.25)",
+                    color: "var(--negative-strong)",
+                    background: "rgba(240, 115, 111, 0.12)",
+                    border: "1px solid rgba(240, 115, 111, 0.25)",
                     padding: "3px 8px",
                     borderRadius: "6px",
                     cursor: "pointer",
@@ -2777,7 +2777,7 @@ export function TradingDashboard() {
                 >
                   🧹 Clear / Reset Logs
                 </button>
-                <span style={{ fontSize: "10px", color: "#c084fc", background: "rgba(168,85,247,0.1)", padding: "2px 8px", borderRadius: "12px" }}>
+                <span style={{ fontSize: "10px", color: "var(--ai)", background: "rgba(164, 138, 224,0.1)", padding: "2px 8px", borderRadius: "12px" }}>
                   Auto-Triggered
                 </span>
               </div>
@@ -2785,26 +2785,26 @@ export function TradingDashboard() {
 
             {/* Filters — applied server-side so the range covers all history,
                 not just the rows already loaded. */}
-            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px", marginBottom: "12px", padding: "8px 10px", background: "rgba(15,23,42,0.5)", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.05)" }}>
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px", marginBottom: "12px", padding: "8px 10px", background: "rgba(15, 19, 25,0.5)", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.05)" }}>
               <input
                 value={aiLogSearch}
                 onChange={e => setAiLogSearch(e.target.value)}
                 placeholder="Search symbol, company or summary…"
-                style={{ flex: 1, minWidth: "170px", padding: "6px 10px", fontSize: "11px", background: "rgba(2,6,23,0.8)", border: "1px solid rgba(168,85,247,0.3)", borderRadius: "6px", color: "#f1f5f9" }}
+                style={{ flex: 1, minWidth: "170px", padding: "6px 10px", fontSize: "11px", background: "rgba(10, 13, 18,0.8)", border: "1px solid rgba(164, 138, 224,0.3)", borderRadius: "6px", color: "var(--text-primary)" }}
               />
-              <label style={{ fontSize: "10px", color: "#94a3b8", display: "flex", alignItems: "center", gap: "4px" }}>
+              <label style={{ fontSize: "10px", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "4px" }}>
                 From
                 <input type="date" value={aiLogDateFrom} onChange={e => setAiLogDateFrom(e.target.value)}
-                  style={{ padding: "5px 7px", fontSize: "11px", background: "rgba(2,6,23,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "#f1f5f9" }} />
+                  style={{ padding: "5px 7px", fontSize: "11px", background: "rgba(10, 13, 18,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "var(--text-primary)" }} />
               </label>
-              <label style={{ fontSize: "10px", color: "#94a3b8", display: "flex", alignItems: "center", gap: "4px" }}>
+              <label style={{ fontSize: "10px", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "4px" }}>
                 To
                 <input type="date" value={aiLogDateTo} onChange={e => setAiLogDateTo(e.target.value)}
-                  style={{ padding: "5px 7px", fontSize: "11px", background: "rgba(2,6,23,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "#f1f5f9" }} />
+                  style={{ padding: "5px 7px", fontSize: "11px", background: "rgba(10, 13, 18,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "var(--text-primary)" }} />
               </label>
               {(aiLogSearch || aiLogDateFrom || aiLogDateTo) && (
                 <button onClick={() => { setAiLogSearch(""); setAiLogDateFrom(""); setAiLogDateTo(""); }}
-                  style={{ padding: "6px 10px", background: "transparent", border: "1px solid rgba(148,163,184,0.3)", borderRadius: "6px", color: "#94a3b8", fontSize: "11px", cursor: "pointer" }}>
+                  style={{ padding: "6px 10px", background: "transparent", border: "1px solid rgba(125, 135, 153,0.3)", borderRadius: "6px", color: "var(--text-muted)", fontSize: "11px", cursor: "pointer" }}>
                   Reset
                 </button>
               )}
@@ -2812,7 +2812,7 @@ export function TradingDashboard() {
 
             <div style={{ maxHeight: "560px", overflowY: "auto" }}>
               {aiLogs.length === 0 ? (
-                <div style={{ color: "#64748b", fontSize: "12px", textAlign: "center", padding: "20px" }}>
+                <div style={{ color: "var(--text-faint)", fontSize: "12px", textAlign: "center", padding: "20px" }}>
                   {(aiLogSearch || aiLogDateFrom || aiLogDateTo)
                     ? "No AI analysis matches these filters."
                     : "No earnings AI analysis logs yet. Auto-trading poller will populate AI results as soon as announcements arrive."}
@@ -2830,23 +2830,23 @@ export function TradingDashboard() {
                     <div key={log.id} id={`ai-card-${(log.symbol || "").toUpperCase()}`} style={{
                       padding: "14px",
                       borderRadius: "10px",
-                      backgroundColor: "#0d131f",
-                      border: isBeat ? "1px solid rgba(16, 185, 129, 0.3)" : isMiss ? "1px solid rgba(239, 68, 68, 0.3)" : "1px solid rgba(168, 85, 247, 0.25)",
+                      backgroundColor: "var(--surface-1)",
+                      border: isBeat ? "1px solid rgba(63, 191, 135, 0.3)" : isMiss ? "1px solid rgba(240, 115, 111, 0.3)" : "1px solid rgba(164, 138, 224, 0.25)",
                       marginBottom: "14px",
                       fontSize: "12px"
                     }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                          <span style={{ fontSize: "15px", fontWeight: "800", color: "#f8fafc" }}>#{log.symbol}</span>
+                          <span style={{ fontSize: "15px", fontWeight: "800", color: "var(--text-primary)" }}>#{log.symbol}</span>
                           {log.company_name && (
-                            <span style={{ fontSize: "11px", color: "#94a3b8", fontWeight: 500 }}>{log.company_name}</span>
+                            <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: 500 }}>{log.company_name}</span>
                           )}
                           <VerdictBadge verdict={log.ai_suggestion} />
                           {log.ai_sentiment && (
                             <span style={{
                               fontSize: "10px",
                               fontWeight: "700",
-                              color: log.ai_sentiment === "positive" ? "#34d399" : log.ai_sentiment === "negative" ? "#f87171" : "#fbbf24",
+                              color: log.ai_sentiment === "positive" ? "var(--positive-strong)" : log.ai_sentiment === "negative" ? "var(--negative-strong)" : "var(--warning)",
                               textTransform: "uppercase"
                             }}>
                               ({log.ai_sentiment})
@@ -2855,7 +2855,7 @@ export function TradingDashboard() {
                           {log.created_at && (
                             <span style={{
                               fontSize: "11px",
-                              color: "#94a3b8",
+                              color: "var(--text-muted)",
                               fontWeight: "600",
                               marginLeft: "6px"
                             }}>
@@ -2866,46 +2866,46 @@ export function TradingDashboard() {
                         <span style={{
                           fontSize: "10px",
                           fontWeight: "600",
-                          color: log.flow_used === "custom_rest_api" ? "#60a5fa" : "#c084fc",
-                          background: log.flow_used === "custom_rest_api" ? "rgba(59,130,246,0.1)" : "rgba(168,85,247,0.1)",
+                          color: log.flow_used === "custom_rest_api" ? "var(--accent)" : "var(--ai)",
+                          background: log.flow_used === "custom_rest_api" ? "rgba(91, 157, 255,0.1)" : "rgba(164, 138, 224,0.1)",
                           padding: "2px 8px",
                           borderRadius: "10px",
-                          border: log.flow_used === "custom_rest_api" ? "1px solid rgba(59,130,246,0.2)" : "1px solid rgba(168,85,247,0.2)"
+                          border: log.flow_used === "custom_rest_api" ? "1px solid rgba(91, 157, 255,0.2)" : "1px solid rgba(164, 138, 224,0.2)"
                         }}>
                           {log.flow_used === "custom_rest_api" ? "Flow 1: Custom REST API" : `Flow 2: ${log.provider}`}
                         </span>
                       </div>
 
-                      <div style={{ fontSize: "12px", fontWeight: "600", color: "#e2e8f0", marginBottom: "10px" }}>
+                      <div style={{ fontSize: "12px", fontWeight: "600", color: "var(--text-primary)", marginBottom: "10px" }}>
                         📢 {log.nse_event_title || "NSE Corporate Announcement"}
                       </div>
 
-                      <div style={{ backgroundColor: "#161e2e", padding: "10px 12px", borderRadius: "8px", marginBottom: "10px" }}>
+                      <div style={{ backgroundColor: "var(--surface-2)", padding: "10px 12px", borderRadius: "8px", marginBottom: "10px" }}>
                         <MetricsTable metrics={log.metrics} />
                         {!log.metrics && (
-                          <div style={{ fontSize: "11px", color: "#64748b", fontStyle: "italic" }}>
+                          <div style={{ fontSize: "11px", color: "var(--text-faint)", fontStyle: "italic" }}>
                             No structured metrics on this analysis (recorded before the metric grid was introduced).
                           </div>
                         )}
                       </div>
 
                       {log.future_growth_outlook && log.future_growth_outlook !== "NA" && (
-                        <div style={{ fontSize: "11px", color: "#cbd5e1", marginBottom: "6px", lineHeight: "1.4" }}>
-                          <strong style={{ color: "#38bdf8" }}>🔮 Future Growth Outlook:</strong> {log.future_growth_outlook}
+                        <div style={{ fontSize: "11px", color: "var(--text-secondary)", marginBottom: "6px", lineHeight: "1.4" }}>
+                          <strong style={{ color: "var(--info)" }}>🔮 Future Growth Outlook:</strong> {log.future_growth_outlook}
                         </div>
                       )}
                       {log.future_projected_numbers && log.future_projected_numbers !== "NA" && (
-                        <div style={{ fontSize: "11px", color: "#cbd5e1", marginBottom: "6px", lineHeight: "1.4" }}>
-                          <strong style={{ color: "#818cf8" }}>📐 Future Projected Numbers:</strong> {log.future_projected_numbers}
+                        <div style={{ fontSize: "11px", color: "var(--text-secondary)", marginBottom: "6px", lineHeight: "1.4" }}>
+                          <strong style={{ color: "var(--ai)" }}>📐 Future Projected Numbers:</strong> {log.future_projected_numbers}
                         </div>
                       )}
                       {log.broker_estimates && !["NA", "N/A"].includes(log.broker_estimates) && (
-                        <div style={{ fontSize: "11px", color: "#cbd5e1", marginBottom: "8px", lineHeight: "1.4" }}>
-                          <strong style={{ color: "#fbbf24" }}>🎯 Broker Estimates:</strong> {log.broker_estimates}
+                        <div style={{ fontSize: "11px", color: "var(--text-secondary)", marginBottom: "8px", lineHeight: "1.4" }}>
+                          <strong style={{ color: "var(--warning)" }}>🎯 Broker Estimates:</strong> {log.broker_estimates}
                         </div>
                       )}
 
-                      <div style={{ fontSize: "11px", color: "#94a3b8", fontStyle: "italic", lineHeight: "1.4", borderTop: "1px dashed rgba(255,255,255,0.08)", paddingTop: "8px", marginTop: "8px" }}>
+                      <div style={{ fontSize: "11px", color: "var(--text-muted)", fontStyle: "italic", lineHeight: "1.4", borderTop: "1px dashed rgba(255,255,255,0.08)", paddingTop: "8px", marginTop: "8px" }}>
                         📝 "{log.ai_summary}"
                       </div>
 
@@ -2915,7 +2915,7 @@ export function TradingDashboard() {
                             href={log.attachment_url}
                             target="_blank"
                             rel="noreferrer"
-                            style={{ fontSize: "11px", color: "#60a5fa", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                            style={{ fontSize: "11px", color: "var(--accent)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "4px" }}
                           >
                             View Full NSE Document <ExternalLink size={12} />
                           </a>
@@ -2952,10 +2952,10 @@ export function TradingDashboard() {
               width: "90vw",
               maxWidth: "1100px",
               maxHeight: "85vh",
-              background: "linear-gradient(135deg, rgba(15, 23, 42, 0.98) 0%, rgba(10, 14, 28, 0.99) 100%)",
-              border: "1px solid rgba(59, 130, 246, 0.25)",
+              background: "linear-gradient(135deg, rgba(15, 19, 25, 0.98) 0%, rgba(10, 14, 28, 0.99) 100%)",
+              border: "1px solid rgba(91, 157, 255, 0.25)",
               borderRadius: "16px",
-              boxShadow: "0 25px 80px rgba(0, 0, 0, 0.8), 0 0 40px rgba(59, 130, 246, 0.12)",
+              boxShadow: "0 25px 80px rgba(0, 0, 0, 0.8), 0 0 40px rgba(91, 157, 255, 0.12)",
               padding: "24px",
               overflowY: "auto"
             }}
@@ -2967,15 +2967,15 @@ export function TradingDashboard() {
                 <span style={{
                   padding: "4px 12px",
                   borderRadius: "8px",
-                  background: "linear-gradient(135deg, #2563eb, #3b82f6)",
-                  color: "white",
+                  background: "linear-gradient(135deg, var(--accent), var(--accent))",
+                  color: "var(--on-accent)",
                   fontWeight: "800",
                   fontSize: "14px",
                   letterSpacing: "0.5px"
                 }}>
                   {chartSymbol}
                 </span>
-                <span style={{ fontSize: "13px", color: "#94a3b8", fontWeight: "600" }}>
+                <span style={{ fontSize: "13px", color: "var(--text-muted)", fontWeight: "600" }}>
                   Price Chart • {chartPeriod}
                 </span>
               </div>
@@ -3000,8 +3000,8 @@ export function TradingDashboard() {
                         borderRadius: "6px",
                         border: "none",
                         cursor: "pointer",
-                        backgroundColor: chartPeriod === p ? "#2563eb" : "transparent",
-                        color: chartPeriod === p ? "white" : "#94a3b8",
+                        backgroundColor: chartPeriod === p ? "var(--accent)" : "transparent",
+                        color: chartPeriod === p ? "var(--on-accent)" : "var(--text-muted)",
                         transition: "all 0.2s"
                       }}
                     >
@@ -3017,9 +3017,9 @@ export function TradingDashboard() {
                     fontSize: "11px",
                     fontWeight: "700",
                     borderRadius: "6px",
-                    backgroundColor: "rgba(248, 113, 113, 0.15)",
-                    color: "#f87171",
-                    border: "1px solid rgba(248, 113, 113, 0.3)",
+                    backgroundColor: "rgba(240, 115, 111, 0.15)",
+                    color: "var(--negative-strong)",
+                    border: "1px solid rgba(240, 115, 111, 0.3)",
                     cursor: "pointer"
                   }}
                 >
@@ -3031,13 +3031,13 @@ export function TradingDashboard() {
             {/* Chart Body */}
             {chartLoading ? (
               <div style={{ height: "400px", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", gap: "10px" }}>
-                <RefreshCw className="animate-spin" style={{ color: "#3b82f6" }} size={24} />
-                <p style={{ fontSize: "12px", color: "#94a3b8" }}>Loading {chartSymbol} candles for {chartPeriod}...</p>
+                <RefreshCw className="animate-spin" style={{ color: "var(--accent)" }} size={24} />
+                <p style={{ fontSize: "12px", color: "var(--text-muted)" }}>Loading {chartSymbol} candles for {chartPeriod}...</p>
               </div>
             ) : chartCandles && chartCandles.length > 0 ? (
               <Chart candles={chartCandles} period={chartPeriod} />
             ) : (
-              <div style={{ height: "400px", display: "flex", justifyContent: "center", alignItems: "center", fontSize: "12px", color: "#64748b" }}>
+              <div style={{ height: "400px", display: "flex", justifyContent: "center", alignItems: "center", fontSize: "12px", color: "var(--text-faint)" }}>
                 Chart data unavailable for {chartSymbol} ({chartPeriod}). Try a different period.
               </div>
             )}

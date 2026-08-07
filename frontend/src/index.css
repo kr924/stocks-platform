@@ -6,28 +6,101 @@
   font-weight: 400;
 
   color-scheme: dark;
-  color: #f8fafc;
-  background-color: #0f172a;
+  color: var(--text-primary);
+  background-color: var(--bg-base);
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 
-  /* Color Palette - Eye-Friendly High Contrast Slate & Navy */
-  --bg-main: #0f172a;
-  --bg-sidebar: #1e293b;
-  --bg-card: rgba(30, 41, 59, 0.85);
-  --border-color: rgba(255, 255, 255, 0.12);
-  --accent-color: #38bdf8;
-  --accent-glow: rgba(56, 189, 248, 0.35);
-  --success-color: #34d399;
-  --success-glow: rgba(52, 211, 153, 0.25);
-  --danger-color: #f43f5e;
-  --danger-glow: rgba(244, 63, 94, 0.25);
-  --text-primary: #ffffff;
-  --text-secondary: #cbd5e1;
-  --text-muted: #94a3b8;
+  /* ===================================================================
+     COLOUR SYSTEM
+     Tuned for long sessions in front of a dark screen. Three rules:
+
+     1. Never pure white on near-black. The old pairing measured 17.9:1, which
+        makes glyph edges bloom (worse with astigmatism). Primary text now sits
+        at 15:1 and is very slightly cool-neutral instead of pure white.
+     2. Never fully saturated accents. The old palette ran 72-100% saturation;
+        the eye cannot focus deep red and deep blue at the same depth, so
+        saturated hues on dark shimmer. Everything here is 38-72%.
+     3. Surfaces step in even, small increments so depth reads without any
+        single edge being harsh.
+
+     Positive/negative are separated by BOTH hue-shift (green leans teal, red
+     leans orange) and luminance, so they stay distinguishable with red-green
+     colour vision deficiency — which matters when the colour IS the signal.
+     =================================================================== */
+
+  /* Surfaces — elevation ladder, never pure black */
+  --bg-base:       #0f1319;
+  --bg-sunken:     #0a0d12;
+  --surface-1:     #161b24;
+  --surface-2:     #1c222d;
+  --surface-3:     #232a37;
+  --surface-hover: #2a3240;
+
+  /* Borders */
+  --border-subtle:  rgba(255, 255, 255, 0.06);
+  --border-default: rgba(255, 255, 255, 0.10);
+  --border-strong:  rgba(255, 255, 255, 0.16);
+  --border-color:   rgba(255, 255, 255, 0.10);
+
+  /* Text — every step stays at or above 4.5:1 on --bg-base, so nothing here
+     forces you to squint. --text-faint was previously #5a6475 (3.1:1), which
+     was being used for real labels like index names, not just decoration. */
+  --text-primary:   #e3e7ee;   /* 15.0:1 */
+  --text-secondary: #a8b2c4;   /*  8.7:1 */
+  --text-muted:     #8b95a6;   /*  6.0:1 */
+  --text-faint:     #7c8698;   /*  5.0:1 */
+
+  /* Text placed ON a filled accent/semantic button. The fills are light, so
+     white lands at 2.2-2.9:1 there — worse than the dark surfaces it was
+     borrowed from. Near-black gives 6.6-8.6:1 on every fill. */
+  --on-accent: #0b1017;
+
+  /* Positive / gain */
+  --positive:        #3fbf87;
+  --positive-strong: #52d69a;
+  --positive-bg:     rgba(63, 191, 135, 0.12);
+  --positive-border: rgba(63, 191, 135, 0.30);
+
+  /* Negative / loss */
+  --negative:        #f0736f;
+  --negative-strong: #ff8a86;
+  --negative-bg:     rgba(240, 115, 111, 0.12);
+  --negative-border: rgba(240, 115, 111, 0.30);
+
+  /* Warning / pending */
+  --warning:        #e0a33e;
+  --warning-bg:     rgba(224, 163, 62, 0.12);
+  --warning-border: rgba(224, 163, 62, 0.30);
+
+  /* Primary action */
+  --accent:        #5b9dff;
+  --accent-strong: #7db0ff;
+  --accent-bg:     rgba(91, 157, 255, 0.12);
+  --accent-border: rgba(91, 157, 255, 0.30);
+  --accent-glow:   rgba(91, 157, 255, 0.28);
+
+  /* Informational */
+  --info:    #4fb8d9;
+  --info-bg: rgba(79, 184, 217, 0.12);
+
+  /* AI / analysis */
+  --ai:        #a48ae0;
+  --ai-bg:     rgba(164, 138, 224, 0.12);
+  --ai-border: rgba(164, 138, 224, 0.30);
+
+  /* Legacy aliases so older rules keep resolving */
+  --bg-main:       var(--bg-base);
+  --bg-sidebar:    var(--surface-2);
+  --bg-card:       var(--surface-1);
+  --accent-color:  var(--accent);
+  --success-color: var(--positive);
+  --success-glow:  var(--positive-bg);
+  --danger-color:  var(--negative);
+  --danger-glow:   var(--negative-bg);
 }
 
 * {
@@ -40,19 +113,22 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background: radial-gradient(circle at 50% 0%, #1e293b 0%, #0f172a 75%);
+  /* Flat, not a radial gradient. The old top-centre glow meant brightness
+     changed as your eye moved down the page, so the pupil kept re-adapting —
+     a low-grade but constant source of fatigue over a long session. */
+  background: var(--bg-base);
   overflow: hidden;
-  color: #f8fafc;
+  color: var(--text-primary);
 }
 
 /* ===== ANIMATIONS ===== */
 @keyframes flash-green {
-  0% { background-color: rgba(16, 185, 129, 0.35); }
+  0% { background-color: rgba(63, 191, 135, 0.35); }
   100% { background-color: transparent; }
 }
 
 @keyframes flash-red {
-  0% { background-color: rgba(239, 68, 68, 0.35); }
+  0% { background-color: rgba(240, 115, 111, 0.35); }
   100% { background-color: transparent; }
 }
 
@@ -133,7 +209,7 @@ input {
 .search-dropdown::-webkit-scrollbar-thumb:hover,
 .news-scroll-area::-webkit-scrollbar-thumb:hover,
 .modal-scroll-area::-webkit-scrollbar-thumb:hover {
-  background: rgba(59, 130, 246, 0.4);
+  background: rgba(91, 157, 255, 0.4);
 }
 
 /* ===== APP LAYOUT ===== */
@@ -152,7 +228,7 @@ input {
   justify-content: space-between;
   padding: 0 24px;
   border-bottom: 1px solid var(--border-color);
-  background: rgba(12, 15, 29, 0.85);
+  background: rgba(15, 19, 25, 0.85);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   height: 52px;
@@ -181,7 +257,7 @@ input {
   padding: 7px 12px;
   border-radius: 8px;
   border: 1px solid var(--border-color);
-  background: rgba(7, 10, 19, 0.7);
+  background: rgba(10, 13, 18, 0.7);
   transition: all 0.2s ease;
 }
 
@@ -198,7 +274,7 @@ input {
   margin-top: 6px;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  background: #0f1324;
+  background: var(--surface-1);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.65);
   z-index: 1000;
   max-height: 220px;
@@ -224,7 +300,7 @@ input {
 
 /* ===== DATA SECTION (Watchlist / Movers) ===== */
 .data-section {
-  background: rgba(14, 17, 32, 0.6);
+  background: rgba(22, 27, 36, 0.6);
   border: 1px solid var(--border-color);
   border-radius: 10px;
   backdrop-filter: blur(8px);
@@ -239,7 +315,7 @@ input {
   gap: 14px;
   padding: 8px 16px;
   border-bottom: 1px solid var(--border-color);
-  background: rgba(12, 15, 29, 0.5);
+  background: rgba(15, 19, 25, 0.5);
   flex-wrap: wrap;
 }
 
@@ -247,7 +323,7 @@ input {
   font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
-  color: white;
+  color: var(--text-primary);
   letter-spacing: 0.5px;
   white-space: nowrap;
   display: flex;
@@ -283,12 +359,12 @@ input {
 }
 
 .toggle-btn.active-gain {
-  background: rgba(16, 185, 129, 0.15);
+  background: rgba(63, 191, 135, 0.15);
   color: var(--success-color);
 }
 
 .toggle-btn.active-loss {
-  background: rgba(239, 68, 68, 0.15);
+  background: rgba(240, 115, 111, 0.15);
   color: var(--danger-color);
 }
 
@@ -314,8 +390,8 @@ input {
 
 .period-pill.active {
   background: var(--accent-color);
-  color: white;
-  box-shadow: 0 2px 6px rgba(59, 130, 246, 0.3);
+  color: var(--on-accent);
+  box-shadow: 0 2px 6px rgba(91, 157, 255, 0.3);
 }
 
 .period-pill:hover:not(.active) {
@@ -340,7 +416,7 @@ input {
   text-transform: uppercase;
   color: var(--text-muted);
   border-bottom: 1px solid var(--border-color);
-  background: rgba(12, 15, 29, 0.4);
+  background: rgba(15, 19, 25, 0.4);
   letter-spacing: 0.05em;
   white-space: nowrap;
   position: sticky;
@@ -368,7 +444,7 @@ input {
 }
 
 .stock-data-table tbody tr.active {
-  background: rgba(59, 130, 246, 0.06);
+  background: rgba(91, 157, 255, 0.06);
   box-shadow: inset 3px 0 0 var(--accent-color);
 }
 
@@ -403,33 +479,33 @@ input {
 }
 
 .trend-badge.strong-buy {
-  background: rgba(16, 185, 129, 0.22);
-  color: #10b981;
-  border: 1px solid rgba(16, 185, 129, 0.45);
+  background: rgba(63, 191, 135, 0.22);
+  color: var(--positive);
+  border: 1px solid rgba(63, 191, 135, 0.45);
 }
 
 .trend-badge.buy {
-  background: rgba(52, 211, 153, 0.15);
-  color: #34d399;
-  border: 1px solid rgba(52, 211, 153, 0.3);
+  background: rgba(63, 191, 135, 0.15);
+  color: var(--positive-strong);
+  border: 1px solid rgba(63, 191, 135, 0.3);
 }
 
 .trend-badge.hold {
-  background: rgba(100, 116, 139, 0.15);
-  color: #94a3b8;
-  border: 1px solid rgba(100, 116, 139, 0.3);
+  background: rgba(125, 135, 153, 0.15);
+  color: var(--text-muted);
+  border: 1px solid rgba(125, 135, 153, 0.3);
 }
 
 .trend-badge.sell {
-  background: rgba(248, 113, 113, 0.15);
-  color: #f87171;
-  border: 1px solid rgba(248, 113, 113, 0.3);
+  background: rgba(240, 115, 111, 0.15);
+  color: var(--negative-strong);
+  border: 1px solid rgba(240, 115, 111, 0.3);
 }
 
 .trend-badge.strong-sell {
-  background: rgba(239, 68, 68, 0.22);
-  color: #ef4444;
-  border: 1px solid rgba(239, 68, 68, 0.45);
+  background: rgba(240, 115, 111, 0.22);
+  color: var(--negative);
+  border: 1px solid rgba(240, 115, 111, 0.45);
 }
 
 
@@ -445,21 +521,21 @@ input {
 }
 
 .ai-badge.buy {
-  background: rgba(16, 185, 129, 0.15);
+  background: rgba(63, 191, 135, 0.15);
   color: var(--success-color);
-  border: 1px solid rgba(16, 185, 129, 0.3);
+  border: 1px solid rgba(63, 191, 135, 0.3);
 }
 
 .ai-badge.sell {
-  background: rgba(239, 68, 68, 0.15);
+  background: rgba(240, 115, 111, 0.15);
   color: var(--danger-color);
-  border: 1px solid rgba(239, 68, 68, 0.3);
+  border: 1px solid rgba(240, 115, 111, 0.3);
 }
 
 .ai-badge.hold {
-  background: rgba(245, 158, 11, 0.15);
-  color: #f59e0b;
-  border: 1px solid rgba(245, 158, 11, 0.3);
+  background: rgba(224, 163, 62, 0.15);
+  color: var(--warning);
+  border: 1px solid rgba(224, 163, 62, 0.3);
 }
 
 /* ===== ACTION BUTTONS ===== */
@@ -478,7 +554,7 @@ input {
 
 .action-btn-danger:hover {
   color: var(--danger-color);
-  background: rgba(239, 68, 68, 0.12);
+  background: rgba(240, 115, 111, 0.12);
 }
 
 .action-btn-add {
@@ -496,7 +572,7 @@ input {
 
 .action-btn-add:hover {
   color: var(--accent-color);
-  background: rgba(59, 130, 246, 0.12);
+  background: rgba(91, 157, 255, 0.12);
 }
 
 .action-btn-add.in-watchlist {
@@ -519,7 +595,7 @@ input {
 
 .action-btn-refresh:hover:not(:disabled) {
   color: var(--success-color);
-  background: rgba(16, 185, 129, 0.12);
+  background: rgba(63, 191, 135, 0.12);
 }
 
 .action-btn-refresh:disabled {
@@ -563,12 +639,12 @@ input {
 }
 
 .pill-change.positive {
-  background: rgba(16, 185, 129, 0.12);
+  background: rgba(63, 191, 135, 0.12);
   color: var(--success-color);
 }
 
 .pill-change.negative {
-  background: rgba(239, 68, 68, 0.12);
+  background: rgba(240, 115, 111, 0.12);
   color: var(--danger-color);
 }
 
@@ -580,7 +656,7 @@ input {
 }
 
 .stats-card {
-  background: rgba(20, 24, 45, 0.45);
+  background: rgba(28, 34, 45, 0.45);
   border: 1px solid rgba(255, 255, 255, 0.04);
   padding: 12px 14px;
   border-radius: 8px;
@@ -605,7 +681,7 @@ input {
 
 /* ===== MODAL: CHART CARD ===== */
 .chart-card {
-  background: rgba(20, 24, 45, 0.25);
+  background: rgba(28, 34, 45, 0.25);
   border: 1px solid rgba(255, 255, 255, 0.04);
   padding: 16px;
   border-radius: 10px;
@@ -626,7 +702,7 @@ input {
 }
 
 .info-card {
-  background: rgba(20, 24, 45, 0.35);
+  background: rgba(28, 34, 45, 0.35);
   border: 1px solid rgba(255, 255, 255, 0.04);
   padding: 16px;
   border-radius: 10px;
@@ -667,7 +743,7 @@ input {
 }
 
 .modal-scroll-area::-webkit-scrollbar-thumb:hover {
-  background: rgba(59, 130, 246, 0.5);
+  background: rgba(91, 157, 255, 0.5);
 }
 
 /* ===== CHATBOT STYLES ===== */
@@ -699,17 +775,17 @@ input {
 
 .chat-bubble.user {
   align-self: flex-end;
-  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
-  color: white;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent) 100%);
+  color: var(--on-accent);
   border-bottom-right-radius: 2px;
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+  box-shadow: 0 4px 12px rgba(91, 157, 255, 0.2);
 }
 
 .chat-bubble.assistant {
   align-self: flex-start;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.06);
-  color: #e5e7eb;
+  color: var(--text-primary);
   border-bottom-left-radius: 2px;
 }
 
@@ -722,28 +798,28 @@ input {
 
 .chat-input-field {
   flex: 1;
-  background: rgba(12, 15, 29, 0.6);
+  background: rgba(15, 19, 25, 0.6);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
   padding: 8px 12px;
   font-size: 12px;
-  color: white;
+  color: var(--text-primary);
   outline: none;
   transition: all 0.2s;
 }
 
 .chat-input-field:focus {
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
-  background: rgba(12, 15, 29, 0.85);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(91, 157, 255, 0.2);
+  background: rgba(15, 19, 25, 0.85);
 }
 
 .chat-send-btn {
   width: 32px;
   height: 32px;
   border-radius: 8px;
-  background: #2563eb;
-  color: white;
+  background: var(--accent);
+  color: var(--on-accent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -752,8 +828,8 @@ input {
 }
 
 .chat-send-btn:hover:not(:disabled) {
-  background: #1d4ed8;
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+  background: var(--accent);
+  box-shadow: 0 4px 12px rgba(91, 157, 255, 0.3);
   transform: translateY(-1px);
 }
 
@@ -811,7 +887,7 @@ input {
 }
 
 .index-card {
-  background: rgba(20, 24, 45, 0.45);
+  background: rgba(28, 34, 45, 0.45);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   padding: 6px 14px;
@@ -830,7 +906,7 @@ input {
 }
 
 .index-price {
-  color: white;
+  color: var(--text-primary);
   font-weight: 800;
 }
 

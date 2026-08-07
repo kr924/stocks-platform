@@ -1080,7 +1080,7 @@ export default function App() {
         flexDirection: "column",
         gap: "2px",
         padding: "6px 10px",
-        backgroundColor: "rgba(13, 19, 31, 0.5)",
+        backgroundColor: "rgba(22, 27, 36, 0.5)",
         border: "1px solid rgba(255, 255, 255, 0.03)",
         borderRadius: "8px",
         minWidth: "115px",
@@ -1089,18 +1089,18 @@ export default function App() {
         <span style={{
           fontSize: "9px",
           fontWeight: "700",
-          color: "#64748b",
+          color: "var(--text-faint)",
           textTransform: "uppercase",
           letterSpacing: "0.5px"
         }}>
           {indexItem.name.replace("Nifty ", "").replace("BSE ", "")}
         </span>
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: "4px" }}>
-          <span style={{ fontSize: "12px", fontWeight: "800", color: "#f8fafc" }}>
+          <span style={{ fontSize: "12px", fontWeight: "800", color: "var(--text-primary)" }}>
             {indexItem.last_price.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </span>
           <span style={{
-            color: isUp ? "#10b981" : "#ef4444",
+            color: isUp ? "var(--positive)" : "var(--negative)",
             fontSize: "9px",
             fontWeight: "800"
           }}>
@@ -1123,16 +1123,16 @@ export default function App() {
             width: "36px",
             height: "36px",
             borderRadius: "8px",
-            backgroundColor: "#2563eb",
-            color: "white",
+            backgroundColor: "var(--accent)",
+            color: "var(--on-accent)",
             fontWeight: "bold",
             fontSize: "18px",
-            boxShadow: "0 0 15px rgba(37,99,235,0.4)"
+            boxShadow: "0 0 15px rgba(91, 157, 255,0.4)"
           }}>
             S
           </div>
           <div>
-            <h1 style={{ fontSize: "16px", fontWeight: "bold", color: "white", letterSpacing: "0.5px" }}>STOCKS EYE</h1>
+            <h1 style={{ fontSize: "16px", fontWeight: "bold", color: "var(--text-primary)", letterSpacing: "0.5px" }}>STOCKS EYE</h1>
             <p style={{ fontSize: "9px", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "1px", fontWeight: "600" }}>
               Indian Markets Dashboard
             </p>
@@ -1150,11 +1150,11 @@ export default function App() {
               fontSize: "11px",
               fontWeight: "600",
               borderRadius: "20px",
-              backgroundColor: "rgba(59,130,246,0.12)",
-              color: "#60a5fa",
-              border: "1px solid rgba(59,130,246,0.2)"
+              backgroundColor: "rgba(91, 157, 255,0.12)",
+              color: "var(--accent)",
+              border: "1px solid rgba(91, 157, 255,0.2)"
             }}>
-              <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: "#60a5fa" }} className="animate-pulse"></span>
+              <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: "var(--accent)" }} className="animate-pulse"></span>
               Demo Feed Active
             </div>
           ) : authState.authenticated ? (
@@ -1167,9 +1167,9 @@ export default function App() {
                 fontSize: "11px",
                 fontWeight: "600",
                 borderRadius: "20px",
-                backgroundColor: "rgba(16,185,129,0.12)",
-                color: "#34d399",
-                border: "1px solid rgba(16,185,129,0.2)"
+                backgroundColor: "rgba(63, 191, 135,0.12)",
+                color: "var(--positive-strong)",
+                border: "1px solid rgba(63, 191, 135,0.2)"
               }}>
                 <UserCheck size={13} />
                 Upstox Connected ({formatLastUpdated(authState.updated_at)})
@@ -1181,18 +1181,18 @@ export default function App() {
                   fontSize: "11px",
                   fontWeight: "600",
                   borderRadius: "6px",
-                  backgroundColor: "rgba(239, 68, 68, 0.1)",
-                  color: "#f87171",
-                  border: "1px solid rgba(239, 68, 68, 0.2)",
+                  backgroundColor: "rgba(240, 115, 111, 0.1)",
+                  color: "var(--negative-strong)",
+                  border: "1px solid rgba(240, 115, 111, 0.2)",
                   transition: "all 0.2s"
                 }}
                 onMouseOver={(e) => {
-                  e.currentTarget.style.backgroundColor = "#ef4444";
-                  e.currentTarget.style.color = "white";
+                  e.currentTarget.style.backgroundColor = "var(--negative)";
+                  e.currentTarget.style.color = "var(--on-accent)";
                 }}
                 onMouseOut={(e) => {
-                  e.currentTarget.style.backgroundColor = "rgba(239, 68, 68, 0.1)";
-                  e.currentTarget.style.color = "#f87171";
+                  e.currentTarget.style.backgroundColor = "rgba(240, 115, 111, 0.1)";
+                  e.currentTarget.style.color = "var(--negative-strong)";
                 }}
               >
                 Disconnect
@@ -1209,13 +1209,13 @@ export default function App() {
                 fontSize: "11px",
                 fontWeight: "700",
                 borderRadius: "8px",
-                backgroundColor: "#2563eb",
-                color: "white",
-                boxShadow: "0 4px 12px rgba(37,99,235,0.25)",
+                backgroundColor: "var(--accent)",
+                color: "var(--on-accent)",
+                boxShadow: "0 4px 12px rgba(91, 157, 255,0.25)",
                 transition: "background 0.2s"
               }}
-              onMouseOver={(e) => e.currentTarget.style.backgroundColor = "#1d4ed8"}
-              onMouseOut={(e) => e.currentTarget.style.backgroundColor = "#2563eb"}
+              onMouseOver={(e) => e.currentTarget.style.backgroundColor = "var(--accent)"}
+              onMouseOut={(e) => e.currentTarget.style.backgroundColor = "var(--accent)"}
             >
               Connect Upstox Account
             </button>
@@ -1229,7 +1229,7 @@ export default function App() {
         gridTemplateColumns: "repeat(auto-fit, minmax(115px, 1fr))",
         gap: "8px",
         padding: "10px 24px",
-        backgroundColor: "rgba(17, 24, 39, 0.4)",
+        backgroundColor: "rgba(22, 27, 36, 0.4)",
         borderBottom: "1px solid rgba(255, 255, 255, 0.05)",
         flexShrink: 0
       }}>
@@ -1251,11 +1251,11 @@ export default function App() {
           zIndex: 9999,
           padding: "12px 20px",
           borderRadius: "8px",
-          backgroundColor: toast.type === "success" ? "rgba(16, 185, 129, 0.95)" : "rgba(239, 68, 68, 0.95)",
-          color: "white",
+          backgroundColor: toast.type === "success" ? "rgba(63, 191, 135, 0.95)" : "rgba(240, 115, 111, 0.95)",
+          color: "var(--text-primary)",
           fontWeight: "600",
           fontSize: "13px",
-          boxShadow: toast.type === "success" ? "0 4px 15px rgba(16, 185, 129, 0.4)" : "0 4px 15px rgba(239, 68, 68, 0.4)",
+          boxShadow: toast.type === "success" ? "0 4px 15px rgba(63, 191, 135, 0.4)" : "0 4px 15px rgba(240, 115, 111, 0.4)",
           display: "flex",
           alignItems: "center",
           gap: "10px",
@@ -1264,7 +1264,7 @@ export default function App() {
         }}>
           {toast.type === "success" ? <UserCheck size={16} /> : <Brain size={16} />}
           <span>{toast.message}</span>
-          <button onClick={() => setToast(null)} style={{ background: "transparent", color: "white", fontWeight: "bold", fontSize: "14px", marginLeft: "10px", border: "none", cursor: "pointer" }}>Ãƒâ€”</button>
+          <button onClick={() => setToast(null)} style={{ background: "transparent", color: "var(--text-primary)", fontWeight: "bold", fontSize: "14px", marginLeft: "10px", border: "none", cursor: "pointer" }}>Ãƒâ€”</button>
         </div>
       )}
 
@@ -1297,7 +1297,7 @@ export default function App() {
                     outline: "none",
                     fontSize: "12px",
                     width: "100%",
-                    color: "white"
+                    color: "var(--text-primary)"
                   }}
                 />
               </div>
@@ -1311,7 +1311,7 @@ export default function App() {
                       onClick={() => handleAddToWatchlist(item)}
                       className="search-item"
                     >
-                      <span style={{ fontSize: "12px", fontWeight: "600", color: "white" }}>{item.symbol}</span>
+                      <span style={{ fontSize: "12px", fontWeight: "600", color: "var(--text-primary)" }}>{item.symbol}</span>
                       <span style={{ fontSize: "9px", color: "var(--text-muted)" }} className="truncate">{item.name}</span>
                     </div>
                   ))}
@@ -1415,7 +1415,7 @@ export default function App() {
                         >
                           <td>
                             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                              <span style={{ fontWeight: 700, color: "white", fontSize: "12px" }}>
+                              <span style={{ fontWeight: 700, color: "var(--text-primary)", fontSize: "12px" }}>
                                 {item.symbol}
                               </span>
                               <button
@@ -1427,14 +1427,14 @@ export default function App() {
                                   display: "inline-flex",
                                   alignItems: "center",
                                   justifyContent: "center",
-                                  color: item.is_holding ? "#f59e0b" : "rgba(255,255,255,0.15)",
+                                  color: item.is_holding ? "var(--warning)" : "rgba(255,255,255,0.15)",
                                   cursor: "pointer",
                                   transition: "all 0.2s"
                                 }}
                                 className={`action-btn-holdings ${item.is_holding ? "active" : ""}`}
                                 title={item.is_holding ? "Remove from holdings" : "Add to holdings"}
                               >
-                                <Briefcase size={12} fill={item.is_holding ? "#f59e0b" : "none"} />
+                                <Briefcase size={12} fill={item.is_holding ? "var(--warning)" : "none"} />
                               </button>
                             </div>
                           </td>
@@ -1443,7 +1443,7 @@ export default function App() {
                               {item.name}
                             </span>
                           </td>
-                          <td style={{ textAlign: "right", fontWeight: 700, color: "white" }}>
+                          <td style={{ textAlign: "right", fontWeight: 700, color: "var(--text-primary)" }}>
                             {item.last_price > 0 ? `₹${item.last_price.toFixed(2)}` : "—"}
                           </td>
                           <td style={{ textAlign: "right" }}>
@@ -1460,7 +1460,7 @@ export default function App() {
                           <td style={{ textAlign: "right", color: "var(--text-secondary)", fontSize: "11px" }}>
                             ₹{(item.close || 0).toFixed(2)}
                           </td>
-                          <td style={{ textAlign: "right", color: "#34d399", fontWeight: 600, fontSize: "11px" }}>
+                          <td style={{ textAlign: "right", color: "var(--positive-strong)", fontWeight: 600, fontSize: "11px" }}>
                             ₹{(item.high || 0).toFixed(2)}
                           </td>
                           <td
@@ -1482,15 +1482,15 @@ export default function App() {
                                   style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2px", width: "90px", margin: "0 auto", cursor: "help" }}
                                 >
                                   <div style={{ display: "flex", justifyContent: "space-between", width: "100%", fontSize: "9px", fontWeight: "800" }}>
-                                    <span style={{ color: "#10b981", display: "flex", alignItems: "center", gap: "2px" }}>
+                                    <span style={{ color: "var(--positive)", display: "flex", alignItems: "center", gap: "2px" }}>
                                       {compositeBuyPct}% B
-                                      {trend === "up" && <span style={{ fontSize: "8px", color: "#34d399", fontWeight: "900" }}>▲</span>}
-                                      {trend === "down" && <span style={{ fontSize: "8px", color: "#f87171", fontWeight: "900" }}>▼</span>}
+                                      {trend === "up" && <span style={{ fontSize: "8px", color: "var(--positive-strong)", fontWeight: "900" }}>▲</span>}
+                                      {trend === "down" && <span style={{ fontSize: "8px", color: "var(--negative-strong)", fontWeight: "900" }}>▼</span>}
                                     </span>
-                                    <span style={{ color: "#ef4444" }}>{compositeSellPct}% S</span>
+                                    <span style={{ color: "var(--negative)" }}>{compositeSellPct}% S</span>
                                   </div>
-                                  <div style={{ width: "100%", height: "5px", backgroundColor: "#ef4444", borderRadius: "3px", overflow: "hidden", display: "flex" }}>
-                                    <div style={{ width: `${compositeBuyPct}%`, height: "100%", backgroundColor: "#10b981" }} />
+                                  <div style={{ width: "100%", height: "5px", backgroundColor: "var(--negative)", borderRadius: "3px", overflow: "hidden", display: "flex" }}>
+                                    <div style={{ width: `${compositeBuyPct}%`, height: "100%", backgroundColor: "var(--positive)" }} />
                                   </div>
                                 </div>
                               );
@@ -1505,11 +1505,11 @@ export default function App() {
                               return (
                                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2px", width: "110px", margin: "0 auto" }}>
                                   <div style={{ display: "flex", justifyContent: "space-between", width: "100%", fontSize: "9px", fontWeight: "700" }}>
-                                    <span style={{ color: "#10b981" }}>{formatQty(buyQty)}</span>
-                                    <span style={{ color: "#ef4444" }}>{formatQty(sellQty)}</span>
+                                    <span style={{ color: "var(--positive)" }}>{formatQty(buyQty)}</span>
+                                    <span style={{ color: "var(--negative)" }}>{formatQty(sellQty)}</span>
                                   </div>
-                                  <div style={{ width: "100%", height: "4px", backgroundColor: "#ef4444", borderRadius: "2px", overflow: "hidden", display: "flex" }}>
-                                    <div style={{ width: `${(buyQty / totalQty) * 100}%`, height: "100%", backgroundColor: "#10b981" }} />
+                                  <div style={{ width: "100%", height: "4px", backgroundColor: "var(--negative)", borderRadius: "2px", overflow: "hidden", display: "flex" }}>
+                                    <div style={{ width: `${(buyQty / totalQty) * 100}%`, height: "100%", backgroundColor: "var(--positive)" }} />
                                   </div>
                                   <div style={{ fontSize: "8px", color: "var(--text-muted)", fontWeight: "600" }}>
                                     Σ {formatQty(totalQty)}
@@ -1642,7 +1642,7 @@ export default function App() {
                       style={{
                         background: "none",
                         border: "none",
-                        color: "#3b82f6",
+                        color: "var(--accent)",
                         textDecoration: "underline",
                         cursor: "pointer",
                         padding: 0,
@@ -1650,8 +1650,8 @@ export default function App() {
                         fontWeight: "600",
                         transition: "color 0.2s"
                       }}
-                      onMouseOver={(e) => e.currentTarget.style.color = "#60a5fa"}
-                      onMouseOut={(e) => e.currentTarget.style.color = "#3b82f6"}
+                      onMouseOver={(e) => e.currentTarget.style.color = "var(--accent)"}
+                      onMouseOut={(e) => e.currentTarget.style.color = "var(--accent)"}
                     >
                       Authorize Upstox
                     </button>{" "}
@@ -1707,7 +1707,7 @@ export default function App() {
                             }`}
                         >
                           <td>
-                            <span style={{ fontWeight: 700, color: "white", fontSize: "12px" }}>
+                            <span style={{ fontWeight: 700, color: "var(--text-primary)", fontSize: "12px" }}>
                               {item.symbol}
                             </span>
                           </td>
@@ -1716,7 +1716,7 @@ export default function App() {
                               {item.name}
                             </span>
                           </td>
-                          <td style={{ textAlign: "right", fontWeight: 700, color: "white" }}>
+                          <td style={{ textAlign: "right", fontWeight: 700, color: "var(--text-primary)" }}>
                             ₹{item.last_price.toFixed(2)}
                           </td>
                           <td style={{ textAlign: "right" }}>
@@ -1731,7 +1731,7 @@ export default function App() {
                           <td style={{ textAlign: "right", color: "var(--text-secondary)", fontSize: "11px" }}>
                             ₹{(item.close || 0).toFixed(2)}
                           </td>
-                          <td style={{ textAlign: "right", color: "#34d399", fontWeight: 600, fontSize: "11px" }}>
+                          <td style={{ textAlign: "right", color: "var(--positive-strong)", fontWeight: 600, fontSize: "11px" }}>
                             ₹{(item.high || 0).toFixed(2)}
                           </td>
                           <td
@@ -1753,15 +1753,15 @@ export default function App() {
                                   style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2px", width: "90px", margin: "0 auto", cursor: "help" }}
                                 >
                                   <div style={{ display: "flex", justifyContent: "space-between", width: "100%", fontSize: "9px", fontWeight: "800" }}>
-                                    <span style={{ color: "#10b981", display: "flex", alignItems: "center", gap: "2px" }}>
+                                    <span style={{ color: "var(--positive)", display: "flex", alignItems: "center", gap: "2px" }}>
                                       {compositeBuyPct}% B
-                                      {trend === "up" && <span style={{ fontSize: "8px", color: "#34d399", fontWeight: "900" }}>▲</span>}
-                                      {trend === "down" && <span style={{ fontSize: "8px", color: "#f87171", fontWeight: "900" }}>▼</span>}
+                                      {trend === "up" && <span style={{ fontSize: "8px", color: "var(--positive-strong)", fontWeight: "900" }}>▲</span>}
+                                      {trend === "down" && <span style={{ fontSize: "8px", color: "var(--negative-strong)", fontWeight: "900" }}>▼</span>}
                                     </span>
-                                    <span style={{ color: "#ef4444" }}>{compositeSellPct}% S</span>
+                                    <span style={{ color: "var(--negative)" }}>{compositeSellPct}% S</span>
                                   </div>
-                                  <div style={{ width: "100%", height: "5px", backgroundColor: "#ef4444", borderRadius: "3px", overflow: "hidden", display: "flex" }}>
-                                    <div style={{ width: `${compositeBuyPct}%`, height: "100%", backgroundColor: "#10b981" }} />
+                                  <div style={{ width: "100%", height: "5px", backgroundColor: "var(--negative)", borderRadius: "3px", overflow: "hidden", display: "flex" }}>
+                                    <div style={{ width: `${compositeBuyPct}%`, height: "100%", backgroundColor: "var(--positive)" }} />
                                   </div>
                                 </div>
                               );
@@ -1776,11 +1776,11 @@ export default function App() {
                               return (
                                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2px", width: "110px", margin: "0 auto" }}>
                                   <div style={{ display: "flex", justifyContent: "space-between", width: "100%", fontSize: "9px", fontWeight: "700" }}>
-                                    <span style={{ color: "#10b981" }}>{formatQty(buyQty)}</span>
-                                    <span style={{ color: "#ef4444" }}>{formatQty(sellQty)}</span>
+                                    <span style={{ color: "var(--positive)" }}>{formatQty(buyQty)}</span>
+                                    <span style={{ color: "var(--negative)" }}>{formatQty(sellQty)}</span>
                                   </div>
-                                  <div style={{ width: "100%", height: "4px", backgroundColor: "#ef4444", borderRadius: "2px", overflow: "hidden", display: "flex" }}>
-                                    <div style={{ width: `${(buyQty / totalQty) * 100}%`, height: "100%", backgroundColor: "#10b981" }} />
+                                  <div style={{ width: "100%", height: "4px", backgroundColor: "var(--negative)", borderRadius: "2px", overflow: "hidden", display: "flex" }}>
+                                    <div style={{ width: `${(buyQty / totalQty) * 100}%`, height: "100%", backgroundColor: "var(--positive)" }} />
                                   </div>
                                   <div style={{ fontSize: "8px", color: "var(--text-muted)", fontWeight: "600" }}>
                                     Σ {formatQty(totalQty)}
@@ -1918,7 +1918,7 @@ export default function App() {
             left: 0,
             right: 0,
             bottom: 0,
-            backgroundColor: "rgba(7, 10, 19, 0.8)",
+            backgroundColor: "rgba(10, 13, 18, 0.8)",
             backdropFilter: "blur(20px)",
             WebkitBackdropFilter: "blur(20px)",
             zIndex: 10000,
@@ -1933,7 +1933,7 @@ export default function App() {
               width: "100%",
               maxWidth: "960px",
               maxHeight: "90vh",
-              background: "linear-gradient(135deg, rgba(20, 24, 45, 0.95) 0%, rgba(12, 15, 29, 0.98) 100%)",
+              background: "linear-gradient(135deg, rgba(28, 34, 45, 0.95) 0%, rgba(15, 19, 25, 0.98) 100%)",
               border: "1px solid rgba(255, 255, 255, 0.1)",
               borderRadius: "16px",
               boxShadow: "0 24px 60px rgba(0, 0, 0, 0.8)",
@@ -1950,24 +1950,24 @@ export default function App() {
                 justifyContent: "space-between",
                 padding: "16px 20px",
                 borderBottom: "1px solid rgba(255, 255, 255, 0.08)",
-                backgroundColor: "rgba(12, 15, 29, 0.4)",
+                backgroundColor: "rgba(15, 19, 25, 0.4)",
                 flexShrink: 0
               }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
                   <div style={{
                     padding: "6px 12px",
                     borderRadius: "8px",
-                    background: "#2563eb",
-                    color: "white",
+                    background: "var(--accent)",
+                    color: "var(--on-accent)",
                     fontWeight: "800",
                     fontSize: "16px",
-                    boxShadow: "0 4px 12px rgba(37,99,235,0.3)"
+                    boxShadow: "0 4px 12px rgba(91, 157, 255,0.3)"
                   }}>
                     {symbol}
                   </div>
                   <div>
                     <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                      <h2 style={{ fontSize: "16px", fontWeight: "800", color: "white", margin: 0 }}>{name}</h2>
+                      <h2 style={{ fontSize: "16px", fontWeight: "800", color: "var(--text-primary)", margin: 0 }}>{name}</h2>
                       <span className="badge-nse">NSE</span>
                     </div>
                     <p style={{ fontSize: "9px", color: "var(--text-muted)", margin: "2px 0 0 0" }}>KEY: {selectedKey}</p>
@@ -1976,7 +1976,7 @@ export default function App() {
 
                 <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
                   <div style={{ textAlign: "right" }}>
-                    <div style={{ fontSize: "18px", fontWeight: "900", color: "white" }}>
+                    <div style={{ fontSize: "18px", fontWeight: "900", color: "var(--text-primary)" }}>
                       {ltp > 0 ? `₹${ltp.toFixed(2)}` : "—"}
                     </div>
                     {ltp > 0 && (
@@ -1995,9 +1995,9 @@ export default function App() {
                           fontSize: "11px",
                           fontWeight: "700",
                           borderRadius: "6px",
-                          backgroundColor: "rgba(239, 68, 68, 0.1)",
-                          color: "#f87171",
-                          border: "1px solid rgba(239, 68, 68, 0.25)"
+                          backgroundColor: "rgba(240, 115, 111, 0.1)",
+                          color: "var(--negative-strong)",
+                          border: "1px solid rgba(240, 115, 111, 0.25)"
                         }}
                       >
                         Remove Watchlist
@@ -2010,9 +2010,9 @@ export default function App() {
                           fontSize: "11px",
                           fontWeight: "700",
                           borderRadius: "6px",
-                          backgroundColor: "#2563eb",
-                          color: "white",
-                          boxShadow: "0 4px 12px rgba(37,99,235,0.2)"
+                          backgroundColor: "var(--accent)",
+                          color: "var(--on-accent)",
+                          boxShadow: "0 4px 12px rgba(91, 157, 255,0.2)"
                         }}
                       >
                         Add Watchlist
@@ -2026,7 +2026,7 @@ export default function App() {
                         height: "30px",
                         borderRadius: "50%",
                         backgroundColor: "rgba(255, 255, 255, 0.05)",
-                        color: "white",
+                        color: "var(--text-primary)",
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
@@ -2063,7 +2063,7 @@ export default function App() {
                     padding: "60px 24px",
                     border: "1px dashed var(--border-color)",
                     borderRadius: "12px",
-                    background: "rgba(20,24,45,0.1)",
+                    background: "rgba(28, 34, 45,0.1)",
                     color: "var(--text-secondary)",
                     fontSize: "13px"
                   }}>
@@ -2075,14 +2075,14 @@ export default function App() {
                     <div className="stats-grid">
                       {[
                         { label: "Open Price", val: detail.quote.ohlc.open },
-                        { label: "Day High", val: detail.quote.ohlc.high, color: "#34d399" },
-                        { label: "Day Low", val: detail.quote.ohlc.low, color: "#f87171" },
+                        { label: "Day High", val: detail.quote.ohlc.high, color: "var(--positive-strong)" },
+                        { label: "Day Low", val: detail.quote.ohlc.low, color: "var(--negative-strong)" },
                         { label: "Prev Close", val: detail.quote.ohlc.close },
                         { label: "Traded Volume", val: detail.quote.volume }
                       ].map((stat, idx) => (
                         <div key={idx} className="stats-card">
                           <span className="stats-label">{stat.label}</span>
-                          <span className="stats-value" style={{ color: stat.color || "white" }}>
+                          <span className="stats-value" style={{ color: stat.color || "var(--text-primary)" }}>
                             {stat.label.includes("Volume") ? stat.val.toLocaleString() : (stat.val ? `₹${stat.val.toFixed(2)}` : "—")}
                           </span>
                         </div>
@@ -2093,8 +2093,8 @@ export default function App() {
                     <div className="chart-card">
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px", borderBottom: "1px solid rgba(255,255,255,0.04)", paddingBottom: "8px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                          <span style={{ width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#3b82f6", boxShadow: "0 0 8px #3b82f6" }}></span>
-                          <span style={{ fontSize: "11px", fontWeight: "700", color: "white", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                          <span style={{ width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "var(--accent)", boxShadow: "0 0 8px var(--accent)" }}></span>
+                          <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--on-accent)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
                             Stock Performance Chart
                           </span>
                         </div>
@@ -2117,8 +2117,8 @@ export default function App() {
                                 borderRadius: "4px",
                                 border: "none",
                                 cursor: "pointer",
-                                backgroundColor: chartPeriod === p ? "#2563eb" : "transparent",
-                                color: chartPeriod === p ? "white" : "#94a3b8",
+                                backgroundColor: chartPeriod === p ? "var(--accent)" : "transparent",
+                                color: chartPeriod === p ? "var(--on-accent)" : "var(--text-muted)",
                                 transition: "all 0.2s"
                               }}
                             >
@@ -2145,7 +2145,7 @@ export default function App() {
                     {/* AI & News Splits */}
                     <div className="details-split-grid">
                       {/* AI Commentary & Metrics Card */}
-                      <div className="info-card" style={{ background: "linear-gradient(135deg, rgba(20,24,45,0.4) 0%, rgba(59,130,246,0.03) 100%)", minHeight: "340px", display: "flex", flexDirection: "column" }}>
+                      <div className="info-card" style={{ background: "linear-gradient(135deg, rgba(28, 34, 45,0.4) 0%, rgba(91, 157, 255,0.03) 100%)", minHeight: "340px", display: "flex", flexDirection: "column" }}>
                         {/* Tab Headers */}
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "14px", borderBottom: "1px solid rgba(255,255,255,0.08)", paddingBottom: "8px", flexShrink: 0 }}>
                           <div style={{ display: "flex", gap: "16px" }}>
@@ -2158,8 +2158,8 @@ export default function App() {
                                 background: "none",
                                 border: "none",
                                 padding: "4px 8px",
-                                borderBottom: chatTab === "analysis" ? "2px solid #3b82f6" : "2px solid transparent",
-                                color: chatTab === "analysis" ? "white" : "var(--text-muted)",
+                                borderBottom: chatTab === "analysis" ? "2px solid var(--accent)" : "2px solid transparent",
+                                color: chatTab === "analysis" ? "var(--on-accent)" : "var(--text-muted)",
                                 fontWeight: "700",
                                 fontSize: "11px",
                                 textTransform: "uppercase",
@@ -2178,8 +2178,8 @@ export default function App() {
                                 background: "none",
                                 border: "none",
                                 padding: "4px 8px",
-                                borderBottom: chatTab === "chat" ? "2px solid #3b82f6" : "2px solid transparent",
-                                color: chatTab === "chat" ? "white" : "var(--text-muted)",
+                                borderBottom: chatTab === "chat" ? "2px solid var(--accent)" : "2px solid transparent",
+                                color: chatTab === "chat" ? "var(--on-accent)" : "var(--text-muted)",
                                 fontWeight: "700",
                                 fontSize: "11px",
                                 textTransform: "uppercase",
@@ -2198,8 +2198,8 @@ export default function App() {
                                 background: "none",
                                 border: "none",
                                 padding: "4px 8px",
-                                borderBottom: chatTab === "depth" ? "2px solid #3b82f6" : "2px solid transparent",
-                                color: chatTab === "depth" ? "white" : "var(--text-muted)",
+                                borderBottom: chatTab === "depth" ? "2px solid var(--accent)" : "2px solid transparent",
+                                color: chatTab === "depth" ? "var(--on-accent)" : "var(--text-muted)",
                                 fontWeight: "700",
                                 fontSize: "11px",
                                 textTransform: "uppercase",
@@ -2234,7 +2234,7 @@ export default function App() {
                               }}>
                                 <div>
                                   <span style={{ fontSize: "9px", color: "var(--text-muted)", textTransform: "uppercase", display: "block" }}>Sector</span>
-                                  <span style={{ fontSize: "12px", color: "white", fontWeight: "600" }}>
+                                  <span style={{ fontSize: "12px", color: "var(--text-primary)", fontWeight: "600" }}>
                                     {detail.analysis?.sector || "General Market"}
                                   </span>
                                 </div>
@@ -2250,20 +2250,20 @@ export default function App() {
                                       display: "inline-block",
                                       marginTop: "2px",
                                       backgroundColor: detail.analysis.recommendation === "BUY"
-                                        ? "rgba(16, 185, 129, 0.15)"
+                                        ? "rgba(63, 191, 135, 0.15)"
                                         : detail.analysis.recommendation === "SELL"
-                                          ? "rgba(239, 68, 68, 0.15)"
-                                          : "rgba(245, 158, 11, 0.15)",
+                                          ? "rgba(240, 115, 111, 0.15)"
+                                          : "rgba(224, 163, 62, 0.15)",
                                       color: detail.analysis.recommendation === "BUY"
                                         ? "var(--success-color)"
                                         : detail.analysis.recommendation === "SELL"
                                           ? "var(--danger-color)"
-                                          : "#f59e0b",
+                                          : "var(--warning)",
                                       border: `1px solid ${detail.analysis.recommendation === "BUY"
-                                          ? "rgba(16, 185, 129, 0.3)"
+                                          ? "rgba(63, 191, 135, 0.3)"
                                           : detail.analysis.recommendation === "SELL"
-                                            ? "rgba(239, 68, 68, 0.3)"
-                                            : "rgba(245, 158, 11, 0.3)"
+                                            ? "rgba(240, 115, 111, 0.3)"
+                                            : "rgba(224, 163, 62, 0.3)"
                                         }`
                                     }}>
                                       {detail.analysis.recommendation}
@@ -2274,20 +2274,20 @@ export default function App() {
                                 </div>
                                 <div>
                                   <span style={{ fontSize: "9px", color: "var(--text-muted)", textTransform: "uppercase", display: "block" }}>Resistance Levels</span>
-                                  <span style={{ fontSize: "12px", color: "white", fontWeight: "600" }}>
+                                  <span style={{ fontSize: "12px", color: "var(--text-primary)", fontWeight: "600" }}>
                                     {detail.analysis?.resistance_levels || "Not calculated"}
                                   </span>
                                 </div>
                                 <div>
                                   <span style={{ fontSize: "9px", color: "var(--text-muted)", textTransform: "uppercase", display: "block" }}>Support Levels</span>
-                                  <span style={{ fontSize: "12px", color: "white", fontWeight: "600" }}>
+                                  <span style={{ fontSize: "12px", color: "var(--text-primary)", fontWeight: "600" }}>
                                     {detail.analysis?.support_levels || "Not calculated"}
                                   </span>
                                 </div>
                               </div>
 
                               {detail.analysis?.comment ? (
-                                <p style={{ fontSize: "12.5px", color: "#e5e7eb", lineHeight: "1.7", fontStyle: "italic", fontWeight: "500", marginTop: "12px" }}>
+                                <p style={{ fontSize: "12.5px", color: "var(--text-primary)", lineHeight: "1.7", fontStyle: "italic", fontWeight: "500", marginTop: "12px" }}>
                                   "{detail.analysis.comment}"
                                 </p>
                               ) : (
@@ -2305,7 +2305,7 @@ export default function App() {
                                   <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                                     {detail.analysis.analyst_recommendations.map((rec, idx) => (
                                       <div key={idx} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "11px", background: "rgba(255,255,255,0.015)", padding: "5px 10px", borderRadius: "6px", border: "1px solid rgba(255,255,255,0.02)" }}>
-                                        <span style={{ color: "#e5e7eb", fontWeight: "500" }}>{rec.analyst_firm}</span>
+                                        <span style={{ color: "var(--text-primary)", fontWeight: "500" }}>{rec.analyst_firm}</span>
                                         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                                           <span style={{
                                             fontWeight: "800",
@@ -2313,20 +2313,20 @@ export default function App() {
                                             padding: "2px 6px",
                                             borderRadius: "4px",
                                             backgroundColor: rec.recommendation === "BUY"
-                                              ? "rgba(16, 185, 129, 0.12)"
+                                              ? "rgba(63, 191, 135, 0.12)"
                                               : rec.recommendation === "SELL"
-                                                ? "rgba(239, 68, 68, 0.12)"
-                                                : "rgba(245, 158, 11, 0.12)",
+                                                ? "rgba(240, 115, 111, 0.12)"
+                                                : "rgba(224, 163, 62, 0.12)",
                                             color: rec.recommendation === "BUY"
                                               ? "var(--success-color)"
                                               : rec.recommendation === "SELL"
                                                 ? "var(--danger-color)"
-                                                : "#f59e0b",
+                                                : "var(--warning)",
                                             border: `1px solid ${rec.recommendation === "BUY"
-                                                ? "rgba(16, 185, 129, 0.2)"
+                                                ? "rgba(63, 191, 135, 0.2)"
                                                 : rec.recommendation === "SELL"
-                                                  ? "rgba(239, 68, 68, 0.2)"
-                                                  : "rgba(245, 158, 11, 0.2)"
+                                                  ? "rgba(240, 115, 111, 0.2)"
+                                                  : "rgba(224, 163, 62, 0.2)"
                                               }`
                                           }}>
                                             {rec.recommendation}
@@ -2355,8 +2355,8 @@ export default function App() {
                                   fontSize: "11px",
                                   fontWeight: "600",
                                   borderRadius: "6px",
-                                  backgroundColor: "#2563eb",
-                                  color: "white"
+                                  backgroundColor: "var(--accent)",
+                                  color: "var(--on-accent)"
                                 }}
                               >
                                 {isLoading ? (
@@ -2384,7 +2384,7 @@ export default function App() {
                                   color: "var(--text-muted)",
                                   gap: "10px"
                                 }}>
-                                  <Brain size={32} style={{ opacity: 0.5, color: "#3b82f6" }} />
+                                  <Brain size={32} style={{ opacity: 0.5, color: "var(--accent)" }} />
                                   <p style={{ fontSize: "12px", fontWeight: "500" }}>
                                     Ask me anything about {symbol}! For example:
                                   </p>
@@ -2407,8 +2407,8 @@ export default function App() {
                                           textAlign: "left"
                                         }}
                                         onMouseOver={(e) => {
-                                          e.currentTarget.style.backgroundColor = "rgba(59, 130, 246, 0.08)";
-                                          e.currentTarget.style.borderColor = "rgba(59, 130, 246, 0.2)";
+                                          e.currentTarget.style.backgroundColor = "rgba(91, 157, 255, 0.08)";
+                                          e.currentTarget.style.borderColor = "rgba(91, 157, 255, 0.2)";
                                         }}
                                         onMouseOut={(e) => {
                                           e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.03)";
@@ -2472,24 +2472,24 @@ export default function App() {
                             <div style={{ padding: "10px", borderRadius: "8px", backgroundColor: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)" }}>
                               <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", fontWeight: "700", marginBottom: "6px" }}>
                                 <span style={{ color: "var(--text-secondary)" }}>ORDER BOOK PRESSURE</span>
-                                <span style={{ color: "#3b82f6" }}>WEIGHTED DISTANCE IMBALANCE</span>
+                                <span style={{ color: "var(--accent)" }}>WEIGHTED DISTANCE IMBALANCE</span>
                               </div>
                               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "4px" }}>
-                                <span style={{ fontSize: "18px", fontWeight: "800", color: "#10b981" }}>
+                                <span style={{ fontSize: "18px", fontWeight: "800", color: "var(--positive)" }}>
                                   {detail?.quote?.depth_buy_pct !== undefined ? detail.quote.depth_buy_pct : 50}%
                                   <span style={{ fontSize: "10px", fontWeight: "700", color: "var(--text-muted)", marginLeft: "4px" }}>BIDS</span>
                                 </span>
-                                <span style={{ fontSize: "18px", fontWeight: "800", color: "#ef4444" }}>
+                                <span style={{ fontSize: "18px", fontWeight: "800", color: "var(--negative)" }}>
                                   {detail?.quote?.depth_sell_pct !== undefined ? detail.quote.depth_sell_pct : 50}%
                                   <span style={{ fontSize: "10px", fontWeight: "700", color: "var(--text-muted)", marginRight: "4px" }}>ASKS</span>
                                 </span>
                               </div>
-                              <div style={{ width: "100%", height: "8px", backgroundColor: "rgba(239, 68, 68, 0.3)", borderRadius: "4px", overflow: "hidden", display: "flex" }}>
+                              <div style={{ width: "100%", height: "8px", backgroundColor: "rgba(240, 115, 111, 0.3)", borderRadius: "4px", overflow: "hidden", display: "flex" }}>
                                 <div style={{
                                   width: `${detail?.quote?.depth_buy_pct !== undefined ? detail.quote.depth_buy_pct : 50}%`,
                                   height: "100%",
-                                  backgroundColor: "#10b981",
-                                  boxShadow: "0 0 8px #10b981"
+                                  backgroundColor: "var(--positive)",
+                                  boxShadow: "0 0 8px var(--positive)"
                                 }} />
                               </div>
                             </div>
@@ -2516,19 +2516,19 @@ export default function App() {
                                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
                                     <div style={{ padding: "8px", borderRadius: "6px", backgroundColor: "rgba(255,255,255,0.015)", border: "1px solid rgba(255,255,255,0.03)", textAlign: "center" }}>
                                       <span style={{ display: "block", fontSize: "8.5px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "700" }}>Bid-Ask Spread</span>
-                                      <span style={{ display: "block", fontSize: "11px", fontWeight: "700", color: "#e5e7eb", marginTop: "2px" }}>
+                                      <span style={{ display: "block", fontSize: "11px", fontWeight: "700", color: "var(--text-primary)", marginTop: "2px" }}>
                                         {spread > 0 ? `₹${spread.toFixed(2)} (${spreadPct.toFixed(2)}%)` : "—"}
                                       </span>
                                     </div>
                                     <div style={{ padding: "8px", borderRadius: "6px", backgroundColor: "rgba(255,255,255,0.015)", border: "1px solid rgba(255,255,255,0.03)", textAlign: "center" }}>
                                       <span style={{ display: "block", fontSize: "8.5px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "700" }}>Total Bid Qty</span>
-                                      <span style={{ display: "block", fontSize: "11px", fontWeight: "700", color: "#34d399", marginTop: "2px" }}>
+                                      <span style={{ display: "block", fontSize: "11px", fontWeight: "700", color: "var(--positive-strong)", marginTop: "2px" }}>
                                         {totalBuyQty.toLocaleString()}
                                       </span>
                                     </div>
                                     <div style={{ padding: "8px", borderRadius: "6px", backgroundColor: "rgba(255,255,255,0.015)", border: "1px solid rgba(255,255,255,0.03)", textAlign: "center" }}>
                                       <span style={{ display: "block", fontSize: "8.5px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "700" }}>Total Ask Qty</span>
-                                      <span style={{ display: "block", fontSize: "11px", fontWeight: "700", color: "#f87171", marginTop: "2px" }}>
+                                      <span style={{ display: "block", fontSize: "11px", fontWeight: "700", color: "var(--negative-strong)", marginTop: "2px" }}>
                                         {totalSellQty.toLocaleString()}
                                       </span>
                                     </div>
@@ -2560,12 +2560,12 @@ export default function App() {
                                                   padding: "5px 6px",
                                                   fontSize: "10.5px",
                                                   borderRadius: "4px",
-                                                  background: `linear-gradient(to right, rgba(16, 185, 129, 0.08) ${pct}%, transparent ${pct}%)`,
+                                                  background: `linear-gradient(to right, rgba(63, 191, 135, 0.08) ${pct}%, transparent ${pct}%)`,
                                                   border: "1px solid rgba(255,255,255,0.01)"
                                                 }}
                                               >
-                                                <span style={{ color: "#34d399", fontWeight: "700" }}>₹{(bid.price || 0).toFixed(2)}</span>
-                                                <span style={{ color: "#e5e7eb", textAlign: "right", fontWeight: "600" }}>{(bid.quantity || 0).toLocaleString()}</span>
+                                                <span style={{ color: "var(--positive-strong)", fontWeight: "700" }}>₹{(bid.price || 0).toFixed(2)}</span>
+                                                <span style={{ color: "var(--text-primary)", textAlign: "right", fontWeight: "600" }}>{(bid.quantity || 0).toLocaleString()}</span>
                                                 <span style={{ color: "var(--text-muted)", textAlign: "right" }}>{bid.orders || 0}</span>
                                               </div>
                                             );
@@ -2598,12 +2598,12 @@ export default function App() {
                                                   padding: "5px 6px",
                                                   fontSize: "10.5px",
                                                   borderRadius: "4px",
-                                                  background: `linear-gradient(to left, rgba(239, 68, 68, 0.08) ${pct}%, transparent ${pct}%)`,
+                                                  background: `linear-gradient(to left, rgba(240, 115, 111, 0.08) ${pct}%, transparent ${pct}%)`,
                                                   border: "1px solid rgba(255,255,255,0.01)"
                                                 }}
                                               >
-                                                <span style={{ color: "#f87171", fontWeight: "700" }}>₹{(ask.price || 0).toFixed(2)}</span>
-                                                <span style={{ color: "#e5e7eb", textAlign: "right", fontWeight: "600" }}>{(ask.quantity || 0).toLocaleString()}</span>
+                                                <span style={{ color: "var(--negative-strong)", fontWeight: "700" }}>₹{(ask.price || 0).toFixed(2)}</span>
+                                                <span style={{ color: "var(--text-primary)", textAlign: "right", fontWeight: "600" }}>{(ask.quantity || 0).toLocaleString()}</span>
                                                 <span style={{ color: "var(--text-muted)", textAlign: "right" }}>{ask.orders || 0}</span>
                                               </div>
                                             );
@@ -2627,16 +2627,16 @@ export default function App() {
                       <div className="info-card" style={{ minHeight: "320px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
                         <div>
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "14px", borderBottom: "1px solid rgba(255,255,255,0.04)", paddingBottom: "8px" }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "#34d399" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--positive-strong)" }}>
                               <Newspaper size={14} />
-                              <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: "white" }}>
+                              <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: "var(--text-primary)" }}>
                                 Company News Feed
                               </span>
                             </div>
                             <button
                               onClick={() => handleFetchNewsAndAI(selectedKey)}
                               disabled={isLoading}
-                              style={{ background: "transparent", color: "#60a5fa", fontSize: "10px", fontWeight: "600", display: "flex", alignItems: "center", gap: "4px" }}
+                              style={{ background: "transparent", color: "var(--accent)", fontSize: "10px", fontWeight: "600", display: "flex", alignItems: "center", gap: "4px" }}
                             >
                               {isLoading ? <RefreshCw size={9} className="animate-spin" /> : <RefreshCw size={9} />}
                               Refresh
@@ -2648,16 +2648,16 @@ export default function App() {
                               {detail.news.map((n: any, idx: number) => (
                                 <div key={idx} style={{ display: "flex", flexDirection: "column", gap: "4px", borderBottom: "1px solid rgba(255,255,255,0.02)", paddingBottom: "10px", marginBottom: "10px" }}>
                                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: "8px", color: "var(--text-muted)" }}>
-                                    <span style={{ fontWeight: "700", color: "#34d399" }}>{n.source}</span>
+                                    <span style={{ fontWeight: "700", color: "var(--positive-strong)" }}>{n.source}</span>
                                     <span>{new Date(n.published_at).toLocaleDateString()}</span>
                                   </div>
                                   <a
                                     href={n.url}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    style={{ fontSize: "11px", fontWeight: "700", color: "#f3f4f6", textDecoration: "none", display: "flex", alignItems: "center", gap: "4px" }}
-                                    onMouseOver={(e) => e.currentTarget.style.color = "#60a5fa"}
-                                    onMouseOut={(e) => e.currentTarget.style.color = "#f3f4f6"}
+                                    style={{ fontSize: "11px", fontWeight: "700", color: "var(--text-primary)", textDecoration: "none", display: "flex", alignItems: "center", gap: "4px" }}
+                                    onMouseOver={(e) => e.currentTarget.style.color = "var(--accent)"}
+                                    onMouseOut={(e) => e.currentTarget.style.color = "var(--text-primary)"}
                                   >
                                     {n.headline}
                                     <ExternalLink size={8} style={{ flexShrink: 0 }} />
@@ -2680,9 +2680,9 @@ export default function App() {
                                   fontSize: "10px",
                                   fontWeight: "600",
                                   borderRadius: "4px",
-                                  backgroundColor: "rgba(59,130,246,0.1)",
-                                  color: "#60a5fa",
-                                  border: "1px solid rgba(59,130,246,0.15)"
+                                  backgroundColor: "rgba(91, 157, 255,0.1)",
+                                  color: "var(--accent)",
+                                  border: "1px solid rgba(91, 157, 255,0.15)"
                                 }}
                               >
                                 Fetch Live News
@@ -2713,10 +2713,10 @@ export default function App() {
               top: hoveredAnalysisKey.y,
               left: hoveredAnalysisKey.x,
               width: "380px",
-              background: "linear-gradient(135deg, rgba(20, 24, 45, 0.98) 0%, rgba(12, 15, 29, 0.99) 100%)",
+              background: "linear-gradient(135deg, rgba(28, 34, 45, 0.98) 0%, rgba(15, 19, 25, 0.99) 100%)",
               border: "1px solid rgba(255, 255, 255, 0.12)",
               borderRadius: "12px",
-              boxShadow: "0 20px 50px rgba(0, 0, 0, 0.9), 0 0 30px rgba(37, 99, 235, 0.15)",
+              boxShadow: "0 20px 50px rgba(0, 0, 0, 0.9), 0 0 30px rgba(91, 157, 255, 0.15)",
               padding: "16px",
               zIndex: 10000,
               pointerEvents: "none",
@@ -2733,14 +2733,14 @@ export default function App() {
                 <div style={{
                   padding: "3px 8px",
                   borderRadius: "6px",
-                  background: "#2563eb",
-                  color: "white",
+                  background: "var(--accent)",
+                  color: "var(--on-accent)",
                   fontWeight: "800",
                   fontSize: "12px"
                 }}>
                   {hoveredAnalysisKey.symbol}
                 </div>
-                <span style={{ fontSize: "12px", fontWeight: "700", color: "white" }} className="truncate">
+                <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--text-primary)" }} className="truncate">
                   {hoveredAnalysisKey.name}
                 </span>
               </div>
@@ -2775,7 +2775,7 @@ export default function App() {
                 }}>
                   <div>
                     <span style={{ fontSize: "8px", color: "var(--text-muted)", textTransform: "uppercase", display: "block" }}>Sector</span>
-                    <span style={{ fontSize: "11px", color: "white", fontWeight: "600" }}>
+                    <span style={{ fontSize: "11px", color: "var(--text-primary)", fontWeight: "600" }}>
                       {activeAnalysis.sector || "General Market"}
                     </span>
                   </div>
@@ -2791,20 +2791,20 @@ export default function App() {
                         display: "inline-block",
                         marginTop: "1px",
                         backgroundColor: activeAnalysis.recommendation === "BUY"
-                          ? "rgba(16, 185, 129, 0.15)"
+                          ? "rgba(63, 191, 135, 0.15)"
                           : activeAnalysis.recommendation === "SELL"
-                            ? "rgba(239, 68, 68, 0.15)"
-                            : "rgba(245, 158, 11, 0.15)",
+                            ? "rgba(240, 115, 111, 0.15)"
+                            : "rgba(224, 163, 62, 0.15)",
                         color: activeAnalysis.recommendation === "BUY"
                           ? "var(--success-color)"
                           : activeAnalysis.recommendation === "SELL"
                             ? "var(--danger-color)"
-                            : "#f59e0b",
+                            : "var(--warning)",
                         border: `1px solid ${activeAnalysis.recommendation === "BUY"
-                            ? "rgba(16, 185, 129, 0.3)"
+                            ? "rgba(63, 191, 135, 0.3)"
                             : activeAnalysis.recommendation === "SELL"
-                              ? "rgba(239, 68, 68, 0.3)"
-                              : "rgba(245, 158, 11, 0.3)"
+                              ? "rgba(240, 115, 111, 0.3)"
+                              : "rgba(224, 163, 62, 0.3)"
                           }`
                       }}>
                         {activeAnalysis.recommendation}
@@ -2815,13 +2815,13 @@ export default function App() {
                   </div>
                   <div>
                     <span style={{ fontSize: "8px", color: "var(--text-muted)", textTransform: "uppercase", display: "block" }}>Resistance Levels</span>
-                    <span style={{ fontSize: "11px", color: "white", fontWeight: "600" }}>
+                    <span style={{ fontSize: "11px", color: "var(--text-primary)", fontWeight: "600" }}>
                       {activeAnalysis.resistance_levels || "Not calculated"}
                     </span>
                   </div>
                   <div>
                     <span style={{ fontSize: "8px", color: "var(--text-muted)", textTransform: "uppercase", display: "block" }}>Support Levels</span>
-                    <span style={{ fontSize: "11px", color: "white", fontWeight: "600" }}>
+                    <span style={{ fontSize: "11px", color: "var(--text-primary)", fontWeight: "600" }}>
                       {activeAnalysis.support_levels || "Not calculated"}
                     </span>
                   </div>
@@ -2829,7 +2829,7 @@ export default function App() {
 
                 {/* AI Commentary */}
                 {activeAnalysis.comment ? (
-                  <p style={{ fontSize: "11px", color: "#e5e7eb", lineHeight: "1.5", fontStyle: "italic", fontWeight: "500" }}>
+                  <p style={{ fontSize: "11px", color: "var(--text-primary)", lineHeight: "1.5", fontStyle: "italic", fontWeight: "500" }}>
                     "{activeAnalysis.comment}"
                   </p>
                 ) : (
@@ -2847,7 +2847,7 @@ export default function App() {
                     <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                       {activeAnalysis.analyst_recommendations.map((rec, idx) => (
                         <div key={idx} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "10px", background: "rgba(255,255,255,0.015)", padding: "4px 8px", borderRadius: "4px", border: "1px solid rgba(255,255,255,0.02)" }}>
-                          <span style={{ color: "#e5e7eb", fontWeight: "500" }}>{rec.analyst_firm}</span>
+                          <span style={{ color: "var(--text-primary)", fontWeight: "500" }}>{rec.analyst_firm}</span>
                           <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                             <span style={{
                               fontWeight: "800",
@@ -2855,20 +2855,20 @@ export default function App() {
                               padding: "1px 4px",
                               borderRadius: "3px",
                               backgroundColor: rec.recommendation === "BUY"
-                                ? "rgba(16, 185, 129, 0.12)"
+                                ? "rgba(63, 191, 135, 0.12)"
                                 : rec.recommendation === "SELL"
-                                  ? "rgba(239, 68, 68, 0.12)"
-                                  : "rgba(245, 158, 11, 0.12)",
+                                  ? "rgba(240, 115, 111, 0.12)"
+                                  : "rgba(224, 163, 62, 0.12)",
                               color: rec.recommendation === "BUY"
                                 ? "var(--success-color)"
                                 : rec.recommendation === "SELL"
                                   ? "var(--danger-color)"
-                                  : "#f59e0b",
+                                  : "var(--warning)",
                               border: `1px solid ${rec.recommendation === "BUY"
-                                  ? "rgba(16, 185, 129, 0.2)"
+                                  ? "rgba(63, 191, 135, 0.2)"
                                   : rec.recommendation === "SELL"
-                                    ? "rgba(239, 68, 68, 0.2)"
-                                    : "rgba(245, 158, 11, 0.2)"
+                                    ? "rgba(240, 115, 111, 0.2)"
+                                    : "rgba(224, 163, 62, 0.2)"
                                 }`
                             }}>
                               {rec.recommendation}
@@ -2928,7 +2928,7 @@ export default function App() {
           }).join(" ");
 
           const isUp = displayHist[displayHist.length - 1] >= displayHist[0];
-          const strokeColor = isUp ? "#10b981" : "#ef4444";
+          const strokeColor = isUp ? "var(--positive)" : "var(--negative)";
 
           return (
             <svg width={width} height={height} style={{ overflow: "visible" }}>
@@ -2951,7 +2951,7 @@ export default function App() {
                 const x = padding + (lastIndex / maxX) * (width - 2 * padding);
                 const y = height - (padding + (displayHist[lastIndex] / maxY) * (height - 2 * padding));
                 return (
-                  <circle cx={x} cy={y} r="3" fill={strokeColor} stroke="white" strokeWidth="1" />
+                  <circle cx={x} cy={y} r="3" fill={strokeColor} stroke="var(--bg-base)" strokeWidth="1.5" />
                 );
               })()}
             </svg>
@@ -2965,10 +2965,10 @@ export default function App() {
               top: hoveredSentimentKey.y,
               left: hoveredSentimentKey.x,
               width: "360px",
-              background: "linear-gradient(135deg, rgba(20, 24, 45, 0.98) 0%, rgba(12, 15, 29, 0.99) 100%)",
+              background: "linear-gradient(135deg, rgba(28, 34, 45, 0.98) 0%, rgba(15, 19, 25, 0.99) 100%)",
               border: "1px solid rgba(255, 255, 255, 0.12)",
               borderRadius: "12px",
-              boxShadow: "0 20px 50px rgba(0, 0, 0, 0.9), 0 0 30px rgba(37, 99, 235, 0.15)",
+              boxShadow: "0 20px 50px rgba(0, 0, 0, 0.9), 0 0 30px rgba(91, 157, 255, 0.15)",
               padding: "16px",
               zIndex: 10000,
               pointerEvents: "none",
@@ -2984,14 +2984,14 @@ export default function App() {
               <div style={{
                 padding: "3px 8px",
                 borderRadius: "6px",
-                background: "#10b981",
-                color: "white",
+                background: "var(--positive)",
+                color: "var(--on-accent)",
                 fontWeight: "800",
                 fontSize: "11px"
               }}>
                 {hoveredSentimentKey.symbol}
               </div>
-              <span style={{ fontSize: "12px", fontWeight: "700", color: "white" }} className="truncate">
+              <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--text-primary)" }} className="truncate">
                 Sentiment & Trend Analyzer
               </span>
             </div>
@@ -2999,11 +2999,11 @@ export default function App() {
             {/* Main stats */}
             <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                <span style={{ fontSize: "18px", fontWeight: "800", color: "#10b981" }}>{compositeBuyPct}% <span style={{ fontSize: "9px", fontWeight: "700", color: "var(--text-muted)", marginLeft: "2px" }}>BUYERS</span></span>
-                <span style={{ fontSize: "18px", fontWeight: "800", color: "#ef4444" }}>{compositeSellPct}% <span style={{ fontSize: "9px", fontWeight: "700", color: "var(--text-muted)", marginRight: "2px" }}>SELLERS</span></span>
+                <span style={{ fontSize: "18px", fontWeight: "800", color: "var(--positive)" }}>{compositeBuyPct}% <span style={{ fontSize: "9px", fontWeight: "700", color: "var(--text-muted)", marginLeft: "2px" }}>BUYERS</span></span>
+                <span style={{ fontSize: "18px", fontWeight: "800", color: "var(--negative)" }}>{compositeSellPct}% <span style={{ fontSize: "9px", fontWeight: "700", color: "var(--text-muted)", marginRight: "2px" }}>SELLERS</span></span>
               </div>
-              <div style={{ width: "100%", height: "6px", backgroundColor: "rgba(239, 68, 68, 0.3)", borderRadius: "3px", overflow: "hidden", display: "flex" }}>
-                <div style={{ width: `${compositeBuyPct}%`, height: "100%", backgroundColor: "#10b981" }} />
+              <div style={{ width: "100%", height: "6px", backgroundColor: "rgba(240, 115, 111, 0.3)", borderRadius: "3px", overflow: "hidden", display: "flex" }}>
+                <div style={{ width: `${compositeBuyPct}%`, height: "100%", backgroundColor: "var(--positive)" }} />
               </div>
             </div>
 
@@ -3011,13 +3011,13 @@ export default function App() {
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", fontSize: "10.5px", margin: "4px 0" }}>
               <div style={{ padding: "8px", borderRadius: "6px", backgroundColor: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)" }}>
                 <span style={{ display: "block", fontSize: "8px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "700" }}>Daily Range (15% Wt)</span>
-                <span style={{ display: "block", fontWeight: "700", color: "#e5e7eb", marginTop: "2px" }}>
+                <span style={{ display: "block", fontWeight: "700", color: "var(--text-primary)", marginTop: "2px" }}>
                   {Math.round(priceBuyPct)}% B / {100 - Math.round(priceBuyPct)}% S
                 </span>
               </div>
               <div style={{ padding: "8px", borderRadius: "6px", backgroundColor: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)" }}>
                 <span style={{ display: "block", fontSize: "8px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "700" }}>Order Book (85% Wt)</span>
-                <span style={{ display: "block", fontWeight: "700", color: "#e5e7eb", marginTop: "2px" }}>
+                <span style={{ display: "block", fontWeight: "700", color: "var(--text-primary)", marginTop: "2px" }}>
                   {Math.round(depthBuyPct)}% B / {100 - Math.round(depthBuyPct)}% S
                 </span>
               </div>
@@ -3043,7 +3043,7 @@ export default function App() {
         zIndex: 1000,
         display: "flex",
         gap: "6px",
-        backgroundColor: "rgba(30, 41, 59, 0.95)",
+        backgroundColor: "rgba(28, 34, 45, 0.95)",
         backdropFilter: "blur(16px)",
         WebkitBackdropFilter: "blur(16px)",
         padding: "6px",
@@ -3060,9 +3060,9 @@ export default function App() {
             borderRadius: "8px",
             border: "none",
             cursor: "pointer",
-            backgroundColor: activeView === "tracker" ? "#2563eb" : "transparent",
-            color: activeView === "tracker" ? "#ffffff" : "#cbd5e1",
-            boxShadow: activeView === "tracker" ? "0 2px 14px rgba(37, 99, 235, 0.5)" : "none",
+            backgroundColor: activeView === "tracker" ? "var(--accent)" : "transparent",
+            color: activeView === "tracker" ? "var(--on-accent)" : "var(--text-secondary)",
+            boxShadow: activeView === "tracker" ? "0 2px 14px rgba(91, 157, 255, 0.5)" : "none",
             transition: "all 0.2s"
           }}
         >
@@ -3077,9 +3077,9 @@ export default function App() {
             borderRadius: "7px",
             border: "none",
             cursor: "pointer",
-            backgroundColor: activeView === "intelligence" ? "#2563eb" : "transparent",
-            color: activeView === "intelligence" ? "#ffffff" : "#94a3b8",
-            boxShadow: activeView === "intelligence" ? "0 2px 10px rgba(37,99,235,0.4)" : "none",
+            backgroundColor: activeView === "intelligence" ? "var(--accent)" : "transparent",
+            color: activeView === "intelligence" ? "var(--on-accent)" : "var(--text-muted)",
+            boxShadow: activeView === "intelligence" ? "0 2px 10px rgba(91, 157, 255,0.4)" : "none",
             transition: "all 0.2s"
           }}
         >
@@ -3094,9 +3094,9 @@ export default function App() {
             borderRadius: "7px",
             border: "none",
             cursor: "pointer",
-            backgroundColor: activeView === "trading" ? "#10b981" : "transparent",
-            color: activeView === "trading" ? "#ffffff" : "#94a3b8",
-            boxShadow: activeView === "trading" ? "0 2px 10px rgba(16,185,129,0.4)" : "none",
+            backgroundColor: activeView === "trading" ? "var(--positive)" : "transparent",
+            color: activeView === "trading" ? "var(--on-accent)" : "var(--text-muted)",
+            boxShadow: activeView === "trading" ? "0 2px 10px rgba(63, 191, 135,0.4)" : "none",
             transition: "all 0.2s"
           }}
         >

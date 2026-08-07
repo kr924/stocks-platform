@@ -25,7 +25,7 @@ export const Chart: React.FC<ChartProps> = ({ candles, period }) => {
     const priceChart = createChart(priceContainer, {
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
-        textColor: "#9ca3af",
+        textColor: "#7d8799",
       },
       grid: {
         vertLines: { color: "rgba(255, 255, 255, 0.03)" },
@@ -58,7 +58,7 @@ export const Chart: React.FC<ChartProps> = ({ candles, period }) => {
     const interestChart = createChart(interestContainer, {
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
-        textColor: "#9ca3af",
+        textColor: "#7d8799",
       },
       grid: {
         vertLines: { color: "rgba(255, 255, 255, 0.03)" },
@@ -114,15 +114,15 @@ export const Chart: React.FC<ChartProps> = ({ candles, period }) => {
 
     // Add Candlestick and Volume to Price Chart
     const candlestickSeries = priceChart.addSeries(CandlestickSeries, {
-      upColor: "#10b981",
-      downColor: "#ef4444",
+      upColor: "#3fbf87",
+      downColor: "#f0736f",
       borderVisible: false,
-      wickUpColor: "#10b981",
-      wickDownColor: "#ef4444",
+      wickUpColor: "#3fbf87",
+      wickDownColor: "#f0736f",
     });
 
     const volumeSeries = priceChart.addSeries(HistogramSeries, {
-      color: "rgba(59, 130, 246, 0.2)",
+      color: "rgba(91, 157, 255, 0.2)",
       priceFormat: { type: "volume" },
       priceScaleId: "",
     });
@@ -136,17 +136,17 @@ export const Chart: React.FC<ChartProps> = ({ candles, period }) => {
 
     // Add Area series for Buyer & Seller Interest to bottom chart
     const buyerSeries = interestChart.addSeries(AreaSeries, {
-      lineColor: "#10b981",
-      topColor: "rgba(16, 185, 129, 0.4)",
-      bottomColor: "rgba(16, 185, 129, 0.0)",
+      lineColor: "#3fbf87",
+      topColor: "rgba(63, 191, 135, 0.4)",
+      bottomColor: "rgba(63, 191, 135, 0.0)",
       lineWidth: 2,
       title: "Buy Interest %",
     });
 
     const sellerSeries = interestChart.addSeries(AreaSeries, {
-      lineColor: "#ef4444",
-      topColor: "rgba(239, 68, 68, 0.25)",
-      bottomColor: "rgba(239, 68, 68, 0.0)",
+      lineColor: "#f0736f",
+      topColor: "rgba(240, 115, 111, 0.25)",
+      bottomColor: "rgba(240, 115, 111, 0.0)",
       lineWidth: 1.5,
       title: "Sell Interest %",
     });
@@ -186,7 +186,7 @@ export const Chart: React.FC<ChartProps> = ({ candles, period }) => {
     const volumeData = uniqueCandles.map((c: any) => ({
       time: c.timeKey,
       value: Number(c[5]),
-      color: Number(c[4]) >= Number(c[1]) ? "rgba(16, 185, 129, 0.25)" : "rgba(239, 68, 68, 0.25)",
+      color: Number(c[4]) >= Number(c[1]) ? "rgba(63, 191, 135, 0.25)" : "rgba(240, 115, 111, 0.25)",
     }));
 
     const buyerData = uniqueCandles.map((c: any) => {
@@ -329,8 +329,8 @@ export const Chart: React.FC<ChartProps> = ({ candles, period }) => {
             Buyer vs Seller Interest Timeline
           </span>
           <div style={{ display: "flex", gap: "12px", fontSize: "9px", fontWeight: "700" }}>
-            <span style={{ color: "#10b981" }}>● BUY INTEREST</span>
-            <span style={{ color: "#ef4444" }}>● SELL INTEREST</span>
+            <span style={{ color: "#3fbf87" }}>● BUY INTEREST</span>
+            <span style={{ color: "#f0736f" }}>● SELL INTEREST</span>
           </div>
         </div>
         <div ref={interestChartContainerRef} style={{ width: "100%" }} />
@@ -349,24 +349,24 @@ export const Chart: React.FC<ChartProps> = ({ candles, period }) => {
           border: "1px solid rgba(255, 255, 255, 0.1)",
           borderRadius: "8px",
           fontSize: "11px",
-          color: "#f3f4f6",
+          color: "#e3e7ee",
           boxShadow: "0 10px 30px rgba(0, 0, 0, 0.6)",
           backdropFilter: "blur(4px)",
           display: "flex",
           flexDirection: "column",
           gap: "6px",
         }}>
-          <span style={{ fontWeight: "800", color: "#60a5fa", borderBottom: "1px solid rgba(255,255,255,0.06)", paddingBottom: "4px", display: "block" }}>
+          <span style={{ fontWeight: "800", color: "#5b9dff", borderBottom: "1px solid rgba(255,255,255,0.06)", paddingBottom: "4px", display: "block" }}>
             {tooltip.time}
           </span>
           <div style={{ display: "grid", gridTemplateColumns: "auto auto", gap: "4px 16px" }}>
-            <span style={{ color: "#9ca3af" }}>Open:</span>
+            <span style={{ color: "#7d8799" }}>Open:</span>
             <span style={{ fontWeight: "700", textAlign: "right" }}>₹{tooltip.open.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
-            <span style={{ color: "#9ca3af" }}>High:</span>
-            <span style={{ fontWeight: "700", textAlign: "right", color: "#34d399" }}>₹{tooltip.high.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
-            <span style={{ color: "#9ca3af" }}>Low:</span>
-            <span style={{ fontWeight: "700", textAlign: "right", color: "#f87171" }}>₹{tooltip.low.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
-            <span style={{ color: "#9ca3af" }}>Close:</span>
+            <span style={{ color: "#7d8799" }}>High:</span>
+            <span style={{ fontWeight: "700", textAlign: "right", color: "#52d69a" }}>₹{tooltip.high.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+            <span style={{ color: "#7d8799" }}>Low:</span>
+            <span style={{ fontWeight: "700", textAlign: "right", color: "#ff8a86" }}>₹{tooltip.low.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+            <span style={{ color: "#7d8799" }}>Close:</span>
             <span style={{ fontWeight: "700", textAlign: "right" }}>₹{tooltip.close.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
           </div>
         </div>
