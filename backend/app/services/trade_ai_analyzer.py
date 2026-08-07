@@ -372,6 +372,85 @@ def _loads_tolerant(payload: str) -> Optional[dict]:
     return None
 
 
+def _balanced_json_objects(text: str):
+    """
+    Yield every balanced {...} region in `text`, longest-first.
+
+    A single regex cannot do this. Scraped Gemini output regularly contains more
+    than one JSON body: the container holds a partial draft as well as the final
+    answer, and textContent concatenates them, so the payload looks like a
+    truncated object immediately followed by a complete one. Matching the
+    outermost braces then spans both and parses as neither.
+
+    Brace counting is string- and escape-aware so a "{" inside a value does not
+    throw off the depth.
+    """
+    starts = []
+    depth = 0
+    in_string = False
+    escaped = False
+    found = []
+
+    for i, ch in enumerate(text):
+        if escaped:
+            escaped = False
+            continue
+        if ch == "\\":
+            escaped = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            if depth == 0:
+                starts.append(i)
+            depth += 1
+        elif ch == "}":
+            if depth > 0:
+                depth -= 1
+                if depth == 0 and starts:
+                    found.append(text[starts.pop() : i + 1])
+
+    # Longest first: the complete body beats a truncated fragment.
+    return sorted(found, key=len, reverse=True)
+
+
+def _restart_point_candidates(text: str):
+    """
+    Rebuild an object from a payload that holds two concatenated renderings.
+
+    Gemini sometimes emits a compact draft and then a fuller revision inside the
+    same response container. Scraped together they look like one object whose
+    middle is corrupt: the draft's last string is cut off, then a second set of
+    the same keys begins. The complete data is the trailing copy — it is only
+    missing its opening brace.
+
+    Every key sitting at the start of a line is a possible restart point, so
+    each is tried as the head of a synthetic object. Callers score the results
+    and keep the richest, which lands on the final rendering.
+    """
+    for m in re.finditer(r'(?m)^\s*"(\w+)"\s*:', text):
+        yield "{" + text[m.start():]
+
+
+def _score_candidate(obj: dict) -> int:
+    """Prefer the parsed object that actually carries the analysis."""
+    if not isinstance(obj, dict):
+        return -1
+    score = len(obj)
+    metrics = obj.get("metrics")
+    if isinstance(metrics, dict):
+        score += 10 * len(metrics)
+        for cells in metrics.values():
+            if isinstance(cells, dict):
+                score += sum(1 for v in cells.values() if _clean_cell(v))
+    if _clean_cell(obj.get("summary")):
+        score += 3
+    return score
+
+
 def _extract_json_from_llm(text: str) -> dict:
     """Robustly extract JSON dictionary from LLM output, handling conversational intros and code blocks."""
     if not text:
@@ -383,22 +462,32 @@ def _extract_json_from_llm(text: str) -> dict:
     candidates = []
 
     # 1. Fenced ```json { ... } ``` code block
-    match_code = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text_str, re.DOTALL | re.IGNORECASE)
-    if match_code:
-        candidates.append(match_code.group(1))
+    for m in re.finditer(r"```(?:json)?\s*(\{.*?\})\s*```", text_str, re.DOTALL | re.IGNORECASE):
+        candidates.append(m.group(1))
 
-    # 2. Outermost curly braces
-    match_braces = re.search(r"(\{.*\})", text_str, re.DOTALL)
-    if match_braces:
-        candidates.append(match_braces.group(1))
+    # 2. Every balanced object in the payload, longest first
+    candidates.extend(_balanced_json_objects(text_str))
 
-    # 3. The whole payload
+    # 3. The whole payload as-is
     candidates.append(text_str)
 
+    # 4. Rebuilt bodies, for payloads holding two concatenated renderings
+    candidates.extend(_restart_point_candidates(text_str))
+
+    # Score every candidate that parses and keep the richest. Returning the
+    # first success would settle for a fragment such as {"sentiment": "..."},
+    # which parses cleanly but carries none of the analysis.
+    best, best_score = None, 0
     for candidate in candidates:
         parsed = _loads_tolerant(candidate)
-        if parsed:
-            return parsed
+        if not parsed:
+            continue
+        score = _score_candidate(parsed)
+        if score > best_score:
+            best, best_score = parsed, score
+
+    if best:
+        return best
 
     logger.warning(
         f"Could not parse JSON from model output ({len(text_str)} chars). "
