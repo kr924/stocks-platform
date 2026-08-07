@@ -324,6 +324,54 @@ def response_matches_company(text: str, symbol: str, company_name: str = "") -> 
     return any(f" {w} " in padded for w in distinctive)
 
 
+# Literal control characters that are legal in scraped text but illegal inside a
+# JSON string. Tab and newline are the ones that actually occur.
+_JSON_CTRL_IN_STRING = re.compile(r'("(?:[^"\\]|\\.)*")', re.DOTALL)
+
+
+def _escape_control_chars_in_strings(payload: str) -> str:
+    """
+    Escape raw newlines/tabs that appear *inside* JSON string literals.
+
+    The Gemini path scrapes textContent out of a <pre> block, so a value the
+    model wrapped across lines arrives containing a literal newline. That is
+    valid text but invalid JSON, and strict json.loads rejects the whole
+    document — which is how a complete, correct 3kB response with real figures
+    ended up rendering as an all-NA grid.
+    """
+    def fix(match):
+        s = match.group(1)
+        inner = s[1:-1]
+        inner = (inner.replace("\r\n", "\\n").replace("\n", "\\n")
+                      .replace("\r", "\\n").replace("\t", "\\t"))
+        return f'"{inner}"'
+
+    return _JSON_CTRL_IN_STRING.sub(fix, payload)
+
+
+def _loads_tolerant(payload: str) -> Optional[dict]:
+    """Parse JSON, tolerating the artefacts that scraped model output carries."""
+    payload = payload.strip()
+    attempts = (
+        # strict=False alone permits control characters inside strings.
+        lambda p: json.loads(p, strict=False),
+        lambda p: json.loads(_escape_control_chars_in_strings(p), strict=False),
+        # Trailing commas before a close brace/bracket.
+        lambda p: json.loads(re.sub(r",(\s*[}\]])", r"\1", p), strict=False),
+        lambda p: json.loads(
+            re.sub(r",(\s*[}\]])", r"\1", _escape_control_chars_in_strings(p)), strict=False
+        ),
+    )
+    for attempt in attempts:
+        try:
+            result = attempt(payload)
+            if isinstance(result, dict):
+                return result
+        except Exception:
+            continue
+    return None
+
+
 def _extract_json_from_llm(text: str) -> dict:
     """Robustly extract JSON dictionary from LLM output, handling conversational intros and code blocks."""
     if not text:
@@ -332,28 +380,30 @@ def _extract_json_from_llm(text: str) -> dict:
         return text
     text_str = str(text)
 
-    # 1. Look for ```json { ... } ``` fenced code blocks
+    candidates = []
+
+    # 1. Fenced ```json { ... } ``` code block
     match_code = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text_str, re.DOTALL | re.IGNORECASE)
     if match_code:
-        try:
-            return json.loads(match_code.group(1).strip())
-        except Exception:
-            pass
+        candidates.append(match_code.group(1))
 
-    # 2. Look for outer curly braces { ... }
+    # 2. Outermost curly braces
     match_braces = re.search(r"(\{.*\})", text_str, re.DOTALL)
     if match_braces:
-        try:
-            return json.loads(match_braces.group(1).strip())
-        except Exception:
-            pass
+        candidates.append(match_braces.group(1))
 
-    # 3. Direct parse
-    try:
-        return json.loads(text_str.strip())
-    except Exception:
-        pass
+    # 3. The whole payload
+    candidates.append(text_str)
 
+    for candidate in candidates:
+        parsed = _loads_tolerant(candidate)
+        if parsed:
+            return parsed
+
+    logger.warning(
+        f"Could not parse JSON from model output ({len(text_str)} chars). "
+        f"Starts: {text_str[:120]!r}"
+    )
     return {}
 
 
