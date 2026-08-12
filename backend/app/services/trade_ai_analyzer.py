@@ -505,7 +505,8 @@ def analyze_earnings_disclosure_2step(
     title: str,
     attachment_url: str = "",
     pdf_text: str = "",
-    config_id: Optional[int] = None
+    config_id: Optional[int] = None,
+    tracking_ref: Optional[str] = None,
 ) -> Optional[dict]:
     """
     Two-Step AI Analysis Pipeline:
@@ -548,7 +549,9 @@ def analyze_earnings_disclosure_2step(
         _in_progress_analyses.add(dedup_key)
 
     try:
-        return _do_analyze_earnings_disclosure_2step(symbol, title, attachment_url, pdf_text, config_id)
+        return _do_analyze_earnings_disclosure_2step(
+            symbol, title, attachment_url, pdf_text, config_id, tracking_ref
+        )
     finally:
         with _in_progress_lock:
             _in_progress_analyses.discard(dedup_key)
@@ -559,13 +562,16 @@ def _do_analyze_earnings_disclosure_2step(
     title: str,
     attachment_url: str = "",
     pdf_text: str = "",
-    config_id: Optional[int] = None
+    config_id: Optional[int] = None,
+    tracking_ref: Optional[str] = None,
 ) -> Optional[dict]:
     import base64
     import requests
     from datetime import datetime
     from app.services.intel_config import get_intel_config
     from app.services.gemini import clean_json_response, call_openrouter
+
+    ai_requested_at = datetime.utcnow()
 
     cfg = get_intel_config()
     auto_ai_cfg = cfg.auto_trading_ai
@@ -825,6 +831,9 @@ CRITICAL: Output ONLY raw JSON. No prose, no markdown fences, no preamble.
                 config_id=config_id,
                 symbol=symbol,
                 company_name=company_name or None,
+                tracking_ref=tracking_ref,
+                ai_requested_at=ai_requested_at,
+                ai_completed_at=datetime.utcnow(),
                 provider=used_provider,
                 prompt_summary=f"2-Step Earnings Analysis for {symbol}",
                 ai_sentiment=ai_sentiment,
@@ -933,6 +942,9 @@ CRITICAL: Output ONLY raw JSON. No prose, no markdown fences, no preamble.
             held_qty=held_qty,
             buy_price=buy_price,
             last_price=last_price,
+            tracking_ref=tracking_ref,
+            ai_requested_at=ai_requested_at,
+            ai_completed_at=datetime.utcnow(),
         )
     except Exception as e:
         logger.error(f"Telegram alert error: {e}")

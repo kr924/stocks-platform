@@ -31,3 +31,4 @@ __pycache__/
 
 # Misc
 *.txt
+backend/data/digests/

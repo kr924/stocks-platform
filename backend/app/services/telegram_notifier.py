@@ -16,6 +16,7 @@ Callback payloads are capped at 64 bytes by Telegram, so they are kept terse:
 """
 import logging
 import os
+from datetime import timedelta, timezone
 from typing import List, Optional
 
 import requests
@@ -181,6 +182,40 @@ def _order_keyboard(pending_id: int) -> dict:
     }
 
 
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def _ist(dt) -> str:
+    """Render a UTC datetime in IST for display. Alerts are read in IST."""
+    if not dt:
+        return "—"
+    try:
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(IST).strftime("%d %b %H:%M:%S")
+    except Exception:
+        return str(dt)
+
+
+def _lag(a, b) -> str:
+    """Elapsed time between two stamps, for spotting where latency accrues."""
+    if not a or not b:
+        return ""
+    try:
+        if a.tzinfo is None:
+            a = a.replace(tzinfo=timezone.utc)
+        if b.tzinfo is None:
+            b = b.replace(tzinfo=timezone.utc)
+        secs = (b - a).total_seconds()
+        if secs < 0:
+            return ""
+        if secs < 90:
+            return f" (+{secs:.0f}s)"
+        return f" (+{secs / 60:.1f}m)"
+    except Exception:
+        return ""
+
+
 def send_result_order_alert(
     symbol: str,
     company_name: str,
@@ -189,6 +224,9 @@ def send_result_order_alert(
     last_price: Optional[float],
     url: Optional[str] = None,
     pending_id: Optional[int] = None,
+    tracking_ref: Optional[str] = None,
+    announced_at=None,
+    ingested_at=None,
 ) -> bool:
     """
     Alert that a financial result has landed, with one-tap order buttons.
@@ -196,15 +234,26 @@ def send_result_order_alert(
     Buttons only appear when `pending_id` is set — that is, when the stock is not
     already armed and therefore still needs an order decision.
     """
+    from datetime import datetime as _dt
+
     price_line = f"₹{last_price:,.2f}" if last_price else "unavailable"
     company_line = f"\n<b>Company:</b> {_esc(company_name)}" if company_name else ""
+    ref_line = f"\n<b>Ref:</b> <code>{_esc(tracking_ref)}</code>" if tracking_ref else ""
+
+    alert_at = _dt.utcnow()
+    timing = (
+        f"\n<b>Announced:</b> {_ist(announced_at)}"
+        f"\n<b>Loaded:</b> {_ist(ingested_at)}{_lag(announced_at, ingested_at)}"
+        f"\n<b>Alerted:</b> {_ist(alert_at)}{_lag(ingested_at, alert_at)}"
+    )
 
     message = (
         f"<b>📊 FINANCIAL RESULTS</b>\n\n"
-        f"<b>Symbol:</b> #{_esc(symbol)}{company_line}\n"
+        f"<b>Symbol:</b> #{_esc(symbol)}{company_line}{ref_line}\n"
         f"<b>Exchange:</b> {_esc(exchange.upper())}\n"
         f"<b>Current Price:</b> {price_line}\n"
         f"<b>Filing:</b> {_esc(title)[:220]}\n"
+        f"{timing}\n"
     )
     if url and str(url).startswith("http"):
         message += f'\n🔗 <a href="{url}">Open filing</a>\n'
@@ -248,6 +297,9 @@ def send_earnings_verdict_alert(
     held_qty: int = 0,
     buy_price: Optional[float] = None,
     last_price: Optional[float] = None,
+    tracking_ref: Optional[str] = None,
+    ai_requested_at=None,
+    ai_completed_at=None,
 ) -> bool:
     """
     Post the structured earnings verdict.

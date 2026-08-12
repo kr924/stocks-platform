@@ -44,7 +44,14 @@ interface PendingResult {
   id: number;
   symbol: string;
   company_name: string | null;
+  tracking_ref: string | null;
   trade_date: string | null;
+  deferred?: boolean;
+  announced_at: string | null;
+  ingested_at: string | null;
+  alert_sent_at: string | null;
+  ai_requested_at: string | null;
+  ai_completed_at: string | null;
   instrument_key: string | null;
   exchange: string;
   title: string;
@@ -146,10 +153,62 @@ interface TradeAILog {
   attachment_url?: string;
   flow_used?: string;
   company_name?: string | null;
+  tracking_ref?: string | null;
+  ai_requested_at?: string | null;
+  ai_completed_at?: string | null;
   metrics?: MetricGrid | null;
   future_growth_outlook?: string | null;
   future_projected_numbers?: string | null;
   extraction_ok?: boolean;
+}
+
+/** Local time-of-day, or an em dash when the stage has not happened yet. */
+function clockTime(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso.endsWith("Z") || iso.includes("+") ? iso : iso + "Z");
+  return isNaN(d.getTime())
+    ? "—"
+    : d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+}
+
+/** Elapsed time between two stages, so latency is visible at a glance. */
+function elapsed(from: string | null | undefined, to: string | null | undefined): string {
+  if (!from || !to) return "";
+  const norm = (s: string) => new Date(s.endsWith("Z") || s.includes("+") ? s : s + "Z").getTime();
+  const ms = norm(to) - norm(from);
+  if (!isFinite(ms) || ms < 0) return "";
+  return ms < 90000 ? `+${Math.round(ms / 1000)}s` : `+${(ms / 60000).toFixed(1)}m`;
+}
+
+/**
+ * The five stages a result passes through. Rendered as a single strip so a slow
+ * step is obvious — the gap between "Loaded" and "AI sent" is where a backlog
+ * shows up, and between "AI sent" and "AI received" is the model's own latency.
+ */
+function LifecycleStrip({ p }: { p: PendingResult }) {
+  const stages: { label: string; at: string | null; prev: string | null }[] = [
+    { label: "Announced", at: p.announced_at, prev: null },
+    { label: "Loaded", at: p.ingested_at, prev: p.announced_at },
+    { label: "Alerted", at: p.alert_sent_at, prev: p.ingested_at },
+    { label: "AI sent", at: p.ai_requested_at, prev: p.alert_sent_at || p.ingested_at },
+    { label: "AI received", at: p.ai_completed_at, prev: p.ai_requested_at },
+  ];
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "14px", marginTop: "8px", fontSize: "10px", color: "var(--text-muted)" }}>
+      {stages.map(s => {
+        const lag = elapsed(s.prev, s.at);
+        return (
+          <span key={s.label} style={{ whiteSpace: "nowrap" }}>
+            <b style={{ color: "var(--text-secondary)", fontWeight: 600 }}>{s.label}</b>{" "}
+            <span style={{ color: s.at ? "var(--text-primary)" : "var(--text-faint)", fontVariantNumeric: "tabular-nums" }}>
+              {clockTime(s.at)}
+            </span>
+            {lag && <span style={{ color: "var(--text-faint)" }}> {lag}</span>}
+          </span>
+        );
+      })}
+    </div>
+  );
 }
 
 /**
@@ -1143,7 +1202,7 @@ export function TradingDashboard() {
               <input
                 value={pendingSearch}
                 onChange={e => setPendingSearch(e.target.value)}
-                placeholder="Search symbol, company or filing…"
+                placeholder="Search symbol, company, filing or ref…"
                 style={{
                   padding: "6px 10px", minWidth: "240px", fontSize: "12px",
                   background: "rgba(10, 13, 18,0.8)", border: "1px solid rgba(224, 163, 62,0.3)",
@@ -1198,6 +1257,20 @@ export function TradingDashboard() {
                     {pending.company_name && (
                       <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: 500 }}>
                         {pending.company_name}
+                      </span>
+                    )}
+                    {pending.tracking_ref && (
+                      <span title="Tracking reference — the same code appears on the Telegram alert and the AI analysis"
+                        style={{ fontSize: "10px", fontFamily: "ui-monospace, Menlo, monospace", color: "var(--text-muted)",
+                                 background: "var(--surface-2)", padding: "2px 6px", borderRadius: "4px" }}>
+                        {pending.tracking_ref}
+                      </span>
+                    )}
+                    {pending.deferred && (
+                      <span title="Filed after the 15:20 IST cutoff — held for the 08:00 digest, no alert or AI overnight"
+                        style={{ fontSize: "10px", fontWeight: 700, color: "var(--warning)",
+                                 background: "var(--warning-bg)", padding: "2px 6px", borderRadius: "4px" }}>
+                        DEFERRED
                       </span>
                     )}
                     <span style={{ fontSize: "12px", color: "var(--text-secondary)", flex: 1, minWidth: "200px" }}>{pending.title}</span>
@@ -1273,6 +1346,8 @@ export function TradingDashboard() {
                       Dismiss
                     </button>
                   </div>
+
+                  <LifecycleStrip p={pending} />
 
                   {/* AI analysis — runs after the order screen is shown */}
                   <div style={{ marginTop: "12px", paddingTop: "10px", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
@@ -2789,7 +2864,7 @@ export function TradingDashboard() {
               <input
                 value={aiLogSearch}
                 onChange={e => setAiLogSearch(e.target.value)}
-                placeholder="Search symbol, company or summary…"
+                placeholder="Search symbol, company, summary or ref…"
                 style={{ flex: 1, minWidth: "170px", padding: "6px 10px", fontSize: "11px", background: "rgba(10, 13, 18,0.8)", border: "1px solid rgba(164, 138, 224,0.3)", borderRadius: "6px", color: "var(--text-primary)" }}
               />
               <label style={{ fontSize: "10px", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "4px" }}>
@@ -2842,6 +2917,19 @@ export function TradingDashboard() {
                             <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: 500 }}>{log.company_name}</span>
                           )}
                           <VerdictBadge verdict={log.ai_suggestion} />
+                          {log.tracking_ref && (
+                            <span title="Matches the tracking reference on the arrival alert"
+                              style={{ fontSize: "10px", fontFamily: "ui-monospace, Menlo, monospace", color: "var(--text-muted)",
+                                       background: "var(--surface-2)", padding: "2px 6px", borderRadius: "4px" }}>
+                              {log.tracking_ref}
+                            </span>
+                          )}
+                          {log.ai_requested_at && (
+                            <span style={{ fontSize: "10px", color: "var(--text-faint)" }}>
+                              AI {clockTime(log.ai_requested_at)} → {clockTime(log.ai_completed_at)}
+                              {elapsed(log.ai_requested_at, log.ai_completed_at) && ` (${elapsed(log.ai_requested_at, log.ai_completed_at)})`}
+                            </span>
+                          )}
                           {log.ai_sentiment && (
                             <span style={{
                               fontSize: "10px",

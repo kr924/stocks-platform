@@ -3,6 +3,7 @@ Trading Engine API Router — CRUD for TradeConfigs, order execution, AI logs, a
 """
 import json
 import logging
+import re
 from datetime import datetime
 from typing import Optional, List
 
@@ -138,6 +139,9 @@ def _serialize_ai_log(a: TradeAILog) -> dict:
         "config_id": a.config_id,
         "symbol": a.symbol,
         "company_name": getattr(a, "company_name", None),
+        "tracking_ref": getattr(a, "tracking_ref", None),
+        "ai_requested_at": a.ai_requested_at.isoformat() if getattr(a, "ai_requested_at", None) else None,
+        "ai_completed_at": a.ai_completed_at.isoformat() if getattr(a, "ai_completed_at", None) else None,
         "metrics": metrics,
         "future_growth_outlook": getattr(a, "future_growth_outlook", None),
         "future_projected_numbers": getattr(a, "future_projected_numbers", None),
@@ -473,6 +477,7 @@ def list_ai_logs(
             TradeAILog.company_name.ilike(pattern),
             TradeAILog.ai_summary.ilike(pattern),
             TradeAILog.nse_event_title.ilike(pattern),
+            TradeAILog.tracking_ref.ilike(pattern),
         ))
     if date_from:
         try:
@@ -597,7 +602,15 @@ def _serialize_pending(p: PendingResultOrder, ai_log: Optional[TradeAILog] = Non
         "id": p.id,
         "symbol": p.symbol,
         "company_name": p.company_name,
+        "tracking_ref": p.tracking_ref,
         "trade_date": p.trade_date,
+        "deferred": bool(p.deferred),
+        # Lifecycle: announced -> ingested -> alerted -> AI sent -> AI received
+        "announced_at": p.event_time.isoformat() if p.event_time else None,
+        "ingested_at": p.created_at.isoformat() if p.created_at else None,
+        "alert_sent_at": p.alert_sent_at.isoformat() if p.alert_sent_at else None,
+        "ai_requested_at": p.ai_requested_at.isoformat() if p.ai_requested_at else None,
+        "ai_completed_at": p.ai_completed_at.isoformat() if p.ai_completed_at else None,
         "instrument_key": p.instrument_key,
         "isin": p.isin,
         "exchange": p.exchange,
@@ -654,6 +667,7 @@ def list_pending_results(
             PendingResultOrder.symbol.ilike(pattern),
             PendingResultOrder.company_name.ilike(pattern),
             PendingResultOrder.title.ilike(pattern),
+            PendingResultOrder.tracking_ref.ilike(pattern),
         ))
 
     pendings = q.order_by(PendingResultOrder.created_at.desc()).all()
@@ -777,6 +791,79 @@ def dismiss_pending_result(pending_id: int, db: Session = Depends(get_db)):
     pending.resolved_at = datetime.utcnow()
     db.commit()
     return {"status": "success", "pending": _serialize_pending(pending)}
+
+
+# ─── Morning results digest ─────────────────────────────────────────────────
+
+@router.get("/digest/{for_date}")
+def get_digest_page(for_date: str):
+    """
+    Serve the dated digest page.
+
+    Rebuilds on demand if the file is missing, so a link stays useful even if
+    the container was replaced after it was sent.
+    """
+    import os
+    from fastapi.responses import HTMLResponse
+    from app.services.morning_digest import _DIGEST_DIR, build_and_publish
+
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", for_date):
+        raise HTTPException(status_code=400, detail="Date must be YYYY-MM-DD")
+
+    path = os.path.join(_DIGEST_DIR, f"digest_{for_date}.html")
+    if not os.path.exists(path):
+        db = next(get_db())
+        try:
+            build_and_publish(db, for_date=for_date)
+        finally:
+            db.close()
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail=f"No digest for {for_date}")
+
+    with open(path, "r", encoding="utf-8") as f:
+        return HTMLResponse(f.read())
+
+
+@router.get("/digest")
+def list_digests():
+    """Available digest dates, newest first."""
+    import os
+    from app.services.morning_digest import _DIGEST_DIR
+
+    if not os.path.isdir(_DIGEST_DIR):
+        return {"digests": []}
+    dates = sorted(
+        (f[len("digest_"):-len(".html")] for f in os.listdir(_DIGEST_DIR)
+         if f.startswith("digest_") and f.endswith(".html")),
+        reverse=True,
+    )
+    return {"digests": [{"date": d, "url": f"/api/trading/digest/{d}"} for d in dates]}
+
+
+@router.post("/digest/run")
+def run_digest_now(
+    analyse_first: bool = Query(False, description="Run any deferred analyses before building"),
+    send_alert: bool = Query(False, description="Also send the Telegram summary"),
+    db: Session = Depends(get_db),
+):
+    """Build the digest immediately, without waiting for 08:00 IST."""
+    import os
+    from app.services.morning_digest import (
+        build_and_publish, run_deferred_analyses, send_digest_alert,
+    )
+
+    analysed = run_deferred_analyses(db) if analyse_first else 0
+    result = build_and_publish(db)
+    if send_alert:
+        send_digest_alert(result, os.getenv("PUBLIC_BASE_URL", ""))
+
+    return {
+        "date": result["date"],
+        "companies": result["count"],
+        "analysed_now": analysed,
+        "url": result["url_path"],
+        "alert_sent": send_alert,
+    }
 
 
 @router.get("/settings")

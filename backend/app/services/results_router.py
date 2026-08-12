@@ -15,6 +15,7 @@ Order matters: the order screen must appear before AI analysis starts, because
 the AI call can take minutes and the trading decision cannot wait for it.
 """
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -32,6 +33,43 @@ IST = timezone(timedelta(hours=5, minutes=30))
 # Single worker: earnings analysis downloads a PDF and calls a premium LLM.
 # Running more than one at a time on a 1-vCPU box is what caused the CPU pile-up.
 _ai_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="earnings-ai")
+
+
+# Results filed after this IST time are held for the next morning's digest
+# rather than alerting overnight. The market closes at 15:30, so anything past
+# 15:20 cannot be acted on the same session anyway.
+INTRADAY_CUTOFF_HOUR = 15
+INTRADAY_CUTOFF_MINUTE = 20
+
+
+def is_within_action_window(now_ist: datetime = None) -> bool:
+    """
+    True when a result arriving now can still be acted on today.
+
+    False after the cutoff on a working day, and false all day at weekends —
+    in both cases there is no session left to trade into, so the result is
+    deferred to the 08:00 digest instead of firing an alert nobody can use.
+    """
+    now = now_ist or datetime.now(IST)
+    if now.weekday() > 4:                       # Saturday / Sunday
+        return False
+    cutoff = now.replace(hour=INTRADAY_CUTOFF_HOUR, minute=INTRADAY_CUTOFF_MINUTE,
+                         second=0, microsecond=0)
+    return now <= cutoff
+
+
+def make_tracking_ref(symbol: str, when: datetime = None) -> str:
+    """
+    Short correlation id, e.g. AARTIPHAR-0807-3F2A.
+
+    Printed on the arrival alert, on the AI verdict alert and in the app row, so
+    a Telegram message can be traced to the analysis it belongs to without
+    anyone having to match on timestamps.
+    """
+    import uuid
+    when = when or datetime.now(IST)
+    stem = re.sub(r"[^A-Z0-9]", "", (symbol or "GEN").upper())[:9] or "GEN"
+    return f"{stem}-{when.strftime('%d%m')}-{uuid.uuid4().hex[:4].upper()}"
 
 
 def _resolve_instrument_key(symbol: str) -> str:
@@ -81,7 +119,7 @@ def get_ltp(instrument_key: str, symbol: str = "") -> Optional[float]:
     return None
 
 
-def _send_result_alert(ann, event, pending_id=None, instrument_key: str = ""):
+def _send_result_alert(ann, event, pending_id=None, instrument_key: str = "", pending=None):
     """
     Immediate Telegram alert that a result has landed, ahead of the AI verdict.
 
@@ -98,6 +136,9 @@ def _send_result_alert(ann, event, pending_id=None, instrument_key: str = ""):
             last_price=get_ltp(instrument_key, ann.symbol),
             url=ann.url,
             pending_id=pending_id,
+            tracking_ref=getattr(pending, "tracking_ref", None),
+            announced_at=ann.event_time,
+            ingested_at=getattr(pending, "created_at", None),
         )
     except Exception as e:
         logger.debug(f"Telegram dispatch error for {ann.symbol}: {e}")
@@ -111,10 +152,13 @@ def _run_earnings_ai(symbol: str, title: str, attachment_url: str, description: 
     db = SessionLocal()
     try:
         pending = None
+        tracking_ref = None
         if pending_id:
             pending = db.query(PendingResultOrder).filter(PendingResultOrder.id == pending_id).first()
             if pending:
                 pending.ai_status = "running"
+                pending.ai_requested_at = datetime.utcnow()
+                tracking_ref = pending.tracking_ref
                 db.commit()
 
         from app.services.trade_ai_analyzer import analyze_earnings_disclosure_2step
@@ -124,6 +168,7 @@ def _run_earnings_ai(symbol: str, title: str, attachment_url: str, description: 
             attachment_url=attachment_url,
             pdf_text=description,
             config_id=config_id,
+            tracking_ref=tracking_ref,
         )
 
         if pending_id:
@@ -137,13 +182,17 @@ def _run_earnings_ai(symbol: str, title: str, attachment_url: str, description: 
                     .first()
                 )
                 pending.ai_status = "done"
+                pending.ai_completed_at = datetime.utcnow()
                 pending.ai_log_id = latest.id if latest else None
                 db.commit()
 
                 sse_manager.broadcast("result_ai_done", {
                     "pending_id": pending.id,
                     "symbol": symbol,
+                    "tracking_ref": pending.tracking_ref,
                     "ai_log_id": pending.ai_log_id,
+                    "ai_requested_at": to_iso_utc(pending.ai_requested_at),
+                    "ai_completed_at": to_iso_utc(pending.ai_completed_at),
                 })
     except Exception as e:
         logger.error(f"[EARNINGS AI] failed for {symbol}: {e}")
@@ -154,6 +203,7 @@ def _run_earnings_ai(symbol: str, title: str, attachment_url: str, description: 
                 ).first()
                 if pending:
                     pending.ai_status = "failed"
+                    pending.ai_completed_at = datetime.utcnow()
                     db.commit()
         except Exception:
             db.rollback()
@@ -195,6 +245,8 @@ def route_financial_result(db: Session, ann, event, dedup_key: str):
     if pending:
         return
 
+    actionable = is_within_action_window()
+
     pending = PendingResultOrder(
         symbol=symbol,
         company_name=ann.company_name or None,
@@ -207,8 +259,10 @@ def route_financial_result(db: Session, ann, event, dedup_key: str):
         attachment_url=ann.url,
         event_time=ann.event_time,
         dedup_key=dedup_key,
+        tracking_ref=make_tracking_ref(symbol),
         status="pending",
-        ai_status="pending",
+        deferred=not actionable,
+        ai_status="pending" if actionable else "deferred",
     )
     try:
         db.add(pending)
@@ -219,25 +273,46 @@ def route_financial_result(db: Session, ann, event, dedup_key: str):
         logger.error(f"Failed to create PendingResultOrder for {symbol}: {e}")
         return
 
-    logger.info(f"🔔 [RESULT] {symbol} is NOT armed — order prompt raised (#{pending.id}).")
-
-    # Alert now that the pending row exists, so the inline buttons can address it.
-    _send_result_alert(ann, event, pending_id=pending.id, instrument_key=pending.instrument_key)
-
-    # Push the order screen to the UI before AI work begins.
+    # Push the order screen to the UI regardless — the row is still visible in
+    # the app, it simply does not alert or analyse until the morning.
     sse_manager.broadcast("pending_result_order", {
         "id": pending.id,
         "symbol": pending.symbol,
         "company_name": pending.company_name,
+        "tracking_ref": pending.tracking_ref,
         "instrument_key": pending.instrument_key,
         "exchange": pending.exchange,
         "title": pending.title,
         "description": (pending.description or "")[:400],
         "attachment_url": pending.attachment_url,
         "time": to_iso_utc(pending.event_time),
+        "ingested_at": to_iso_utc(pending.created_at),
         "status": pending.status,
         "ai_status": pending.ai_status,
+        "deferred": pending.deferred,
     })
+
+    if not actionable:
+        logger.info(
+            f"🌙 [RESULT DEFERRED] {symbol} ({pending.tracking_ref}) arrived after the "
+            f"15:20 IST cutoff — no alert or AI now; held for the 08:00 digest."
+        )
+        return
+
+    logger.info(
+        f"🔔 [RESULT] {symbol} ({pending.tracking_ref}) is NOT armed — order prompt raised (#{pending.id})."
+    )
+
+    # Alert now that the pending row exists, so the inline buttons can address it.
+    _send_result_alert(
+        ann, event, pending_id=pending.id,
+        instrument_key=pending.instrument_key, pending=pending,
+    )
+    try:
+        pending.alert_sent_at = datetime.utcnow()
+        db.commit()
+    except Exception:
+        db.rollback()
 
     # Then run the AI analysis in the background.
     _ai_pool.submit(

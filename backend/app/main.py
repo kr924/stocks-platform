@@ -206,17 +206,31 @@ async def _intelligence_scheduler():
             if due("ai_analysis", "ai_analysis_queue", 120, scaled=False):
                 asyncio.create_task(asyncio.to_thread(_run_ai_analysis))
 
-            # Daily 6:00 AM IST Earnings Auto-Sync to Watchlist
+            # Daily IST jobs, each guarded by the date it last ran on so a
+            # restart during the window cannot fire them twice.
             try:
                 from datetime import datetime as dt_cls, timezone as tz_cls, timedelta as td_cls
                 ist = tz_cls(td_cls(hours=5, minutes=30))
                 now_ist = dt_cls.now(ist)
                 today_str = now_ist.strftime("%Y-%m-%d")
+
+                # 06:00 — sync upcoming earnings into the watchlist
                 if now_ist.hour >= 6 and last_run.get("earnings_sync_date") != today_str:
                     last_run["earnings_sync_date"] = today_str
                     await asyncio.to_thread(_run_earnings_sync)
+
+                # 07:00 — analyse everything deferred overnight, so the 08:00
+                # digest has verdicts rather than a page of "pending".
+                if now_ist.hour >= 7 and last_run.get("deferred_ai_date") != today_str:
+                    last_run["deferred_ai_date"] = today_str
+                    asyncio.create_task(asyncio.to_thread(_run_deferred_analyses))
+
+                # 08:00 — publish the digest page and send the single alert
+                if now_ist.hour >= 8 and last_run.get("morning_digest_date") != today_str:
+                    last_run["morning_digest_date"] = today_str
+                    asyncio.create_task(asyncio.to_thread(_run_morning_digest))
             except Exception as e:
-                logger.error(f"6 AM IST earnings sync error: {e}")
+                logger.error(f"Daily IST job error: {e}")
 
         except Exception as e:
             logger.error(f"Intelligence scheduler error: {e}")
@@ -276,6 +290,34 @@ def _run_earnings_sync():
             db.close()
     except Exception as e:
         logger.error(f"Daily earnings sync error: {e}")
+
+
+@_single_flight("deferred_ai")
+def _run_deferred_analyses():
+    """07:00 IST — work through results held back since yesterday's cutoff."""
+    try:
+        from app.services.morning_digest import run_deferred_analyses
+        db = next(get_db())
+        try:
+            run_deferred_analyses(db)
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"Deferred analyses error: {e}")
+
+
+@_single_flight("morning_digest")
+def _run_morning_digest():
+    """08:00 IST — publish the comparison page and send one summary alert."""
+    try:
+        from app.services.morning_digest import run_morning_digest
+        db = next(get_db())
+        try:
+            run_morning_digest(db, public_base_url=os.getenv("PUBLIC_BASE_URL", ""))
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"Morning digest error: {e}")
 
 
 @_single_flight("corporate_announcements")

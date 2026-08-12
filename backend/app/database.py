@@ -295,6 +295,11 @@ class TradeAILog(Base):
     config_id = Column(Integer, nullable=True, index=True)            # FK to TradeConfig.id
     symbol = Column(String(50), nullable=False, index=True)
     company_name = Column(String(250), nullable=True)
+    # Correlation id shared with the PendingResultOrder that triggered this
+    tracking_ref = Column(String(40), index=True, nullable=True)
+    # Dispatch / receipt of the AI call itself
+    ai_requested_at = Column(DateTime, nullable=True)
+    ai_completed_at = Column(DateTime, nullable=True)
     provider = Column(String(50), nullable=False)                     # "custom_rest_api", "openrouter_premium", etc.
     prompt_summary = Column(Text, nullable=True)                      # brief description of what was analyzed
     ai_sentiment = Column(String(20), nullable=True)
@@ -366,11 +371,30 @@ class PendingResultOrder(Base):
     title = Column(Text, nullable=False)
     description = Column(Text, nullable=True)
     attachment_url = Column(Text, nullable=True)
+    # ── Lifecycle timestamps (all UTC) ──
+    # When the exchange published it
     event_time = Column(DateTime, nullable=False, index=True)
+    # When our poller ingested it -> created_at below
+    # When the arrival alert went out
+    alert_sent_at = Column(DateTime, nullable=True)
+    # When the earnings AI request was dispatched, and when its reply landed
+    ai_requested_at = Column(DateTime, nullable=True)
+    ai_completed_at = Column(DateTime, nullable=True)
+
+    # Short human-readable correlation id (e.g. AARTI-0807-3F2A). Printed on the
+    # arrival alert, the AI verdict alert and the app row so one alert can be
+    # traced through to its analysis.
+    tracking_ref = Column(String(40), unique=True, index=True, nullable=True)
+
+    # Arrived after the intraday cutoff, so alerts and AI are held for the
+    # next morning digest rather than firing overnight.
+    deferred = Column(Boolean, default=False, index=True)
+    digest_sent_at = Column(DateTime, nullable=True)
+
     dedup_key = Column(String(200), unique=True, index=True, nullable=False)
     # pending → ordered | dismissed | expired
     status = Column(String(20), default="pending", index=True)
-    # AI analysis lifecycle: pending → running → done | failed
+    # AI analysis lifecycle: pending → deferred → running → done | failed
     ai_status = Column(String(20), default="pending", index=True)
     ai_log_id = Column(Integer, nullable=True)          # FK to TradeAILog.id
     config_id = Column(Integer, nullable=True)          # FK to TradeConfig.id once ordered
@@ -429,6 +453,17 @@ def init_db():
         _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN future_growth_outlook TEXT")
         _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN future_projected_numbers TEXT")
         _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN extraction_ok BOOLEAN DEFAULT 0")
+
+        # Lifecycle timestamps + alert correlation
+        _safe_alter(conn, "ALTER TABLE pending_result_orders ADD COLUMN alert_sent_at DATETIME")
+        _safe_alter(conn, "ALTER TABLE pending_result_orders ADD COLUMN ai_requested_at DATETIME")
+        _safe_alter(conn, "ALTER TABLE pending_result_orders ADD COLUMN ai_completed_at DATETIME")
+        _safe_alter(conn, "ALTER TABLE pending_result_orders ADD COLUMN tracking_ref VARCHAR(40)")
+        _safe_alter(conn, "ALTER TABLE pending_result_orders ADD COLUMN deferred BOOLEAN DEFAULT 0")
+        _safe_alter(conn, "ALTER TABLE pending_result_orders ADD COLUMN digest_sent_at DATETIME")
+        _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN tracking_ref VARCHAR(40)")
+        _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN ai_requested_at DATETIME")
+        _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN ai_completed_at DATETIME")
 
 
 def _safe_alter(conn, sql: str):
