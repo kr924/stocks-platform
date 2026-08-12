@@ -325,6 +325,9 @@ class TradeAILog(Base):
     # x columns (current_qtr / yoy_change_pct / last_year_same_qtr / estimated).
     # "NA" wherever a figure could not be extracted from the filing.
     metrics_json = Column(Text, nullable=True)
+    # Result of the internal consistency checks: which figures failed to
+    # reconcile, so a suspect extraction can be seen rather than just distrusted.
+    validation_json = Column(Text, nullable=True)
     future_growth_outlook = Column(Text, nullable=True)
     future_projected_numbers = Column(Text, nullable=True)
     # True when the filing yielded no usable figures — suppresses any verdict
@@ -464,6 +467,7 @@ def init_db():
         _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN tracking_ref VARCHAR(40)")
         _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN ai_requested_at DATETIME")
         _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN ai_completed_at DATETIME")
+        _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN validation_json TEXT")
 
 
 def _safe_alter(conn, sql: str):

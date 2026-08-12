@@ -139,11 +139,14 @@ def call_openai(prompt: str, api_key: str) -> dict:
     return json.loads(cleaned)
 
 
-def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url: str = None) -> dict:
+def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url: str = None,
+                    pdf_engine: str = None) -> dict:
     """Call OpenRouter API with dynamic model discovery and document URL attachment support."""
     key = api_key.strip().rstrip(">").strip('"').strip("'").strip()
     if not key or key.startswith("YOUR_"):
         raise ValueError("Invalid or placeholder OpenRouter API key")
+
+    pdf_engine = pdf_engine or os.getenv("OPENROUTER_PDF_ENGINE", "native")
 
     headers = {
         "Content-Type": "application/json",
@@ -156,8 +159,23 @@ def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url
     if model:
         models_to_try.append(model)
 
+    # An explicitly configured model is a deliberate choice. Falling through a
+    # hundred free models behind it was not a fallback so much as a way to spend
+    # several minutes discovering that rate-limited models cannot read a PDF.
+    # A short curated chain covers a genuine outage instead.
+    if model:
+        for fallback in ("google/gemini-2.5-flash-lite", "openai/gpt-4o-mini"):
+            if fallback != model:
+                models_to_try.append(fallback)
+        models_to_try = models_to_try[:3]
+        skip_free_discovery = True
+    else:
+        skip_free_discovery = False
+
     # 1. Fetch live free models dynamically from OpenRouter's API
     try:
+        if skip_free_discovery:
+            raise StopIteration
         models_res = requests.get("https://openrouter.ai/api/v1/models", timeout=5)
         if models_res.ok:
             m_data = models_res.json().get("data", [])
@@ -168,6 +186,8 @@ def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url
                 p_compl = str(pricing.get("completion", "1"))
                 if (m_id.endswith(":free") or (p_prompt == "0" and p_compl == "0")) and m_id not in models_to_try:
                     models_to_try.append(m_id)
+    except StopIteration:
+        pass
     except Exception as e:
         logger.warning(f"Failed to fetch live OpenRouter models list: {e}")
     
@@ -179,19 +199,31 @@ def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url
             "qwen/qwen-2.5-coder-32b-instruct:free",
         ]
     
+    # openrouter/auto picks a model per request, so cost and output shape vary
+    # run to run. Only reach for it when nothing was configured.
     if "openrouter/auto" not in models_to_try and not model:
         models_to_try.insert(0, "openrouter/auto")
         
+    # OpenRouter takes the document as {"file": {"filename", "file_data"}}, and
+    # file_data accepts a plain URL — it fetches and parses the PDF itself, so
+    # nothing has to be downloaded or OCR'd here. The previous shape used a
+    # "file_url" key, which OpenRouter does not recognise, so the attachment was
+    # dropped and the model was asked about a document it never received.
     user_content = prompt
-    if attachment_url and attachment_url.startswith("http"):
+    has_attachment = bool(attachment_url and attachment_url.startswith("http"))
+    if has_attachment:
+        filename = attachment_url.rstrip("/").split("/")[-1] or "filing.pdf"
+        if not filename.lower().endswith(".pdf"):
+            filename += ".pdf"
         user_content = [
             {"type": "text", "text": prompt},
             {
                 "type": "file",
-                "file_url": {
-                    "url": attachment_url
-                }
-            }
+                "file": {
+                    "filename": filename,
+                    "file_data": attachment_url,
+                },
+            },
         ]
 
     last_err = None
@@ -204,11 +236,25 @@ def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url
                     {"role": "user", "content": user_content}
                 ]
             }
-            if use_json_format and isinstance(user_content, str):
+            # JSON mode was previously skipped whenever a file was attached —
+            # exactly the request where structured output matters most.
+            if use_json_format:
                 payload["response_format"] = {"type": "json_object"}
+            if has_attachment:
+                # "native" lets a document-capable model read the PDF itself,
+                # including scans, without a separate OCR pass. OpenRouter falls
+                # back to its own parser when the model cannot.
+                payload["plugins"] = [
+                    {"id": "file-parser", "pdf": {"engine": pdf_engine}}
+                ]
                 
             try:
-                res = requests.post("https://openrouter.ai/api/v1/chat/completions", json=payload, headers=headers, timeout=25)
+                res = requests.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    json=payload, headers=headers,
+                    # Fetching, parsing and reading a filing does not fit in 25s.
+                    timeout=180 if has_attachment else 30,
+                )
                 if res.ok:
                     raw_text = res.json()["choices"][0]["message"]["content"]
                     cleaned = clean_json_response(raw_text)

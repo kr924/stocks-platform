@@ -203,6 +203,84 @@ def metrics_are_usable(metrics: dict) -> bool:
     return bool(_clean_cell(revenue)) and bool(_clean_cell(pat))
 
 
+def validate_metrics(metrics: dict) -> dict:
+    """
+    Check an extracted grid against itself.
+
+    Layout is the weak point in reading these filings: every company arranges its
+    P&L differently, many are scans, and a number can be picked up from the wrong
+    row or the wrong column while still looking like a plausible figure. Nothing
+    downstream can tell, because a wrong number is still a number.
+
+    The strongest available check needs no external source: the model reports
+    both the values and the percentage change between them, so those two claims
+    must agree. If it says revenue went from 386 to 536 but also says that is
+    +12%, one of the three was misread. Sign and magnitude checks catch the
+    rest — expenses are never negative, PAT never exceeds revenue.
+
+    Returns:
+        {"issues": [str], "hard_failures": int, "reconciled": int, "trustworthy": bool}
+    """
+    from app.services.screener_quarters import parse_ai_value
+
+    issues, hard, reconciled = [], 0, 0
+    if not metrics:
+        return {"issues": ["no metrics"], "hard_failures": 1, "reconciled": 0, "trustworthy": False}
+
+    def pct(text):
+        if not _clean_cell(text):
+            return None
+        try:
+            return float(str(text).replace("%", "").replace("+", "").strip())
+        except ValueError:
+            return None
+
+    for row in METRIC_ROWS:
+        cells = metrics.get(row, {})
+        cur = parse_ai_value(cells.get("current_qtr"))
+        ly = parse_ai_value(cells.get("last_year_same_qtr"))
+        stated = pct(cells.get("yoy_change_pct"))
+        label = _ROW_LABELS[row]
+
+        # 1. The model's own percentage must match its own numbers.
+        if cur is not None and ly not in (None, 0) and stated is not None:
+            computed = (cur - ly) / abs(ly) * 100
+            # Allow rounding and a modest relative drift before calling it wrong.
+            tolerance = max(2.0, abs(stated) * 0.10)
+            if abs(computed - stated) > tolerance:
+                hard += 1
+                issues.append(
+                    f"{label}: stated YoY {stated:+.1f}% but {cur:,.2f} vs {ly:,.2f} "
+                    f"computes to {computed:+.1f}% — a value or the change was misread"
+                )
+            else:
+                reconciled += 1
+
+        # 2. Sign sanity. Revenue and expenses are never negative on a P&L.
+        for key, value in (("current_qtr", cur), ("last_year_same_qtr", ly)):
+            if value is not None and value < 0 and row in ("revenue", "expenses", "ebitda"):
+                hard += 1
+                issues.append(f"{label}: {key.replace('_', ' ')} is negative ({value:,.2f})")
+
+    # 3. Magnitude sanity across rows.
+    rev = parse_ai_value(metrics.get("revenue", {}).get("current_qtr"))
+    pat = parse_ai_value(metrics.get("pat", {}).get("current_qtr"))
+    exp = parse_ai_value(metrics.get("expenses", {}).get("current_qtr"))
+    if rev and pat is not None and abs(pat) > abs(rev):
+        hard += 1
+        issues.append(f"PAT {pat:,.2f} exceeds revenue {rev:,.2f} — rows were likely transposed")
+    if rev and exp is not None and exp > abs(rev) * 3:
+        hard += 1
+        issues.append(f"Expenses {exp:,.2f} are implausible against revenue {rev:,.2f}")
+
+    return {
+        "issues": issues,
+        "hard_failures": hard,
+        "reconciled": reconciled,
+        "trustworthy": hard == 0,
+    }
+
+
 def _cell_summary(metrics: dict, row: str) -> str:
     """One-line rendering of a row, for the legacy single-string columns."""
     cells = metrics.get(row, {})
@@ -578,7 +656,7 @@ def _do_analyze_earnings_disclosure_2step(
     
     custom_url = auto_ai_cfg.get("custom_api_url", "http://localhost:3000/api/generate").strip()
     openrouter_key = auto_ai_cfg.get("premium_openrouter_api_key", "").strip() or os.getenv("OPENROUTER_PREMIUM_API_KEY", "").strip() or os.getenv("OPENROUTER_API_KEY", "").strip()
-    openrouter_model = auto_ai_cfg.get("premium_openrouter_model", "anthropic/claude-3.5-sonnet").strip()
+    openrouter_model = auto_ai_cfg.get("premium_openrouter_model", "google/gemini-2.5-flash-lite").strip()
 
     company_name = ""
     try:
@@ -758,6 +836,16 @@ CRITICAL: Output ONLY raw JSON. No prose, no markdown fences, no preamble.
     metrics = normalize_metrics(parsed_json.get("metrics"))
     extraction_ok = metrics_are_usable(metrics)
 
+    # Numbers can be read off the wrong row or column and still look plausible,
+    # so the grid is checked against itself before any verdict is derived.
+    validation = validate_metrics(metrics)
+    if extraction_ok and not validation["trustworthy"]:
+        logger.warning(
+            f"⚠️ [EXTRACTION SUSPECT] #{symbol}: {validation['hard_failures']} "
+            f"consistency failure(s) — {'; '.join(validation['issues'][:3])}"
+        )
+        extraction_ok = False
+
     future_growth_outlook = _clean_cell(parsed_json.get("future_growth_outlook")) or "NA"
     future_projected_numbers = _clean_cell(parsed_json.get("future_projected_numbers")) or "NA"
     broker_estimates = _clean_cell(parsed_json.get("broker_estimates")) or "NA"
@@ -859,6 +947,7 @@ CRITICAL: Output ONLY raw JSON. No prose, no markdown fences, no preamble.
                 attachment_url=attachment_url,
                 flow_used=used_flow,
                 metrics_json=json.dumps(metrics),
+                validation_json=json.dumps(validation),
                 future_growth_outlook=future_growth_outlook,
                 future_projected_numbers=future_projected_numbers,
                 extraction_ok=extraction_ok,

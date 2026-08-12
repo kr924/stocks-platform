@@ -169,24 +169,41 @@ def fetch_latest_quarter(symbol: str) -> dict:
 _NUM_IN_TEXT = re.compile(r"-?[\d,]+(?:\.\d+)?")
 
 
+# Currency symbols and separators sit between the sign and the digits, so they
+# are stripped before the sign is read.
+_CURRENCY_NOISE = re.compile(r"[₹$€£¥,\s]")
+
+
 def parse_ai_value(text: str) -> Optional[float]:
     """
     Pull a number out of an AI cell such as "₹535.80 Cr" so it can be compared.
 
     Handles the crore/lakh/million suffixes the model uses, normalising
     everything to crore, which is what Screener reports in.
+
+    Sign is resolved before parsing. "-₹442.59 Cr" puts the minus in front of the
+    currency symbol, and "(442.59)" is the accounting form of a negative — read
+    naively both come back positive, which would silently turn a quarterly loss
+    into a profit.
     """
     if not text:
         return None
     s = str(text).strip()
-    if s.upper() in ("NA", "N/A", "", "-"):
+    if s.upper() in ("NA", "N/A", "", "-", "--"):
         return None
 
-    m = _NUM_IN_TEXT.search(s.replace(",", ""))
+    compact = _CURRENCY_NOISE.sub("", s)
+    negative = (
+        compact.startswith("-")
+        or compact.startswith("−")          # unicode minus
+        or ("(" in compact and ")" in compact)   # accounting negative
+    )
+
+    m = _NUM_IN_TEXT.search(compact)
     if not m:
         return None
     try:
-        value = float(m.group(0).replace(",", ""))
+        value = abs(float(m.group(0).lstrip("-−")))
     except ValueError:
         return None
 
@@ -197,7 +214,8 @@ def parse_ai_value(text: str) -> Optional[float]:
         value /= 10.0                  # 10 million = 1 crore
     elif "bn" in low or "billion" in low:
         value *= 100.0
-    return round(value, 2)
+
+    return round(-value if negative else value, 2)
 
 
 def compare(ai_value: Optional[float], actual: Optional[float]) -> dict:

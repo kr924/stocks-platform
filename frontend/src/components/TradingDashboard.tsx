@@ -160,6 +160,7 @@ interface TradeAILog {
   future_growth_outlook?: string | null;
   future_projected_numbers?: string | null;
   extraction_ok?: boolean;
+  validation?: { issues: string[]; hard_failures: number; reconciled: number; trustworthy: boolean } | null;
 }
 
 /** Local time-of-day, or an em dash when the stage has not happened yet. */
@@ -254,6 +255,29 @@ function MetricsTable({ metrics }: { metrics: MetricGrid | null | undefined }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+
+/**
+ * Consistency failures found in an extraction. Shown rather than merely acted
+ * on, so a suspect filing can be checked against the source instead of just
+ * being distrusted silently.
+ */
+function ValidationNotice({ v }: { v: TradeAILog["validation"] }) {
+  if (!v || !v.issues || v.issues.length === 0) return null;
+  return (
+    <div style={{
+      marginTop: "8px", padding: "8px 10px", borderRadius: "6px",
+      background: "var(--warning-bg)", border: "1px solid var(--warning-border)",
+    }}>
+      <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--warning)", marginBottom: "4px" }}>
+        ⚠ FIGURES FAILED CONSISTENCY CHECKS — treat as unverified
+      </div>
+      {v.issues.slice(0, 4).map((issue, i) => (
+        <div key={i} style={{ fontSize: "10px", color: "var(--text-secondary)", lineHeight: 1.5 }}>• {issue}</div>
+      ))}
     </div>
   );
 }
@@ -1364,6 +1388,7 @@ export function TradingDashboard() {
                           )}
                         </div>
                         <MetricsTable metrics={ai.metrics} />
+                        <ValidationNotice v={ai.validation} />
                         <div style={{ fontSize: "11px", color: "var(--text-secondary)", lineHeight: 1.55, marginTop: "8px" }}>{ai.ai_summary}</div>
                         {(ai.future_growth_outlook || ai.future_projected_numbers) && (
                           <div style={{ display: "flex", flexDirection: "column", gap: "3px", marginTop: "8px", fontSize: "10px", color: "var(--text-muted)" }}>
@@ -2970,6 +2995,7 @@ export function TradingDashboard() {
 
                       <div style={{ backgroundColor: "var(--surface-2)", padding: "10px 12px", borderRadius: "8px", marginBottom: "10px" }}>
                         <MetricsTable metrics={log.metrics} />
+                        <ValidationNotice v={log.validation} />
                         {!log.metrics && (
                           <div style={{ fontSize: "11px", color: "var(--text-faint)", fontStyle: "italic" }}>
                             No structured metrics on this analysis (recorded before the metric grid was introduced).

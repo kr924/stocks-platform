@@ -146,6 +146,8 @@ def _serialize_ai_log(a: TradeAILog) -> dict:
         "future_growth_outlook": getattr(a, "future_growth_outlook", None),
         "future_projected_numbers": getattr(a, "future_projected_numbers", None),
         "extraction_ok": bool(getattr(a, "extraction_ok", False)),
+        "validation": (json.loads(a.validation_json)
+                       if getattr(a, "validation_json", None) else None),
         "provider": a.provider,
         "prompt_summary": a.prompt_summary,
         "ai_sentiment": a.ai_sentiment,

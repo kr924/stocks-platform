@@ -345,7 +345,11 @@ class IntelConfig:
         ai_cfg = self._config.get("auto_trading_ai", {
             "custom_api_url": "http://localhost:11434/api/generate",
             "premium_openrouter_api_key": "",
-            "premium_openrouter_model": "anthropic/claude-3.5-sonnet",
+            # Reads PDFs natively (including scans) without a separate OCR pass,
+            # supports JSON mode, 1M context, and is the cheapest capable
+            # option on OpenRouter. anthropic/claude-3.5-sonnet was the previous
+            # default and has since been retired from OpenRouter entirely.
+            "premium_openrouter_model": "google/gemini-2.5-flash-lite",
         })
         try:
             from app.database import SessionLocal, SystemSetting
