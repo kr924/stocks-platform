@@ -5,14 +5,14 @@ Results land mostly after the close, when there is no session left to trade
 into. Those are deferred (see results_router.is_within_action_window) and
 collected here instead:
 
-    07:00 IST  run the held analyses — quiet time, market shut, and it gives
-               the slow browser-driven AI an hour to work through the queue
-    08:00 IST  publish one HTML page and send a single Telegram alert linking
-               to it
+    08:00 IST  publish one HTML page and send a single Telegram alert linking to it
 
-The page puts our AI's extracted figures beside Screener.in's reported numbers
-for the same quarter, with the variance, so every company filed overnight can be
-checked on one screen.
+The page lists every company whose results were announced the previous day and
+shows Screener.in's reported figures for the quarter. Our AI's extraction sits
+beside them *only where it exists* — that is, where the filing arrived before the
+15:25 cutoff and was analysed live. Filings that landed after the cutoff are
+never analysed, so their AI column reads "not analysed", and Screener is the
+single source for them.
 """
 import html
 import json
@@ -50,13 +50,20 @@ def _ist_str(dt) -> str:
     return dt.astimezone(IST).strftime("%d %b %H:%M:%S")
 
 
-def collect_deferred(db: Session, since_hours: int = 20) -> List[PendingResultOrder]:
-    """Results held back since the last cutoff, oldest first."""
-    since = datetime.utcnow() - timedelta(hours=since_hours)
+def collect_for_digest(db: Session, lookback_days: int = 4) -> List[PendingResultOrder]:
+    """
+    Everything not yet reported in a digest, oldest first.
+
+    Selected on "not yet digested" rather than a fixed previous-calendar-day
+    window, so a Monday morning naturally rolls up Friday evening through Sunday
+    instead of silently dropping the weekend. Both intraday and post-cutoff
+    filings are included: the difference between them is whether an AI analysis
+    exists, not whether they are reported.
+    """
+    since = datetime.utcnow() - timedelta(days=lookback_days)
     return (
         db.query(PendingResultOrder)
         .filter(
-            PendingResultOrder.deferred == True,
             PendingResultOrder.created_at >= since,
             PendingResultOrder.digest_sent_at.is_(None),
         )
@@ -65,43 +72,38 @@ def collect_deferred(db: Session, since_hours: int = 20) -> List[PendingResultOr
     )
 
 
+# Kept under the old name so existing callers and tests keep working.
+collect_deferred = collect_for_digest
+
+
 def run_deferred_analyses(db: Session) -> int:
     """
-    Work through the overnight queue, one filing at a time.
+    Retained as a manual escape hatch only; nothing schedules it.
 
-    Sequential on purpose: the earnings AI downloads a PDF and drives a browser
-    session, and running several at once is what previously pinned the CPU.
+    Post-cutoff filings are deliberately not analysed — that is the point of the
+    cutoff. Calling this analyses them anyway, which is occasionally useful when
+    reviewing a past day by hand, but it is never invoked automatically.
     """
     from app.services.trade_ai_analyzer import analyze_earnings_disclosure_2step
 
-    pending = [p for p in collect_deferred(db) if p.ai_status in ("deferred", "pending", "failed")]
+    pending = [p for p in collect_for_digest(db) if p.ai_status in ("deferred", "pending", "failed")]
     if not pending:
-        logger.info("[DIGEST] No deferred results awaiting analysis.")
         return 0
 
-    logger.info(f"[DIGEST] Running {min(len(pending), MAX_ANALYSES_PER_RUN)} deferred analyses.")
+    logger.info(f"[DIGEST] Manually analysing {min(len(pending), MAX_ANALYSES_PER_RUN)} filings.")
     done = 0
     for row in pending[:MAX_ANALYSES_PER_RUN]:
         try:
             row.ai_status = "running"
             row.ai_requested_at = datetime.utcnow()
             db.commit()
-
             analyze_earnings_disclosure_2step(
-                symbol=row.symbol,
-                title=row.title,
-                attachment_url=row.attachment_url or "",
-                pdf_text=row.description or "",
-                config_id=None,
-                tracking_ref=row.tracking_ref,
+                symbol=row.symbol, title=row.title,
+                attachment_url=row.attachment_url or "", pdf_text=row.description or "",
+                config_id=None, tracking_ref=row.tracking_ref,
             )
-
-            latest = (
-                db.query(TradeAILog)
-                .filter(TradeAILog.symbol == row.symbol)
-                .order_by(TradeAILog.created_at.desc())
-                .first()
-            )
+            latest = (db.query(TradeAILog).filter(TradeAILog.symbol == row.symbol)
+                      .order_by(TradeAILog.created_at.desc()).first())
             row.ai_log_id = latest.id if latest else None
             row.ai_status = "done"
             row.ai_completed_at = datetime.utcnow()
@@ -109,15 +111,7 @@ def run_deferred_analyses(db: Session) -> int:
             done += 1
         except Exception as e:
             db.rollback()
-            logger.error(f"[DIGEST] Analysis failed for {row.symbol}: {e}")
-            try:
-                row.ai_status = "failed"
-                row.ai_completed_at = datetime.utcnow()
-                db.commit()
-            except Exception:
-                db.rollback()
-
-    logger.info(f"[DIGEST] Completed {done} deferred analyses.")
+            logger.error(f"[DIGEST] Manual analysis failed for {row.symbol}: {e}")
     return done
 
 
@@ -161,12 +155,17 @@ def _build_rows(db: Session, pendings: List[PendingResultOrder]) -> List[dict]:
                 **compare(ai_num, actual),
             })
 
+        # "not analysed" and "analysed but inconclusive" are different states and
+        # must not both render as NA — one is a policy decision, the other a
+        # judgement about the filing.
+        analysed = bool(log and log.ai_completed_at)
         rows.append({
             "pending": p,
             "log": log,
             "screener": screener,
             "comparison": comparison,
-            "verdict": (log.ai_suggestion if log else None) or "NA",
+            "analysed": analysed,
+            "verdict": ((log.ai_suggestion if log else None) or "NA") if analysed else "NOT ANALYSED",
         })
     return rows
 
@@ -229,6 +228,8 @@ def render_html(rows: List[dict], for_date: str) -> str:
         cls = ("b-pos" if verdict.upper() in ("BUY", "BEATS ESTIMATES")
                else "b-neg" if verdict.upper() in ("SELL", "MISSES ESTIMATES")
                else "b-na")
+        badge_title = ("Filed after the 15:25 cutoff, so it was not analysed — Screener is the source here"
+                       if not r["analysed"] else "Verdict from our AI analysis")
 
         body = []
         for c in r["comparison"]:
@@ -239,8 +240,12 @@ def render_html(rows: List[dict], for_date: str) -> str:
             else:
                 verdict_cell = '<span class="unk">—</span>'
             ai_txt = c["ai_text"]
-            ai_disp = ('<span class="na">NA</span>' if not ai_txt or ai_txt.upper() == "NA"
-                       else e(str(ai_txt)))
+            if not r["analysed"]:
+                ai_disp = '<span class="na">not analysed</span>'
+            elif not ai_txt or ai_txt.upper() == "NA":
+                ai_disp = '<span class="na">NA</span>'
+            else:
+                ai_disp = e(str(ai_txt))
             body.append(
                 f"<tr><td>{e(c['label'])}</td>"
                 f"<td>{ai_disp}</td>"
@@ -260,7 +265,7 @@ def render_html(rows: List[dict], for_date: str) -> str:
   <div class="hd">
     <span class="sym">{e(p.symbol)}</span>
     <span class="co">{e(p.company_name or '')}</span>
-    <span class="badge {cls}">{e(verdict)}</span>
+    <span class="badge {cls}" title="{e(badge_title)}">{e(verdict)}</span>
     <span class="ref">{e(p.tracking_ref or '')}</span>
   </div>
   <div class="title">{e((p.title or '')[:190])}</div>
@@ -269,6 +274,7 @@ def render_html(rows: List[dict], for_date: str) -> str:
     <span><b>Loaded</b> {_ist_str(p.created_at)}</span>
     <span><b>AI sent</b> {_ist_str(p.ai_requested_at)}</span>
     <span><b>AI received</b> {_ist_str(p.ai_completed_at)}</span>
+    <span><b>Window</b> {'intraday' if not p.deferred else 'after 15:25 cutoff'}</span>
     <span><b>Exchange</b> {e(p.exchange.upper())}</span>
   </div>
   <table>
@@ -289,13 +295,15 @@ def render_html(rows: List[dict], for_date: str) -> str:
 <title>Results digest — {e(for_date)}</title>
 <style>{_CSS}</style></head>
 <body>
-<h1>Results filed after cutoff — {e(for_date)}</h1>
+<h1>Results announced {e(for_date)}</h1>
 <div class="sub">{len(rows)} compan{'y' if len(rows) == 1 else 'ies'} ·
- our AI's extraction beside Screener.in's reported figures for the same quarter</div>
+ {sum(1 for r in rows if r['analysed'])} analysed intraday ·
+ {sum(1 for r in rows if not r['analysed'])} filed after the 15:25 cutoff (Screener only)</div>
 <div class="legend">
   <span><b style="color:var(--pos)">match</b> within 2% of Screener</span>
   <span><b style="color:var(--neg)">±n%</b> our figure differs by that much</span>
   <span><b style="color:var(--na)">—</b> one side missing, so no comparison is possible</span>
+  <span><b style="color:var(--na)">not analysed</b> filed after 15:25; no AI is run on those</span>
   <span>All Screener values in ₹ crore, consolidated where available</span>
 </div>
 {content}
@@ -346,14 +354,18 @@ def send_digest_alert(result: dict, public_base_url: str = "") -> bool:
     if not rows:
         return send_message(
             f"<b>📋 MORNING RESULTS DIGEST — {_esc(result['date'])}</b>\n\n"
-            f"No results were filed after yesterday's 15:20 cutoff."
+            f"No results were announced."
         ) is not None
 
-    beats = sum(1 for r in rows if "BEAT" in (r["verdict"] or "").upper())
-    misses = sum(1 for r in rows if "MISS" in (r["verdict"] or "").upper())
-    na = sum(1 for r in rows if (r["verdict"] or "NA").upper() == "NA")
+    analysed = [r for r in rows if r.get("analysed")]
+    unanalysed = [r for r in rows if not r.get("analysed")]
+    beats = sum(1 for r in analysed if "BEAT" in (r["verdict"] or "").upper())
+    misses = sum(1 for r in analysed if "MISS" in (r["verdict"] or "").upper())
+    na = sum(1 for r in analysed if (r["verdict"] or "NA").upper() == "NA")
+    # Only an analysed filing can disagree with Screener; the rest have nothing
+    # of ours to compare against.
     mismatches = sum(
-        1 for r in rows if any(c["match"] is False for c in r["comparison"])
+        1 for r in analysed if any(c["match"] is False for c in r["comparison"])
     )
 
     lines = []
@@ -362,8 +374,9 @@ def send_digest_alert(result: dict, public_base_url: str = "") -> bool:
         flag = ""
         if any(c["match"] is False for c in r["comparison"]):
             flag = " ⚠"
+        mark = "" if r.get("analysed") else " ·"
         lines.append(
-            f"• <b>{_esc(p.symbol)}</b> — {_esc(r['verdict'])}{flag}  "
+            f"• <b>{_esc(p.symbol)}</b> — {_esc(r['verdict'])}{flag}{mark}  "
             f"<code>{_esc(p.tracking_ref or '')}</code>"
         )
     if len(rows) > 25:

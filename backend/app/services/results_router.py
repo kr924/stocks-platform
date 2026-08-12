@@ -35,20 +35,20 @@ IST = timezone(timedelta(hours=5, minutes=30))
 _ai_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="earnings-ai")
 
 
-# Results filed after this IST time are held for the next morning's digest
-# rather than alerting overnight. The market closes at 15:30, so anything past
-# 15:20 cannot be acted on the same session anyway.
+# Results filed after this IST time get no alert and no AI analysis. The market
+# closes at 15:30, so there is no session left to act in; they are reported in
+# the next morning's digest from Screener's figures instead.
 INTRADAY_CUTOFF_HOUR = 15
-INTRADAY_CUTOFF_MINUTE = 20
+INTRADAY_CUTOFF_MINUTE = 25
 
 
 def is_within_action_window(now_ist: datetime = None) -> bool:
     """
     True when a result arriving now can still be acted on today.
 
-    False after the cutoff on a working day, and false all day at weekends —
-    in both cases there is no session left to trade into, so the result is
-    deferred to the 08:00 digest instead of firing an alert nobody can use.
+    False after 15:25 on a working day, and false all day at weekends — in both
+    cases there is no session left to trade into, so the result raises no alert
+    and consumes no AI budget. It appears in the next 08:00 digest instead.
     """
     now = now_ist or datetime.now(IST)
     if now.weekday() > 4:                       # Saturday / Sunday

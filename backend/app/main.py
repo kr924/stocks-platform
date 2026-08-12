@@ -219,12 +219,6 @@ async def _intelligence_scheduler():
                     last_run["earnings_sync_date"] = today_str
                     await asyncio.to_thread(_run_earnings_sync)
 
-                # 07:00 — analyse everything deferred overnight, so the 08:00
-                # digest has verdicts rather than a page of "pending".
-                if now_ist.hour >= 7 and last_run.get("deferred_ai_date") != today_str:
-                    last_run["deferred_ai_date"] = today_str
-                    asyncio.create_task(asyncio.to_thread(_run_deferred_analyses))
-
                 # 08:00 — publish the digest page and send the single alert
                 if now_ist.hour >= 8 and last_run.get("morning_digest_date") != today_str:
                     last_run["morning_digest_date"] = today_str
@@ -290,20 +284,6 @@ def _run_earnings_sync():
             db.close()
     except Exception as e:
         logger.error(f"Daily earnings sync error: {e}")
-
-
-@_single_flight("deferred_ai")
-def _run_deferred_analyses():
-    """07:00 IST — work through results held back since yesterday's cutoff."""
-    try:
-        from app.services.morning_digest import run_deferred_analyses
-        db = next(get_db())
-        try:
-            run_deferred_analyses(db)
-        finally:
-            db.close()
-    except Exception as e:
-        logger.error(f"Deferred analyses error: {e}")
 
 
 @_single_flight("morning_digest")
