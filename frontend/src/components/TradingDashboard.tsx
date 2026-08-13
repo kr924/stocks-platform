@@ -188,6 +188,57 @@ interface TradeAILog {
   validation?: { issues: string[]; hard_failures: number; reconciled: number; trustworthy: boolean } | null;
 }
 
+/**
+ * Live price and how far the stock has moved since the result landed.
+ *
+ * The move since announcement is the number that decides whether there is still
+ * a trade here — by the time a result reaches this panel the market has often
+ * already repriced, and the day's change from the previous close does not show
+ * that. Falls back to the day's change when no announcement price was captured.
+ */
+function ResultPriceMove({ p, quote }: { p: PendingResult; quote: any }) {
+  const ltp: number | undefined = quote?.last_price;
+  const base = p.price_at_announcement;
+  const dayChange: number | undefined = quote?.change;
+
+  const sinceAnnounce =
+    ltp && base ? ((ltp - base) / base) * 100 : null;
+
+  const tone = (v: number | null | undefined) =>
+    v == null ? "var(--text-faint)" : v > 0 ? "var(--positive)" : v < 0 ? "var(--negative)" : "var(--text-secondary)";
+  const fmt = (v: number | null | undefined) =>
+    v == null ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(2)}%`;
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "14px", flexWrap: "wrap" }}>
+      <span style={{ fontSize: "15px", fontWeight: 800, color: "var(--text-primary)", fontVariantNumeric: "tabular-nums" }}>
+        {ltp ? `₹${ltp.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
+      </span>
+
+      <span title="Move since the result was announced — what is left of the reaction"
+        style={{ display: "flex", flexDirection: "column", lineHeight: 1.15 }}>
+        <span style={{ fontSize: "9px", color: "var(--text-faint)", letterSpacing: "0.3px" }}>SINCE RESULT</span>
+        <span style={{ fontSize: "13px", fontWeight: 800, color: tone(sinceAnnounce), fontVariantNumeric: "tabular-nums" }}>
+          {sinceAnnounce == null ? "—" : fmt(sinceAnnounce)}
+        </span>
+      </span>
+
+      <span style={{ display: "flex", flexDirection: "column", lineHeight: 1.15 }}>
+        <span style={{ fontSize: "9px", color: "var(--text-faint)", letterSpacing: "0.3px" }}>DAY</span>
+        <span style={{ fontSize: "13px", fontWeight: 700, color: tone(dayChange), fontVariantNumeric: "tabular-nums" }}>
+          {fmt(dayChange)}
+        </span>
+      </span>
+
+      {base != null && (
+        <span style={{ fontSize: "10px", color: "var(--text-faint)", whiteSpace: "nowrap" }}>
+          at result ₹{base.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+        </span>
+      )}
+    </div>
+  );
+}
+
 /** Local time-of-day, or an em dash when the stage has not happened yet. */
 function clockTime(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -361,6 +412,9 @@ export function TradingDashboard() {
   const [nseAnnouncements, setNseAnnouncements] = useState<any[]>([]);
   const [pendingResults, setPendingResults] = useState<PendingResult[]>([]);
   const [pendingSearch, setPendingSearch] = useState("");
+  // AI detail is collapsed by default: on a heavy results day this panel carries
+  // 170+ cards, and a five-row metric table on each buries the order controls.
+  const [expandedResults, setExpandedResults] = useState<Record<number, boolean>>({});
   const [aiLogSearch, setAiLogSearch] = useState("");
   const [aiLogDateFrom, setAiLogDateFrom] = useState("");
   const [aiLogDateTo, setAiLogDateTo] = useState("");
@@ -806,9 +860,13 @@ export function TradingDashboard() {
         }
       }
 
-      // 2. Batch fetch live Upstox market quotes for all upcoming earnings symbols
-      if (upcomingEarnings.length > 0) {
-        const uniqueSyms = Array.from(new Set(upcomingEarnings.map(item => item.symbol))).slice(0, 80);
+      // 2. Batch fetch live Upstox market quotes for earnings + pending results
+      const quoteSymbols = [
+        ...upcomingEarnings.map(item => item.symbol),
+        ...pendingResults.map(p => p.symbol),
+      ].filter(Boolean);
+      if (quoteSymbols.length > 0) {
+        const uniqueSyms = Array.from(new Set(quoteSymbols)).slice(0, 80);
         if (uniqueSyms.length > 0) {
           const symStr = uniqueSyms.join(",");
           const resBatch = await fetch(`${API_BASE}/api/market/quotes-by-symbols?symbols=${encodeURIComponent(symStr)}`);
@@ -1308,6 +1366,8 @@ export function TradingDashboard() {
               const form = getResultForm(pending.id);
               const busy = !!actionLoading[`result_${pending.id}`];
               const ai = pending.ai_analysis;
+              const quote = marketQuotesMap[pending.symbol.toUpperCase()] || {};
+              const isOpen = !!expandedResults[pending.id];
               return (
                 <div key={pending.id} style={{
                   background: "rgba(15, 19, 25, 0.6)",
@@ -1349,12 +1409,27 @@ export function TradingDashboard() {
                         {new Date(pending.event_time).toLocaleString()}
                       </span>
                     )}
+                    <button
+                      onClick={() => openEarningsChart(pending.symbol, pending.instrument_key || undefined)}
+                      title="Open price chart"
+                      style={{
+                        padding: "3px 9px", background: "var(--accent-bg)",
+                        border: "1px solid var(--accent-border)", borderRadius: "5px",
+                        color: "var(--accent)", fontSize: "10px", fontWeight: 700,
+                        cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px",
+                      }}>
+                      <TrendingUp size={11} /> Chart
+                    </button>
                     {pending.attachment_url && (
                       <a href={pending.attachment_url} target="_blank" rel="noreferrer"
                          style={{ fontSize: "11px", color: "var(--accent)", display: "flex", alignItems: "center", gap: "4px" }}>
                         <ExternalLink size={12} /> Filing
                       </a>
                     )}
+                  </div>
+
+                  <div style={{ marginBottom: "10px" }}>
+                    <ResultPriceMove p={pending} quote={quote} />
                   </div>
 
                   {/* Order form */}
@@ -1417,38 +1492,76 @@ export function TradingDashboard() {
                     </button>
                   </div>
 
-                  <LifecycleStrip p={pending} />
+                  {/* One collapsed row carries the AI state, so the verdict is
+                      still visible without the five-row table pushing the next
+                      order card off screen. */}
+                  <div style={{ marginTop: "10px", paddingTop: "9px", borderTop: "1px solid var(--border-subtle)" }}>
+                    <button
+                      onClick={() => setExpandedResults(prev => ({ ...prev, [pending.id]: !prev[pending.id] }))}
+                      style={{
+                        display: "flex", alignItems: "center", gap: "8px", width: "100%",
+                        background: "transparent", border: "none", padding: 0,
+                        cursor: "pointer", textAlign: "left", flexWrap: "wrap",
+                      }}>
+                      <ChevronRight
+                        size={13}
+                        style={{
+                          color: "var(--ai)", flexShrink: 0,
+                          transform: isOpen ? "rotate(90deg)" : "none",
+                          transition: "transform 0.15s",
+                        }} />
+                      <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--ai)" }}>AI EARNINGS ANALYSIS</span>
 
-                  {/* AI analysis — runs after the order screen is shown */}
-                  <div style={{ marginTop: "12px", paddingTop: "10px", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-                    {pending.ai_status === "done" && ai ? (
-                      <div>
-                        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px", flexWrap: "wrap" }}>
-                          <Sparkles size={13} style={{ color: "var(--ai)" }} />
-                          <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--ai)" }}>AI EARNINGS ANALYSIS</span>
+                      {pending.ai_status === "done" && ai ? (
+                        <>
                           <VerdictBadge verdict={ai.ai_suggestion} />
                           {ai.extraction_ok === false && (
                             <span style={{ fontSize: "10px", color: "var(--text-muted)", fontStyle: "italic" }}>
-                              figures not extractable — no directional call
+                              figures not extractable
                             </span>
                           )}
-                        </div>
-                        <MetricsTable metrics={ai.metrics} />
-                        <ValidationNotice v={ai.validation} />
-                        <div style={{ fontSize: "11px", color: "var(--text-secondary)", lineHeight: 1.55, marginTop: "8px" }}>{ai.ai_summary}</div>
-                        {(ai.future_growth_outlook || ai.future_projected_numbers) && (
-                          <div style={{ display: "flex", flexDirection: "column", gap: "3px", marginTop: "8px", fontSize: "10px", color: "var(--text-muted)" }}>
-                            {ai.future_growth_outlook && <span><b style={{ color: "var(--text-primary)" }}>Outlook:</b> {ai.future_growth_outlook}</span>}
-                            {ai.future_projected_numbers && <span><b style={{ color: "var(--text-primary)" }}>Projected:</b> {ai.future_projected_numbers}</span>}
-                          </div>
-                        )}
-                      </div>
-                    ) : pending.ai_status === "failed" ? (
-                      <span style={{ fontSize: "11px", color: "var(--negative-strong)" }}>AI analysis failed — place the order on the filing itself.</span>
-                    ) : (
-                      <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "6px" }}>
-                        <RefreshCw size={12} className="spin" /> AI earnings analysis running…
+                          {ai.validation?.issues?.length ? (
+                            <span style={{ fontSize: "10px", color: "var(--warning)", fontWeight: 700 }}>
+                              ⚠ {ai.validation.issues.length} consistency issue{ai.validation.issues.length > 1 ? "s" : ""}
+                            </span>
+                          ) : null}
+                        </>
+                      ) : pending.ai_status === "failed" ? (
+                        <span style={{ fontSize: "10px", color: "var(--negative-strong)" }}>failed</span>
+                      ) : pending.deferred ? (
+                        <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>not analysed — after cutoff</span>
+                      ) : (
+                        <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                          <RefreshCw size={11} className="spin" /> running…
+                        </span>
+                      )}
+
+                      <span style={{ marginLeft: "auto", fontSize: "10px", color: "var(--text-faint)" }}>
+                        {isOpen ? "hide" : "details"}
                       </span>
+                    </button>
+
+                    {isOpen && (
+                      <div style={{ marginTop: "10px" }}>
+                        <LifecycleStrip p={pending} />
+                        {pending.ai_status === "done" && ai ? (
+                          <div style={{ marginTop: "8px" }}>
+                            <MetricsTable metrics={ai.metrics} />
+                            <ValidationNotice v={ai.validation} />
+                            <div style={{ fontSize: "11px", color: "var(--text-secondary)", lineHeight: 1.55, marginTop: "8px" }}>{ai.ai_summary}</div>
+                            {(ai.future_growth_outlook || ai.future_projected_numbers) && (
+                              <div style={{ display: "flex", flexDirection: "column", gap: "3px", marginTop: "8px", fontSize: "10px", color: "var(--text-muted)" }}>
+                                {ai.future_growth_outlook && <span><b style={{ color: "var(--text-primary)" }}>Outlook:</b> {ai.future_growth_outlook}</span>}
+                                {ai.future_projected_numbers && <span><b style={{ color: "var(--text-primary)" }}>Projected:</b> {ai.future_projected_numbers}</span>}
+                              </div>
+                            )}
+                          </div>
+                        ) : pending.ai_status === "failed" ? (
+                          <div style={{ fontSize: "11px", color: "var(--negative-strong)", marginTop: "8px" }}>
+                            AI analysis failed — place the order on the filing itself.
+                          </div>
+                        ) : null}
+                      </div>
                     )}
                   </div>
                 </div>

@@ -119,7 +119,8 @@ def get_ltp(instrument_key: str, symbol: str = "") -> Optional[float]:
     return None
 
 
-def _send_result_alert(ann, event, pending_id=None, instrument_key: str = "", pending=None):
+def _send_result_alert(ann, event, pending_id=None, instrument_key: str = "", pending=None,
+                       last_price=None):
     """
     Immediate Telegram alert that a result has landed, ahead of the AI verdict.
 
@@ -133,7 +134,7 @@ def _send_result_alert(ann, event, pending_id=None, instrument_key: str = "", pe
             company_name=ann.company_name,
             exchange=ann.exchange,
             title=ann.title or "Financial Results",
-            last_price=get_ltp(instrument_key, ann.symbol),
+            last_price=last_price if last_price is not None else get_ltp(instrument_key, ann.symbol),
             url=ann.url,
             pending_id=pending_id,
             tracking_ref=getattr(pending, "tracking_ref", None),
@@ -303,13 +304,18 @@ def route_financial_result(db: Session, ann, event, dedup_key: str):
         f"🔔 [RESULT] {symbol} ({pending.tracking_ref}) is NOT armed — order prompt raised (#{pending.id})."
     )
 
-    # Alert now that the pending row exists, so the inline buttons can address it.
+    # One quote call serves both the alert and the baseline for "move since the
+    # result landed", so this costs nothing extra on the ingest path.
+    ltp_at_announcement = get_ltp(pending.instrument_key, symbol)
+
     _send_result_alert(
         ann, event, pending_id=pending.id,
         instrument_key=pending.instrument_key, pending=pending,
+        last_price=ltp_at_announcement,
     )
     try:
         pending.alert_sent_at = datetime.utcnow()
+        pending.price_at_announcement = ltp_at_announcement
         db.commit()
     except Exception:
         db.rollback()

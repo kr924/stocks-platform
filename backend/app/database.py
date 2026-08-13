@@ -371,6 +371,10 @@ class PendingResultOrder(Base):
     exchange = Column(String(10), nullable=False)      # nse | bse
     # Trading date (IST) this result belongs to, for the daily reset
     trade_date = Column(String(20), index=True, nullable=True)
+    # Last traded price at the moment the result was captured. The move since
+    # then is the number that actually matters on this panel — the market has
+    # usually already reacted by the time you look.
+    price_at_announcement = Column(Float, nullable=True)
     title = Column(Text, nullable=False)
     description = Column(Text, nullable=True)
     attachment_url = Column(Text, nullable=True)
@@ -468,6 +472,7 @@ def init_db():
         _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN ai_requested_at DATETIME")
         _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN ai_completed_at DATETIME")
         _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN validation_json TEXT")
+        _safe_alter(conn, "ALTER TABLE pending_result_orders ADD COLUMN price_at_announcement FLOAT")
 
 
 def _safe_alter(conn, sql: str):

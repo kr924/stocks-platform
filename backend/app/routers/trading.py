@@ -607,6 +607,7 @@ def _serialize_pending(p: PendingResultOrder, ai_log: Optional[TradeAILog] = Non
         "tracking_ref": p.tracking_ref,
         "trade_date": p.trade_date,
         "deferred": bool(p.deferred),
+        "price_at_announcement": p.price_at_announcement,
         # Lifecycle: announced -> ingested -> alerted -> AI sent -> AI received
         "announced_at": p.event_time.isoformat() if p.event_time else None,
         "ingested_at": p.created_at.isoformat() if p.created_at else None,
