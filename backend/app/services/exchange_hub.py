@@ -21,6 +21,7 @@ import json
 import logging
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
@@ -396,18 +397,23 @@ def poll_exchange_announcements(db: Session) -> Dict[str, int]:
     except Exception as e:
         logger.debug(f"Pending-result expiry skipped: {e}")
 
-    # ── 1. Fetch both exchanges ──
-    try:
-        raw_nse = _fetch_nse_raw()
-    except Exception as e:
-        logger.error(f"NSE announcement fetch failed: {e}")
-        raw_nse = []
-
-    try:
-        raw_bse = _fetch_bse_raw()
-    except Exception as e:
-        logger.error(f"BSE announcement fetch failed: {e}")
-        raw_bse = []
+    # ── 1. Fetch both exchanges, concurrently ──
+    # Measured on the VM: NSE ~72ms, BSE ~13ms. Run sequentially that is the sum;
+    # run together it is the slower of the two. A filing can appear on either
+    # exchange, so waiting for BSE before asking NSE delays every NSE result by
+    # the BSE round trip for no reason.
+    raw_nse, raw_bse = [], []
+    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="exch-fetch") as pool:
+        nse_future = pool.submit(_fetch_nse_raw)
+        bse_future = pool.submit(_fetch_bse_raw)
+        try:
+            raw_nse = nse_future.result()
+        except Exception as e:
+            logger.error(f"NSE announcement fetch failed: {e}")
+        try:
+            raw_bse = bse_future.result()
+        except Exception as e:
+            logger.error(f"BSE announcement fetch failed: {e}")
 
     announcements: List[Announcement] = []
     for raw in raw_nse:

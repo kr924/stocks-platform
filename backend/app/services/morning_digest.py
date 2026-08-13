@@ -159,11 +159,18 @@ def _build_rows(db: Session, pendings: List[PendingResultOrder]) -> List[dict]:
         # must not both render as NA — one is a policy decision, the other a
         # judgement about the filing.
         analysed = bool(log and log.ai_completed_at)
+        validation = None
+        if log and getattr(log, "validation_json", None):
+            try:
+                validation = json.loads(log.validation_json)
+            except Exception:
+                validation = None
         rows.append({
             "pending": p,
             "log": log,
             "screener": screener,
             "comparison": comparison,
+            "validation": validation,
             "analysed": analysed,
             "verdict": ((log.ai_suggestion if log else None) or "NA") if analysed else "NOT ANALYSED",
         })
@@ -328,6 +335,15 @@ def build_and_publish(db: Session, for_date: Optional[str] = None) -> dict:
     with open(path, "w", encoding="utf-8") as f:
         f.write(render_html(rows, for_date))
 
+    # The PDF is what actually reaches Telegram; the page is for the browser.
+    pdf_path = os.path.join(_DIGEST_DIR, f"digest_{for_date}.pdf")
+    try:
+        from app.services.digest_pdf import build_digest_pdf
+        build_digest_pdf(rows, for_date, pdf_path)
+    except Exception as e:
+        logger.error(f"[DIGEST] PDF generation failed: {e}")
+        pdf_path = None
+
     stamp = datetime.utcnow()
     for p in pendings:
         p.digest_sent_at = stamp
@@ -339,6 +355,7 @@ def build_and_publish(db: Session, for_date: Optional[str] = None) -> dict:
     logger.info(f"[DIGEST] Published {len(rows)} companies to {path}")
     return {
         "path": path,
+        "pdf_path": pdf_path,
         "url_path": f"/api/trading/digest/{for_date}",
         "count": len(rows),
         "date": for_date,
@@ -393,6 +410,23 @@ def send_digest_alert(result: dict, public_base_url: str = "") -> bool:
         + (f"⚠ <b>{mismatches}</b> with figures that disagree with Screener.\n" if mismatches else "")
         + "\n" + "\n".join(lines) + link
     )
+    # Send the PDF first: it carries every company in full, where a text message
+    # would be cut off partway through the list.
+    pdf_path = result.get("pdf_path")
+    if pdf_path and os.path.exists(pdf_path):
+        from app.services.telegram_notifier import send_document
+        caption = (
+            f"<b>📋 Results digest — {_esc(result['date'])}</b>\n"
+            f"{len(rows)} compan{'y' if len(rows) == 1 else 'ies'} · "
+            f"{len(analysed)} analysed intraday · {len(unanalysed)} after cutoff"
+        )
+        if send_document(pdf_path, caption=caption,
+                         filename=f"results-digest-{result['date']}.pdf"):
+            # The summary still follows, for the at-a-glance counts and refs.
+            send_message(message)
+            return True
+        logger.warning("[DIGEST] PDF send failed; falling back to a text summary.")
+
     return send_message(message) is not None
 
 

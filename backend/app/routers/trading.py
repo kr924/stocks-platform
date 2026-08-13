@@ -842,6 +842,90 @@ def list_digests():
     return {"digests": [{"date": d, "url": f"/api/trading/digest/{d}"} for d in dates]}
 
 
+@router.get("/digest/{for_date}/data")
+def get_digest_data(for_date: str, db: Session = Depends(get_db)):
+    """
+    The digest as JSON, for the dashboard panel.
+
+    Serves the same rows the page and the PDF are built from, so the three views
+    cannot drift apart.
+    """
+    import json as _json
+    from app.services.morning_digest import _build_rows, collect_for_digest
+
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", for_date):
+        raise HTTPException(status_code=400, detail="Date must be YYYY-MM-DD")
+
+    # A past date reads back what was reported that day; today builds live.
+    q = db.query(PendingResultOrder).filter(PendingResultOrder.trade_date == for_date)
+    pendings = q.order_by(PendingResultOrder.event_time.asc()).all()
+    if not pendings:
+        pendings = collect_for_digest(db)
+        pendings = [p for p in pendings
+                    if p.event_time and p.event_time.strftime("%Y-%m-%d") == for_date]
+
+    rows = _build_rows(db, pendings)
+    out = []
+    for r in rows:
+        p, log = r["pending"], r.get("log")
+        out.append({
+            "symbol": p.symbol,
+            "company_name": p.company_name,
+            "exchange": p.exchange,
+            "tracking_ref": p.tracking_ref,
+            "announced_at": p.event_time.isoformat() if p.event_time else None,
+            "ingested_at": p.created_at.isoformat() if p.created_at else None,
+            "ai_requested_at": p.ai_requested_at.isoformat() if p.ai_requested_at else None,
+            "ai_completed_at": p.ai_completed_at.isoformat() if p.ai_completed_at else None,
+            "deferred": bool(p.deferred),
+            "analysed": r["analysed"],
+            "verdict": r["verdict"],
+            "title": p.title,
+            "attachment_url": p.attachment_url,
+            "screener": {
+                "ok": r["screener"].get("ok"),
+                "quarter": r["screener"].get("quarter"),
+                "source_url": r["screener"].get("source_url"),
+                "error": r["screener"].get("error"),
+            },
+            "comparison": r["comparison"],
+            "validation": r.get("validation"),
+            "ai_summary": log.ai_summary if log else None,
+            "future_growth_outlook": log.future_growth_outlook if log else None,
+            "future_projected_numbers": log.future_projected_numbers if log else None,
+            "broker_estimates": log.broker_estimates if log else None,
+        })
+    return {
+        "date": for_date,
+        "total": len(out),
+        "analysed": sum(1 for r in out if r["analysed"]),
+        "companies": out,
+    }
+
+
+@router.get("/digest/{for_date}/pdf")
+def get_digest_pdf(for_date: str):
+    """Download the digest PDF, rebuilding it if the file is not on disk."""
+    import os
+    from fastapi.responses import FileResponse
+    from app.services.morning_digest import _DIGEST_DIR, build_and_publish
+
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", for_date):
+        raise HTTPException(status_code=400, detail="Date must be YYYY-MM-DD")
+
+    path = os.path.join(_DIGEST_DIR, f"digest_{for_date}.pdf")
+    if not os.path.exists(path):
+        db = next(get_db())
+        try:
+            build_and_publish(db, for_date=for_date)
+        finally:
+            db.close()
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail=f"No digest PDF for {for_date}")
+    return FileResponse(path, media_type="application/pdf",
+                        filename=f"results-digest-{for_date}.pdf")
+
+
 @router.post("/digest/run")
 def run_digest_now(
     analyse_first: bool = Query(False, description="Run any deferred analyses before building"),

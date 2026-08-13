@@ -14,3 +14,5 @@ lxml==5.2.2
 PyPDF2==3.0.1
 python-dateutil==2.9.0.post0
 brotli==1.1.0
+# Digest PDF generation (pure Python — no system libs needed in the slim image)
+reportlab==4.2.2

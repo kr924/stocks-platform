@@ -342,6 +342,52 @@ def send_earnings_verdict_alert(
     return send_message(message, reply_markup=markup) is not None
 
 
+def send_document(path: str, caption: str = "", filename: str = None) -> bool:
+    """
+    Upload a file to the chat.
+
+    Telegram silently truncates a message past ~4096 characters, so a digest
+    covering a day of results cannot be delivered as text. A PDF sent this way
+    renders inline in the client and carries the whole thing.
+    """
+    bot_token, chat_id = _credentials()
+    if not bot_token or not chat_id:
+        logger.debug("Telegram document skipped: bot token or chat id not configured.")
+        return False
+    if not os.path.exists(path):
+        logger.error(f"Telegram document missing on disk: {path}")
+        return False
+
+    # Bots may upload at most 50MB.
+    size = os.path.getsize(path)
+    if size > 50 * 1024 * 1024:
+        logger.error(f"Telegram document too large ({size / 1e6:.1f}MB): {path}")
+        return False
+
+    try:
+        with open(path, "rb") as f:
+            res = requests.post(
+                _API.format(token=bot_token, method="sendDocument"),
+                data={
+                    "chat_id": chat_id,
+                    # Caption has its own 1024-char limit, separate from messages.
+                    "caption": caption[:1024],
+                    "parse_mode": "HTML",
+                },
+                files={"document": (filename or os.path.basename(path), f, "application/pdf")},
+                timeout=120,
+            )
+        data = res.json()
+        if data.get("ok"):
+            logger.info(f"📎 [TELEGRAM DOC SENT]: {os.path.basename(path)} ({size / 1024:.0f}KB)")
+            return True
+        logger.warning(f"Telegram sendDocument rejected: {str(data)[:200]}")
+        return False
+    except Exception as e:
+        logger.error(f"Telegram sendDocument failed: {e}")
+        return False
+
+
 # ─── Webhook registration ───────────────────────────────────────────────────
 
 def set_webhook(public_url: str) -> bool:

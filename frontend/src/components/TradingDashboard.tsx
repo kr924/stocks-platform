@@ -30,6 +30,31 @@ const API_BASE = import.meta.env.VITE_API_BASE || (window.location.hostname === 
  * A financial result that landed for a stock with no armed config.
  * The user is prompted to place an order; AI analysis follows.
  */
+interface DigestCompany {
+  symbol: string;
+  company_name: string | null;
+  exchange: string;
+  tracking_ref: string | null;
+  announced_at: string | null;
+  ai_requested_at: string | null;
+  ai_completed_at: string | null;
+  deferred: boolean;
+  analysed: boolean;
+  verdict: string;
+  title: string;
+  attachment_url: string | null;
+  screener: { ok: boolean; quarter: string | null; source_url: string | null; error: string | null };
+  comparison: {
+    label: string; ai_text: string; actual: number | null;
+    ai_yoy: string; actual_yoy: number | null;
+    match: boolean | null; diff_pct: number | null;
+  }[];
+  ai_summary: string | null;
+  future_growth_outlook: string | null;
+  future_projected_numbers: string | null;
+  broker_estimates: string | null;
+}
+
 interface MetricCell {
   current_qtr: string;
   last_year_same_qtr: string;
@@ -339,6 +364,9 @@ export function TradingDashboard() {
   const [aiLogSearch, setAiLogSearch] = useState("");
   const [aiLogDateFrom, setAiLogDateFrom] = useState("");
   const [aiLogDateTo, setAiLogDateTo] = useState("");
+  const [digestDate, setDigestDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [digest, setDigest] = useState<{ date: string; total: number; analysed: number; companies: DigestCompany[] } | null>(null);
+  const [digestLoading, setDigestLoading] = useState(false);
   // Per-prompt order form state, keyed by pending-result id
   const [resultOrderForm, setResultOrderForm] = useState<Record<number, {
     quantity: number; order_type: string; limit_price: string;
@@ -567,6 +595,24 @@ export function TradingDashboard() {
       (p.title || "").toLowerCase().includes(q)
     );
   }, [pendingResults, pendingSearch]);
+
+  // The digest is fetched on demand rather than on the 3s poll: it hits
+  // screener.in per company, so refetching it every few seconds would hammer
+  // an external site for data that only changes once a day.
+  const fetchDigest = async (date: string) => {
+    setDigestLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/trading/digest/${date}/data`);
+      setDigest(res.ok ? await res.json() : null);
+    } catch (err) {
+      console.error("Error loading digest:", err);
+      setDigest(null);
+    } finally {
+      setDigestLoading(false);
+    }
+  };
+
+  useEffect(() => { fetchDigest(digestDate); }, [digestDate]);
 
   // Fetch initial & fast status data
   const fetchData = async () => {
@@ -1411,6 +1457,121 @@ export function TradingDashboard() {
           </div>
         </div>
       )}
+
+      {/* RESULTS DIGEST — the same data as the 8am alert, any date */}
+      <div style={{
+        background: "var(--surface-1)",
+        border: "1px solid var(--border-default)",
+        borderRadius: "14px",
+        padding: "18px",
+        marginBottom: "20px"
+      }}>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "14px" }}>
+          <h3 style={{ fontSize: "15px", fontWeight: 700, color: "var(--info)", display: "flex", alignItems: "center", gap: "8px", margin: 0 }}>
+            <Calendar size={18} /> Results Digest
+            {digest && ` — ${digest.total} compan${digest.total === 1 ? "y" : "ies"}, ${digest.analysed} analysed`}
+          </h3>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <input type="date" value={digestDate} onChange={e => setDigestDate(e.target.value)}
+              style={{ padding: "6px 10px", fontSize: "12px", background: "var(--bg-sunken)", border: "1px solid var(--border-default)", borderRadius: "6px", color: "var(--text-primary)" }} />
+            <button onClick={() => fetchDigest(digestDate)} disabled={digestLoading}
+              style={{ padding: "6px 12px", background: "var(--accent-bg)", border: "1px solid var(--accent-border)", borderRadius: "6px", color: "var(--accent)", fontSize: "11px", fontWeight: 700, cursor: digestLoading ? "wait" : "pointer" }}>
+              {digestLoading ? "Loading…" : "Refresh"}
+            </button>
+            <a href={`${API_BASE}/api/trading/digest/${digestDate}/pdf`} target="_blank" rel="noreferrer"
+              style={{ padding: "6px 12px", background: "transparent", border: "1px solid var(--border-default)", borderRadius: "6px", color: "var(--text-secondary)", fontSize: "11px", fontWeight: 600, textDecoration: "none" }}>
+              PDF
+            </a>
+          </div>
+        </div>
+
+        <div style={{ maxHeight: "620px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "12px", paddingRight: "6px" }}>
+          {digestLoading && <div style={{ padding: "24px", textAlign: "center", color: "var(--text-muted)", fontSize: "12px" }}>Loading digest…</div>}
+          {!digestLoading && (!digest || digest.companies.length === 0) && (
+            <div style={{ padding: "24px", textAlign: "center", color: "var(--text-muted)", fontSize: "12px" }}>
+              No results announced on {digestDate}.
+            </div>
+          )}
+          {!digestLoading && digest?.companies.map((c, ci) => (
+            <div key={`${c.symbol}-${ci}`} style={{ background: "var(--bg-sunken)", border: "1px solid var(--border-subtle)", borderRadius: "10px", padding: "14px" }}>
+              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "10px", marginBottom: "6px" }}>
+                <span style={{ fontSize: "15px", fontWeight: 800, color: "var(--text-primary)" }}>{c.symbol}</span>
+                {c.company_name && <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>{c.company_name}</span>}
+                <span style={{
+                  fontSize: "10px", fontWeight: 700, padding: "2px 7px", borderRadius: "4px",
+                  color: c.exchange === "nse" ? "var(--accent)" : "var(--ai)",
+                  background: c.exchange === "nse" ? "var(--accent-bg)" : "var(--ai-bg)",
+                }}>{c.exchange.toUpperCase()}</span>
+                <VerdictBadge verdict={c.analysed ? c.verdict : "NA"} />
+                {!c.analysed && (
+                  <span title="Filed after the 15:25 cutoff, so no AI was run — Screener is the source here"
+                    style={{ fontSize: "10px", fontWeight: 700, color: "var(--warning)", background: "var(--warning-bg)", padding: "2px 7px", borderRadius: "4px" }}>
+                    NOT ANALYSED
+                  </span>
+                )}
+                {c.tracking_ref && (
+                  <span style={{ fontSize: "10px", fontFamily: "ui-monospace, Menlo, monospace", color: "var(--text-muted)", background: "var(--surface-2)", padding: "2px 6px", borderRadius: "4px" }}>{c.tracking_ref}</span>
+                )}
+              </div>
+
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "14px", fontSize: "10px", color: "var(--text-muted)", marginBottom: "8px" }}>
+                <span><b style={{ color: "var(--text-secondary)" }}>Announced</b> {c.announced_at ? new Date(c.announced_at + "Z").toLocaleString() : "—"}</span>
+                {c.analysed && <span><b style={{ color: "var(--text-secondary)" }}>AI</b> {clockTime(c.ai_requested_at)} → {clockTime(c.ai_completed_at)}</span>}
+                {c.attachment_url && <a href={c.attachment_url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: "4px" }}><ExternalLink size={11} /> Filing</a>}
+              </div>
+
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ borderCollapse: "collapse", fontSize: "11px", width: "100%", minWidth: "520px" }}>
+                  <thead>
+                    <tr>
+                      {["", "Our AI", `Screener${c.screener.quarter ? ` (${c.screener.quarter})` : ""}`, "Variance", "AI YoY", "Screener YoY"].map((h, i) => (
+                        <th key={i} style={{ textAlign: i === 0 ? "left" : "right", padding: "4px 8px", color: "var(--text-muted)", fontWeight: 600, fontSize: "10px", borderBottom: "1px solid var(--border-subtle)", whiteSpace: "nowrap" }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {c.comparison.map((row, ri) => {
+                      const na = (v: any) => !v || String(v).toUpperCase() === "NA";
+                      return (
+                        <tr key={ri}>
+                          <td style={{ padding: "4px 8px", fontWeight: 600, color: "var(--text-primary)", whiteSpace: "nowrap" }}>{row.label}</td>
+                          <td style={{ padding: "4px 8px", textAlign: "right", color: !c.analysed || na(row.ai_text) ? "var(--text-faint)" : "var(--text-primary)", fontStyle: !c.analysed || na(row.ai_text) ? "italic" : "normal", whiteSpace: "nowrap" }}>
+                            {!c.analysed ? "not analysed" : (row.ai_text || "NA")}
+                          </td>
+                          <td style={{ padding: "4px 8px", textAlign: "right", color: row.actual === null ? "var(--text-faint)" : "var(--text-primary)", whiteSpace: "nowrap" }}>
+                            {row.actual === null ? "—" : row.actual.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                          <td style={{ padding: "4px 8px", textAlign: "right", whiteSpace: "nowrap", color: row.match === true ? "var(--positive)" : row.match === false ? "var(--negative)" : "var(--text-faint)" }}>
+                            {row.match === true ? "match" : row.match === false ? `${row.diff_pct! > 0 ? "+" : ""}${row.diff_pct}%` : "—"}
+                          </td>
+                          <td style={{ padding: "4px 8px", textAlign: "right", color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{c.analysed ? (row.ai_yoy || "NA") : "—"}</td>
+                          <td style={{ padding: "4px 8px", textAlign: "right", color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{row.actual_yoy === null ? "—" : `${row.actual_yoy}%`}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {c.analysed && c.ai_summary && (
+                <div style={{ fontSize: "11px", color: "var(--text-secondary)", lineHeight: 1.55, marginTop: "8px" }}>{c.ai_summary}</div>
+              )}
+              {c.analysed && (c.future_growth_outlook || c.future_projected_numbers || c.broker_estimates) && (
+                <div style={{ display: "flex", flexDirection: "column", gap: "3px", marginTop: "6px", fontSize: "10px", color: "var(--text-muted)" }}>
+                  {c.future_growth_outlook && c.future_growth_outlook !== "NA" && <span><b style={{ color: "var(--text-secondary)" }}>Outlook:</b> {c.future_growth_outlook}</span>}
+                  {c.future_projected_numbers && c.future_projected_numbers !== "NA" && <span><b style={{ color: "var(--text-secondary)" }}>Projected:</b> {c.future_projected_numbers}</span>}
+                  {c.broker_estimates && !["NA", "N/A"].includes(c.broker_estimates) && <span><b style={{ color: "var(--text-secondary)" }}>Broker:</b> {c.broker_estimates}</span>}
+                </div>
+              )}
+              {c.screener.source_url && (
+                <div style={{ fontSize: "10px", color: "var(--text-faint)", marginTop: "6px" }}>
+                  <a href={c.screener.source_url} target="_blank" rel="noreferrer" style={{ color: "var(--text-muted)" }}>screener.in</a>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
 
       {/* UPCOMING EARNINGS CALENDAR SECTION */}
       <div style={{
