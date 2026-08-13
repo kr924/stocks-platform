@@ -73,14 +73,20 @@ def make_tracking_ref(symbol: str, when: datetime = None) -> str:
 
 
 def _resolve_instrument_key(symbol: str) -> str:
-    """Map an NSE symbol to its Upstox instrument key, falling back to a synthetic one."""
+    """
+    Map a symbol to its Upstox instrument key, NSE first then BSE.
+
+    A BSE-only scrip has no NSE key at all, and the synthetic `NSE_EQ|<SYMBOL>`
+    we used to fall back to is not a key any endpoint accepts — it cost those
+    stocks their live price and their chart.
+    """
     if not symbol:
         return ""
     try:
-        from app.main import get_nse_equities
-        for eq in get_nse_equities():
-            if (eq.get("symbol") or "").upper() == symbol.upper():
-                return eq.get("key") or f"NSE_EQ|{symbol.upper()}"
+        from app.main import resolve_instrument_keys
+        keys = resolve_instrument_keys(symbol)
+        if keys:
+            return keys[0]
     except Exception:
         pass
     return f"NSE_EQ|{symbol.upper()}"

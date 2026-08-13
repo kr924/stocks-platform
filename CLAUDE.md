@@ -87,6 +87,14 @@ than `CATEGORYNAME`.
 current endpoint returns no ISIN and the NSE dump truncates company names, so
 name similarity fails in both directions.
 
+**Instrument keys must be resolved, never synthesised.** `NSE_EQ|<SYMBOL>` is
+not a key Upstox accepts, and a BSE-only scrip has no NSE listing to fall back
+on. Worse, one malformed key fails the *whole* batch, so a single unknown scrip
+blanked every price on the screen. `main.py::resolve_instrument_keys` indexes
+both exchange dumps — by trading symbol and by BSE scrip code — and returns NSE
+first, BSE second. Unresolvable symbols are dropped from the request and read
+"no live quote" in the UI.
+
 **A "success-shaped failure" is the dangerous kind.** The BSE proxy returned
 HTTP 200 "No Record Found!" for every query and starved the feed silently. Empty
 responses now re-check the origin.

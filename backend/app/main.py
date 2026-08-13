@@ -487,22 +487,27 @@ def get_quotes_by_symbols(
     db: Session = Depends(get_db),
     feed: BaseMarketFeed = Depends(get_active_feed)
 ):
-    """Get real-time Upstox quotes for a comma-separated list of symbols without requiring them to be in watchlist DB."""
+    """
+    Real-time quotes for a comma-separated list of symbols, without requiring
+    them to be in the watchlist DB.
+
+    Symbols that resolve to no listing on either exchange are dropped rather
+    than guessed at: Upstox rejects the whole batch when one key is malformed,
+    so a single unknown scrip would blank every price on the screen.
+    """
     sym_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
     if not sym_list:
         return {}
 
-    eqs = get_nse_equities()
-    sym_to_key = {item["symbol"].upper(): item["key"] for item in eqs if item.get("symbol") and item.get("key")}
-
     keys = []
     key_to_sym = {}
+    key_rank = {}
     for s in sym_list:
-        k = sym_to_key.get(s) or f"NSE_EQ|{s}"
-        keys.append(k)
-        keys.append(k.replace("|", ":"))
-        key_to_sym[k] = s
-        key_to_sym[k.replace("|", ":")] = s
+        for rank, k in enumerate(resolve_instrument_keys(s)):
+            keys.append(k)
+            for variant in (k, k.replace("|", ":")):
+                key_to_sym[variant] = s
+                key_rank[variant] = rank
         key_to_sym[s] = s
 
     if not keys:
@@ -517,29 +522,45 @@ def get_quotes_by_symbols(
                 sym = k.split(":")[-1]
             if not sym and "|" in k:
                 sym = k.split("|")[-1]
-            if sym:
-                last_price = q.get("last_price", 0.0)
-                ohlc = q.get("ohlc", {})
-                prev_close = q.get("close") or ohlc.get("close", 0.0)
-                day_high = ohlc.get("high", 0.0) or q.get("high", 0.0)
-                day_low = ohlc.get("low", 0.0) or q.get("low", 0.0)
-                pct_change = 0.0
-                if prev_close > 0 and last_price > 0:
-                    pct_change = ((last_price - prev_close) / prev_close) * 100
+            if not sym:
+                continue
 
-                result[sym.upper()] = {
-                    "symbol": sym.upper(),
-                    "instrument_key": k,
-                    "last_price": last_price,
-                    "change": round(pct_change, 2),
-                    "close": prev_close,
-                    "high": day_high,
-                    "low": day_low,
-                    "depth_buy_pct": q.get("depth_buy_pct", 50.0),
-                    "depth_sell_pct": q.get("depth_sell_pct", 50.0),
-                    "total_buy_qty": q.get("total_buy_qty", 0),
-                    "total_sell_qty": q.get("total_sell_qty", 0)
-                }
+            last_price = q.get("last_price", 0.0)
+            ohlc = q.get("ohlc", {})
+            prev_close = q.get("close") or ohlc.get("close", 0.0)
+            day_high = ohlc.get("high", 0.0) or q.get("high", 0.0)
+            day_low = ohlc.get("low", 0.0) or q.get("low", 0.0)
+            pct_change = 0.0
+            if prev_close > 0 and last_price > 0:
+                pct_change = ((last_price - prev_close) / prev_close) * 100
+
+            # A dually-listed scrip comes back once per exchange. Prefer the
+            # book that actually traded, and NSE on a tie — it is the deeper one.
+            rank = key_rank.get(k, key_rank.get(k.replace(":", "|"), 99))
+            existing = result.get(sym.upper())
+            if existing:
+                traded, was_traded = last_price > 0, existing["last_price"] > 0
+                if was_traded and not traded:
+                    continue
+                if was_traded == traded and rank >= existing["_rank"]:
+                    continue
+
+            result[sym.upper()] = {
+                "_rank": rank,
+                "symbol": sym.upper(),
+                "instrument_key": k,
+                "last_price": last_price,
+                "change": round(pct_change, 2),
+                "close": prev_close,
+                "high": day_high,
+                "low": day_low,
+                "depth_buy_pct": q.get("depth_buy_pct", 50.0),
+                "depth_sell_pct": q.get("depth_sell_pct", 50.0),
+                "total_buy_qty": q.get("total_buy_qty", 0),
+                "total_sell_qty": q.get("total_sell_qty", 0)
+            }
+        for row in result.values():
+            row.pop("_rank", None)
         return result
     except Exception as e:
         print(f"Error in quotes-by-symbols: {e}")
@@ -868,6 +889,94 @@ def get_nse_equities():
         
     # Fallback to DEFAULT_NIFTY_50
     return [{"key": x["key"], "symbol": x["symbol"], "name": x["name"]} for x in DEFAULT_NIFTY_50]
+
+
+_bse_equities_cache = None
+
+# BSE marks the trading group in `instrument_type` (A/B/T/X/…) rather than "EQ",
+# so equities are selected by segment. F and G are debt and government paper.
+_BSE_NON_EQUITY_GROUPS = {"F", "G"}
+
+
+def get_bse_equities():
+    """
+    BSE equity instruments, keyed the way Upstox expects (`BSE_EQ|<ISIN>`).
+
+    Plenty of small caps file results with BSE only and have no NSE listing at
+    all. Without this map their quote request is built from a symbol NSE has
+    never heard of, and the panel shows no price.
+    """
+    global _bse_equities_cache
+    if _bse_equities_cache is not None:
+        return _bse_equities_cache
+
+    url = "https://assets.upstox.com/market-quote/instruments/exchange/BSE.json.gz"
+    try:
+        res = requests.get(url, timeout=10)
+        if res.status_code == 200:
+            compressed_file = io.BytesIO(res.content)
+            with gzip.GzipFile(fileobj=compressed_file) as f:
+                data = json.load(f)
+            eq_keys = []
+            for item in data:
+                key = item.get("instrument_key", "")
+                if not key.startswith("BSE_EQ|"):
+                    continue
+                if item.get("instrument_type") in _BSE_NON_EQUITY_GROUPS:
+                    continue
+                eq_keys.append({
+                    "key": key,
+                    "symbol": item.get("trading_symbol", ""),
+                    "name": item.get("name", ""),
+                    "isin": item.get("isin", ""),
+                    # The scrip code. BSE filings sometimes carry it where a
+                    # ticker would go, and the registry has no row for those.
+                    "token": str(item.get("exchange_token") or ""),
+                })
+            if eq_keys:
+                _bse_equities_cache = eq_keys
+                return _bse_equities_cache
+    except Exception as e:
+        print(f"Error fetching BSE instruments: {e}")
+
+    return []
+
+
+_symbol_key_index: Optional[Dict[str, List[str]]] = None
+
+
+def _get_symbol_key_index() -> Dict[str, List[str]]:
+    """Symbol → instrument keys, NSE first. Built once; the panels resolve
+    hundreds of symbols per poll and a linear scan of both dumps does not."""
+    global _symbol_key_index
+    if _symbol_key_index is not None:
+        return _symbol_key_index
+
+    index: Dict[str, List[str]] = {}
+    for eqs in (get_nse_equities(), get_bse_equities()):
+        for eq in eqs:
+            key = eq.get("key")
+            if not key:
+                continue
+            for handle in ((eq.get("symbol") or "").upper(), eq.get("token") or ""):
+                if handle and key not in index.setdefault(handle, []):
+                    index[handle].append(key)
+    if index:
+        _symbol_key_index = index
+    return index
+
+
+def resolve_instrument_keys(symbol: str) -> List[str]:
+    """
+    Every Upstox key a symbol could trade under, NSE first.
+
+    NSE leads because it is the more liquid book, but a BSE-only scrip must
+    still resolve to something real — a synthesised `NSE_EQ|<SYMBOL>` is not a
+    valid key and costs the whole batch, not just that one row.
+    """
+    if not symbol:
+        return []
+    return list(_get_symbol_key_index().get(symbol.upper(), []))
 
 
 def resolve_stock_info(instrument_key: str, db: Session) -> tuple:

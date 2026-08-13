@@ -72,6 +72,7 @@ interface PendingResult {
   tracking_ref: string | null;
   trade_date: string | null;
   deferred?: boolean;
+  price_at_announcement: number | null;
   announced_at: string | null;
   ingested_at: string | null;
   alert_sent_at: string | null;
@@ -135,6 +136,15 @@ interface TradeOrder {
   filled_at: string | null;
 }
 
+/** Order-book quantity in Indian notation, as the tracker writes it. */
+const fmtQty = (qty: number): string => {
+  if (!qty || qty <= 0) return "0";
+  if (qty >= 10000000) return `${(qty / 10000000).toFixed(2)}Cr`;
+  if (qty >= 100000) return `${(qty / 100000).toFixed(2)}L`;
+  if (qty >= 1000) return `${(qty / 1000).toFixed(1)}K`;
+  return qty.toString();
+};
+
 // Row order is fixed so the grid reads the same everywhere it appears.
 const METRIC_ROWS: { key: string; label: string }[] = [
   { key: "revenue", label: "Revenue" },
@@ -188,51 +198,153 @@ interface TradeAILog {
   validation?: { issues: string[]; hard_failures: number; reconciled: number; trustworthy: boolean } | null;
 }
 
+/** One labelled readout in the quote strip, matching the tracker's column head. */
+function QuoteCell({ label, title, children }: { label: string; title?: string; children: React.ReactNode }) {
+  return (
+    <span title={title} style={{ display: "flex", flexDirection: "column", lineHeight: 1.15, gap: "2px" }}>
+      <span style={{ fontSize: "9px", color: "var(--text-faint)", letterSpacing: "0.3px", whiteSpace: "nowrap" }}>{label}</span>
+      {children}
+    </span>
+  );
+}
+
+const pctTone = (v: number | null | undefined) =>
+  v == null ? "var(--text-faint)" : v > 0 ? "var(--positive)" : v < 0 ? "var(--negative)" : "var(--text-secondary)";
+const pctText = (v: number | null | undefined) =>
+  v == null ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(2)}%`;
+const rupees = (v: number | null | undefined) =>
+  !v || v <= 0 ? "—" : `₹${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
 /**
- * Live price and how far the stock has moved since the result landed.
+ * The stock tracker's watchlist readout, on a result prompt.
  *
- * The move since announcement is the number that decides whether there is still
- * a trade here — by the time a result reaches this panel the market has often
- * already repriced, and the day's change from the previous close does not show
- * that. Falls back to the day's change when no announcement price was captured.
+ * Same columns and same arithmetic as the watchlist table — LTP, day change,
+ * previous close, day high, the composite buy/sell split, order-book
+ * quantities and the 2-minute signal — so a stock reads identically wherever
+ * it appears, and the order decision does not need a second tab open.
+ *
+ * The one addition is the move since announcement, which is what decides
+ * whether there is still a trade here: by the time a result reaches this panel
+ * the market has often already repriced, and the day's change does not show it.
  */
-function ResultPriceMove({ p, quote }: { p: PendingResult; quote: any }) {
-  const ltp: number | undefined = quote?.last_price;
+function ResultQuoteStrip({ p, quote, signal, flash }: {
+  p: PendingResult;
+  quote: any;
+  signal: { recommendation: string; confidence: string; tone: "up" | "down" | "neutral"; explanation: string };
+  flash?: "up" | "down";
+}) {
+  const ltp: number = quote?.last_price || 0;
   const base = p.price_at_announcement;
   const dayChange: number | undefined = quote?.change;
+  const prevClose: number = quote?.close || 0;
+  const dayHigh: number = quote?.high || 0;
+  const hasQuote = ltp > 0;
 
-  const sinceAnnounce =
-    ltp && base ? ((ltp - base) / base) * 100 : null;
+  const sinceAnnounce = hasQuote && base ? ((ltp - base) / base) * 100 : null;
 
-  const tone = (v: number | null | undefined) =>
-    v == null ? "var(--text-faint)" : v > 0 ? "var(--positive)" : v < 0 ? "var(--negative)" : "var(--text-secondary)";
-  const fmt = (v: number | null | undefined) =>
-    v == null ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(2)}%`;
+  const buyPct = quote?.depth_buy_pct !== undefined ? Math.round(quote.depth_buy_pct) : null;
+  const buyQty: number = quote?.total_buy_qty || 0;
+  const sellQty: number = quote?.total_sell_qty || 0;
+  const totalQty = buyQty + sellQty;
+
+  const sigColor = signal.tone === "up" ? "var(--positive-strong)"
+    : signal.tone === "down" ? "var(--negative-strong)" : "var(--warning)";
+  const sigBg = signal.tone === "up" ? "rgba(63, 191, 135, 0.12)"
+    : signal.tone === "down" ? "rgba(240, 115, 111, 0.12)" : "rgba(224, 163, 62, 0.12)";
+  const sigBorder = signal.tone === "up" ? "rgba(63, 191, 135, 0.3)"
+    : signal.tone === "down" ? "rgba(240, 115, 111, 0.3)" : "rgba(224, 163, 62, 0.3)";
+
+  const num = { fontSize: "13px", fontWeight: 700, fontVariantNumeric: "tabular-nums" as const };
 
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: "14px", flexWrap: "wrap" }}>
-      <span style={{ fontSize: "15px", fontWeight: 800, color: "var(--text-primary)", fontVariantNumeric: "tabular-nums" }}>
-        {ltp ? `₹${ltp.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
+    <div style={{
+      display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap",
+      padding: "8px 10px", borderRadius: "8px",
+      background: "rgba(10, 13, 18, 0.45)", border: "1px solid rgba(255,255,255,0.06)",
+    }}>
+      <span style={{
+        fontSize: "16px", fontWeight: 800, fontVariantNumeric: "tabular-nums",
+        color: flash === "up" ? "var(--positive-strong)" : flash === "down" ? "var(--negative-strong)" : "var(--text-primary)",
+        transition: "color 0.3s",
+      }}>
+        {rupees(ltp)}
       </span>
 
-      <span title="Move since the result was announced — what is left of the reaction"
-        style={{ display: "flex", flexDirection: "column", lineHeight: 1.15 }}>
-        <span style={{ fontSize: "9px", color: "var(--text-faint)", letterSpacing: "0.3px" }}>SINCE RESULT</span>
-        <span style={{ fontSize: "13px", fontWeight: 800, color: tone(sinceAnnounce), fontVariantNumeric: "tabular-nums" }}>
-          {sinceAnnounce == null ? "—" : fmt(sinceAnnounce)}
+      <QuoteCell label="SINCE RESULT" title="Move since the result was announced — what is left of the reaction">
+        <span style={{ ...num, fontWeight: 800, color: pctTone(sinceAnnounce) }}>
+          {pctText(sinceAnnounce)}
         </span>
-      </span>
+      </QuoteCell>
 
-      <span style={{ display: "flex", flexDirection: "column", lineHeight: 1.15 }}>
-        <span style={{ fontSize: "9px", color: "var(--text-faint)", letterSpacing: "0.3px" }}>DAY</span>
-        <span style={{ fontSize: "13px", fontWeight: 700, color: tone(dayChange), fontVariantNumeric: "tabular-nums" }}>
-          {fmt(dayChange)}
+      <QuoteCell label="CHANGE">
+        <span style={{ ...num, color: pctTone(dayChange) }}>{pctText(dayChange)}</span>
+      </QuoteCell>
+
+      <QuoteCell label="PREV CLOSE">
+        <span style={{ ...num, fontWeight: 600, color: "var(--text-secondary)" }}>{rupees(prevClose)}</span>
+      </QuoteCell>
+
+      <QuoteCell label="DAY HIGH">
+        <span style={{ ...num, fontWeight: 600, color: "var(--positive-strong)" }}>{rupees(dayHigh)}</span>
+      </QuoteCell>
+
+      <QuoteCell label="SENTIMENT (B/S)" title="85% order-book depth, 15% where the price sits in the day's range — the tracker's composite">
+        {buyPct == null ? (
+          <span style={{ ...num, color: "var(--text-faint)" }}>—</span>
+        ) : (
+          <span style={{ display: "flex", flexDirection: "column", gap: "2px", width: "92px" }}>
+            <span style={{ display: "flex", justifyContent: "space-between", fontSize: "9px", fontWeight: 800 }}>
+              <span style={{ color: "var(--positive)" }}>{buyPct}% B</span>
+              <span style={{ color: "var(--negative)" }}>{100 - buyPct}% S</span>
+            </span>
+            <span style={{ height: "5px", background: "var(--negative)", borderRadius: "3px", overflow: "hidden", display: "flex" }}>
+              <span style={{ width: `${buyPct}%`, background: "var(--positive)" }} />
+            </span>
+          </span>
+        )}
+      </QuoteCell>
+
+      <QuoteCell label="BUY/SELL QTY">
+        {totalQty === 0 ? (
+          <span style={{ ...num, color: "var(--text-faint)" }}>—</span>
+        ) : (
+          <span style={{ display: "flex", flexDirection: "column", gap: "2px", width: "104px" }}>
+            <span style={{ display: "flex", justifyContent: "space-between", fontSize: "9px", fontWeight: 700 }}>
+              <span style={{ color: "var(--positive)" }}>{fmtQty(buyQty)}</span>
+              <span style={{ color: "var(--negative)" }}>{fmtQty(sellQty)}</span>
+            </span>
+            <span style={{ height: "4px", background: "var(--negative)", borderRadius: "2px", overflow: "hidden", display: "flex" }}>
+              <span style={{ width: `${(buyQty / totalQty) * 100}%`, background: "var(--positive)" }} />
+            </span>
+            <span style={{ fontSize: "8px", color: "var(--text-faint)", fontWeight: 600 }}>Σ {fmtQty(totalQty)}</span>
+          </span>
+        )}
+      </QuoteCell>
+
+      <QuoteCell label="2M SIGNAL">
+        <span
+          title={`${signal.explanation}\n\nReliability Warning:\nThis micro-trend is based on high-frequency order-book data. Useful for near-term momentum, but vulnerable to spoofing. Use as helper, not standalone decision.`}
+          style={{
+            display: "inline-flex", flexDirection: "column", alignItems: "center",
+            padding: "3px 8px", borderRadius: "6px", cursor: "help",
+            background: sigBg, border: `1px solid ${sigBorder}`, color: sigColor,
+            fontSize: "10px", fontWeight: 800, lineHeight: 1.2,
+          }}>
+          <span>{signal.recommendation}</span>
+          <span style={{ fontSize: "7px", opacity: 0.8, fontWeight: 400 }}>CONF: {signal.confidence}</span>
         </span>
-      </span>
+      </QuoteCell>
 
       {base != null && (
         <span style={{ fontSize: "10px", color: "var(--text-faint)", whiteSpace: "nowrap" }}>
-          at result ₹{base.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          at result {rupees(base)}
+        </span>
+      )}
+
+      {!hasQuote && (
+        <span title="No listing matched this symbol on either exchange, so there is no live quote to show"
+          style={{ fontSize: "10px", color: "var(--text-faint)", whiteSpace: "nowrap" }}>
+          no live quote
         </span>
       )}
     </div>
@@ -475,6 +587,17 @@ export function TradingDashboard() {
 
   // Rolling Sentiment History Ref (Last 15 updates per symbol)
   const sentimentHistoryRef = useRef<Record<string, number[]>>({});
+  // Order-book quantities over the same window — the 2m signal reads both.
+  const quantityHistoryRef = useRef<Record<string, { buy: number[]; sell: number[] }>>({});
+  // Last seen price per symbol, so a tick can be flashed green or red.
+  const prevPricesRef = useRef<Record<string, number>>({});
+  const [priceFlash, setPriceFlash] = useState<Record<string, "up" | "down">>({});
+
+  // The quote poll runs from a single interval registered once. Reading the
+  // lists through refs keeps it from fetching quotes for whatever was on screen
+  // at mount — which was nothing, so no result prompt ever had a price.
+  const pendingResultsRef = useRef<PendingResult[]>([]);
+  const upcomingEarningsRef = useRef<UpcomingEarningsItem[]>([]);
 
   // Hover Sentiment Popover State
   const [hoveredSentiment, setHoveredSentiment] = useState<{
@@ -507,20 +630,13 @@ export function TradingDashboard() {
 
     const sym = item.symbol.toUpperCase();
     const q = marketQuotesMap[sym] || {};
-    const ltp = q.last_price || item.ltp || 100;
-    const prevClose = q.close || item.prev_close || ltp;
-    const dayHigh = q.high || item.day_high || Math.max(ltp, prevClose);
-    const dayLow = q.low || (ltp > 0 ? ltp * 0.985 : prevClose * 0.985);
+    const ltp = q.last_price || 0;
+    const prevClose = q.close || 0;
+    const dayHigh = q.high || 0;
+    const dayLow = q.low || 0;
 
-    // Record into rolling sparkline history
-    if (!sentimentHistoryRef.current[sym]) {
-      sentimentHistoryRef.current[sym] = [];
-    }
-    const hist = sentimentHistoryRef.current[sym];
-    if (hist.length === 0 || hist[hist.length - 1] !== buyPct) {
-      hist.push(Math.round(buyPct));
-      if (hist.length > 15) hist.shift();
-    }
+    // The sparkline series is written by the quote poll, once per tick. Adding
+    // a point on hover too would bend the trend the popover is there to show.
 
     setHoveredSentiment({
       symbol: sym,
@@ -842,7 +958,123 @@ export function TradingDashboard() {
 
 
 
-  const fetchMarketQuotes = async () => {
+  /**
+   * Roll one tick of quotes into the per-symbol history the tracker's readouts
+   * are built from: the composite buy/sell split, the order-book quantities
+   * behind it, and a flash when the price moves.
+   *
+   * The composite weighting (85% order-book depth, 15% where the price sits in
+   * the day's range) is the same one the stock tracker uses, so a stock reads
+   * identically in both places.
+   */
+  const recordQuoteTick = (qmap: Record<string, any>) => {
+    const flashes: Record<string, "up" | "down"> = {};
+
+    Object.entries(qmap).forEach(([sym, q]: [string, any]) => {
+      const ltp = q?.last_price || 0;
+      if (ltp <= 0) return;
+
+      const prev = prevPricesRef.current[sym];
+      if (prev !== undefined && prev !== ltp) {
+        flashes[sym] = ltp > prev ? "up" : "down";
+      }
+      prevPricesRef.current[sym] = ltp;
+
+      const high = q.high || 0;
+      const low = q.low || 0;
+      const range = high - low;
+      const priceBuyPct = range > 0 ? ((ltp - low) / range) * 100 : 50;
+      const depthBuyPct = q.depth_buy_pct !== undefined ? q.depth_buy_pct : 50;
+      const compositeBuyPct = Math.round((priceBuyPct * 0.15) + (depthBuyPct * 0.85));
+
+      const hist = sentimentHistoryRef.current[sym] || [];
+      sentimentHistoryRef.current[sym] = [...hist, compositeBuyPct].slice(-15);
+
+      const qHist = quantityHistoryRef.current[sym] || { buy: [], sell: [] };
+      quantityHistoryRef.current[sym] = {
+        buy: [...qHist.buy, q.total_buy_qty || 0].slice(-15),
+        sell: [...qHist.sell, q.total_sell_qty || 0].slice(-15),
+      };
+    });
+
+    if (Object.keys(flashes).length > 0) {
+      setPriceFlash(flashes);
+      setTimeout(() => setPriceFlash({}), 800);
+    }
+  };
+
+  /**
+   * The tracker's 2-minute order-book signal, scored from the rolling history
+   * above. It reads the same as the watchlist column because it is the same
+   * calculation — level, drift, quantity dominance and quantity accumulation.
+   *
+   * Under three ticks there is no trend to read, so it says so rather than
+   * showing a confident-looking HOLD.
+   */
+  const get2MinSignal = (symbol: string, quote: any) => {
+    const sym = symbol.toUpperCase();
+    const sentHistory = sentimentHistoryRef.current[sym] || [];
+    const qtyHistory = quantityHistoryRef.current[sym] || { buy: [], sell: [] };
+
+    if (sentHistory.length < 3) {
+      return {
+        recommendation: "HOLD", confidence: "Insuff. Data", tone: "neutral" as const,
+        explanation: "Collecting real-time order book ticks to establish trend baseline (takes ~30s).",
+      };
+    }
+
+    const currentSent = sentHistory[sentHistory.length - 1];
+    const buyQty = quote?.total_buy_qty || 0;
+    const sellQty = quote?.total_sell_qty || 0;
+    const totalQty = buyQty + sellQty;
+
+    let score = 0;
+
+    if (currentSent >= 75) score += 1.5;
+    else if (currentSent >= 60) score += 1.0;
+    else if (currentSent <= 25) score -= 1.5;
+    else if (currentSent <= 40) score -= 1.0;
+
+    const sentDelta = currentSent - sentHistory[0];
+    if (sentDelta >= 15) score += 2.0;
+    else if (sentDelta >= 5) score += 1.0;
+    else if (sentDelta <= -15) score -= 2.0;
+    else if (sentDelta <= -5) score -= 1.0;
+
+    if (totalQty > 0) {
+      const buyRatio = buyQty / totalQty;
+      if (buyRatio >= 0.75) score += 1.5;
+      else if (buyRatio >= 0.60) score += 1.0;
+      else if (buyRatio <= 0.25) score -= 1.5;
+      else if (buyRatio <= 0.40) score -= 1.0;
+    }
+
+    if (qtyHistory.buy.length >= 3) {
+      const buyQtyChange = qtyHistory.buy[qtyHistory.buy.length - 1] - qtyHistory.buy[0];
+      const sellQtyChange = qtyHistory.sell[qtyHistory.sell.length - 1] - qtyHistory.sell[0];
+      if (buyQtyChange > 0 && buyQtyChange > sellQtyChange) score += 1.0;
+      else if (sellQtyChange > 0 && sellQtyChange > buyQtyChange) score -= 1.0;
+    }
+
+    let recommendation = "HOLD";
+    let confidence = "Low";
+    let tone: "up" | "down" | "neutral" = "neutral";
+    if (score >= 3.5) { recommendation = "STRONG BUY"; confidence = "High"; tone = "up"; }
+    else if (score >= 1.5) { recommendation = "BUY"; confidence = "Medium"; tone = "up"; }
+    else if (score <= -3.5) { recommendation = "STRONG SELL"; confidence = "High"; tone = "down"; }
+    else if (score <= -1.5) { recommendation = "SELL"; confidence = "Medium"; tone = "down"; }
+
+    const sentTrendText = sentDelta > 0 ? "improving" : sentDelta < 0 ? "weakening" : "stable";
+    const qtyDominance = buyQty > sellQty ? "Buyer volume dominance"
+      : sellQty > buyQty ? "Seller volume dominance" : "Balanced volume";
+
+    return {
+      recommendation, confidence, tone,
+      explanation: `Sentiment is ${sentTrendText} (${sentDelta >= 0 ? "+" : ""}${sentDelta.toFixed(0)}% delta). ${qtyDominance} with total interest of ${fmtQty(totalQty)}.`,
+    };
+  };
+
+  const fetchMarketQuotes = useCallback(async () => {
     try {
       const qmap: Record<string, any> = {};
 
@@ -862,38 +1094,49 @@ export function TradingDashboard() {
 
       // 2. Batch fetch live Upstox market quotes for earnings + pending results
       const quoteSymbols = [
-        ...upcomingEarnings.map(item => item.symbol),
-        ...pendingResults.map(p => p.symbol),
+        ...upcomingEarningsRef.current.map(item => item.symbol),
+        ...pendingResultsRef.current.map(p => p.symbol),
       ].filter(Boolean);
       if (quoteSymbols.length > 0) {
-        const uniqueSyms = Array.from(new Set(quoteSymbols)).slice(0, 80);
-        if (uniqueSyms.length > 0) {
-          const symStr = uniqueSyms.join(",");
+        const uniqueSyms = Array.from(new Set(quoteSymbols.map(s => s.toUpperCase())));
+        // Chunked because a heavy results day carries well past 100 symbols and
+        // the whole panel, not just the overflow, goes priceless if the URL is
+        // rejected for length.
+        for (let i = 0; i < uniqueSyms.length; i += 80) {
+          const symStr = uniqueSyms.slice(i, i + 80).join(",");
           const resBatch = await fetch(`${API_BASE}/api/market/quotes-by-symbols?symbols=${encodeURIComponent(symStr)}`);
-          if (resBatch.ok) {
-            const batchQuotes = await resBatch.json();
-            Object.entries(batchQuotes).forEach(([sym, q]: [string, any]) => {
-              const symKey = sym.toUpperCase();
-              const existing = qmap[symKey] || {};
-              const validChange = (q.change !== undefined && q.change !== 0.0) ? q.change : existing.change;
-              const validLtp = (q.last_price && q.last_price > 0) ? q.last_price : existing.last_price;
+          if (!resBatch.ok) continue;
+          const batchQuotes = await resBatch.json();
+          Object.entries(batchQuotes).forEach(([sym, q]: [string, any]) => {
+            const symKey = sym.toUpperCase();
+            const existing = qmap[symKey] || {};
+            const validChange = (q.change !== undefined && q.change !== 0.0) ? q.change : existing.change;
+            const validLtp = (q.last_price && q.last_price > 0) ? q.last_price : existing.last_price;
 
-              qmap[symKey] = {
-                ...existing,
-                ...q,
-                change: validChange,
-                last_price: validLtp
-              };
-            });
-          }
+            qmap[symKey] = {
+              ...existing,
+              ...q,
+              change: validChange,
+              last_price: validLtp
+            };
+          });
         }
       }
 
+      recordQuoteTick(qmap);
       setMarketQuotesMap(qmap);
     } catch (err) {
       console.error("Error loading live market quotes:", err);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    pendingResultsRef.current = pendingResults;
+  }, [pendingResults]);
+
+  useEffect(() => {
+    upcomingEarningsRef.current = upcomingEarnings;
+  }, [upcomingEarnings]);
 
   useEffect(() => {
     fetchData();
@@ -1429,7 +1672,12 @@ export function TradingDashboard() {
                   </div>
 
                   <div style={{ marginBottom: "10px" }}>
-                    <ResultPriceMove p={pending} quote={quote} />
+                    <ResultQuoteStrip
+                      p={pending}
+                      quote={quote}
+                      signal={get2MinSignal(pending.symbol, quote)}
+                      flash={priceFlash[pending.symbol.toUpperCase()]}
+                    />
                   </div>
 
                   {/* Order form */}
@@ -1867,51 +2115,35 @@ export function TradingDashboard() {
                   const sym = (item.symbol || "").toUpperCase();
                   const q = marketQuotesMap[sym] || {};
 
-                  // Real-time Upstox / Market Quote values
-                  const hash = sym.split("").reduce((acc: number, c: string) => acc + c.charCodeAt(0), 0);
-                  const baseLtp = 125.0 + (hash % 1450);
+                  // Live quote only. These readouts used to fall back to a hash
+                  // of the symbol when no quote arrived — a plausible-looking
+                  // price, a plausible-looking depth split and a plausible-looking
+                  // signal, none of them real. A blank is the honest answer.
+                  const ltp: number = (q.last_price && q.last_price > 0) ? q.last_price : 0;
+                  const prevClose: number = (q.close && q.close > 0) ? q.close : 0;
+                  const dayHigh: number = (q.high && q.high > 0) ? q.high : 0;
 
-                  const ltp = (q.last_price && q.last_price > 0) ? q.last_price : (item.ltp && item.ltp > 0 ? item.ltp : baseLtp);
-                  const prevClose = (q.close && q.close > 0) ? q.close : (item.prev_close && item.prev_close > 0 ? item.prev_close : ltp);
-
-                  // Calculate change % cleanly:
-                  let changePct = 0.0;
+                  let changePct: number | null = null;
                   if (q.change !== undefined && q.change !== 0.0) {
                     changePct = q.change;
-                  } else if (item.change_pct !== undefined && item.change_pct !== 0.0) {
-                    changePct = item.change_pct;
-                  } else if (ltp > 0 && prevClose > 0 && ltp !== prevClose) {
+                  } else if (ltp > 0 && prevClose > 0) {
                     changePct = ((ltp - prevClose) / prevClose) * 100;
-                  } else {
-                    changePct = parseFloat((((hash % 79) - 39) / 10).toFixed(2));
                   }
-
-                  const dayHigh = q.high || item.day_high || Math.max(ltp, prevClose);
-                  const isUp = changePct >= 0;
-
-                  // Format Quantity helper
-                  const fmtQty = (q: number) => {
-                    if (!q || q === 0) return "0";
-                    if (q >= 10000000) return `${(q / 10000000).toFixed(2)}Cr`;
-                    if (q >= 100000) return `${(q / 100000).toFixed(2)}L`;
-                    if (q >= 1000) return `${(q / 1000).toFixed(1)}K`;
-                    return q.toString();
-                  };
+                  const isUp = (changePct ?? 0) >= 0;
 
                   // Micro Depth & Quantities for Stock View
-                  const buyPct = q.depth_buy_pct !== undefined ? q.depth_buy_pct : (item.depth_buy_pct !== undefined ? item.depth_buy_pct : (35 + (hash % 50)));
-                  const sellPct = 100 - buyPct;
+                  const buyPct: number | null = q.depth_buy_pct !== undefined ? Math.round(q.depth_buy_pct) : null;
+                  const sellPct = buyPct == null ? null : 100 - buyPct;
 
-                  const buyQty = q.total_buy_qty || item.buy_qty || Math.round(1200 + (hash * 37) % 25000);
-                  const sellQty = q.total_sell_qty || item.sell_qty || Math.round(900 + (hash * 43) % 20000);
+                  const buyQty: number = q.total_buy_qty || 0;
+                  const sellQty: number = q.total_sell_qty || 0;
                   const totalQty = buyQty + sellQty;
 
-                  // 2m Signal Logic
-                  const sigRec = changePct > 1.0 ? "BUY" : changePct < -1.0 ? "SELL" : (hash % 2 === 0 ? "HOLD" : "BUY");
-                  const sigConf = Math.abs(changePct) > 1.5 ? "HIGH" : Math.abs(changePct) > 0.5 ? "MEDIUM" : "LOW";
-                  const sigColor = sigRec === "BUY" ? "var(--positive-strong)" : sigRec === "SELL" ? "var(--negative-strong)" : "var(--warning)";
-                  const sigBg = sigRec === "BUY" ? "rgba(63, 191, 135, 0.12)" : sigRec === "SELL" ? "rgba(240, 115, 111, 0.12)" : "rgba(224, 163, 62, 0.12)";
-                  const sigBorder = sigRec === "BUY" ? "rgba(63, 191, 135, 0.3)" : sigRec === "SELL" ? "rgba(240, 115, 111, 0.3)" : "rgba(224, 163, 62, 0.3)";
+                  // Same 2m order-book signal as the watchlist and the result prompts
+                  const sig = get2MinSignal(sym, q);
+                  const sigColor = sig.tone === "up" ? "var(--positive-strong)" : sig.tone === "down" ? "var(--negative-strong)" : "var(--warning)";
+                  const sigBg = sig.tone === "up" ? "rgba(63, 191, 135, 0.12)" : sig.tone === "down" ? "rgba(240, 115, 111, 0.12)" : "rgba(224, 163, 62, 0.12)";
+                  const sigBorder = sig.tone === "up" ? "rgba(63, 191, 135, 0.3)" : sig.tone === "down" ? "rgba(240, 115, 111, 0.3)" : "rgba(224, 163, 62, 0.3)";
 
                   return (
                     <tr key={item.id || item.symbol} style={{ borderBottom: "1px solid rgba(255, 255, 255, 0.05)", background: "var(--surface-1)" }}>
@@ -1941,8 +2173,8 @@ export function TradingDashboard() {
                       </td>
 
                       {/* 4. CHANGE */}
-                      <td style={{ padding: "10px 12px", textAlign: "right", fontWeight: "700", fontSize: "11px", color: isUp ? "var(--positive-strong)" : "var(--negative-strong)" }}>
-                        {isUp ? "+" : ""}{changePct.toFixed(2)}%
+                      <td style={{ padding: "10px 12px", textAlign: "right", fontWeight: "700", fontSize: "11px", color: changePct == null ? "var(--text-faint)" : isUp ? "var(--positive-strong)" : "var(--negative-strong)" }}>
+                        {changePct == null ? "—" : `${isUp ? "+" : ""}${changePct.toFixed(2)}%`}
                       </td>
 
                       {/* 5. PREV CLOSE */}
@@ -1958,63 +2190,73 @@ export function TradingDashboard() {
                       {/* 7. SENTIMENT (B/S) */}
                       <td
                         style={{ verticalAlign: "middle", padding: "8px 10px", textAlign: "center", cursor: "pointer" }}
-                        onMouseEnter={(e) => handleSentimentMouseEnter(e, item, buyPct, buyQty, sellQty, changePct)}
+                        onMouseEnter={(e) => handleSentimentMouseEnter(e, item, buyPct ?? 50, buyQty, sellQty, changePct ?? 0)}
                         onMouseLeave={handleSentimentMouseLeave}
                       >
-                        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2px", width: "85px", margin: "0 auto" }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", width: "100%", fontSize: "9px", fontWeight: "800" }}>
-                            <span style={{ color: "var(--positive)", display: "flex", alignItems: "center", gap: "2px" }}>
-                              {buyPct}% B {buyPct >= 50 ? "▲" : "▼"}
-                            </span>
-                            <span style={{ color: "var(--negative)" }}>{sellPct}% S</span>
+                        {buyPct == null ? (
+                          <span style={{ color: "var(--text-faint)", fontSize: "10px" }}>—</span>
+                        ) : (
+                          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2px", width: "85px", margin: "0 auto" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", width: "100%", fontSize: "9px", fontWeight: "800" }}>
+                              <span style={{ color: "var(--positive)", display: "flex", alignItems: "center", gap: "2px" }}>
+                                {buyPct}% B {buyPct >= 50 ? "▲" : "▼"}
+                              </span>
+                              <span style={{ color: "var(--negative)" }}>{sellPct}% S</span>
+                            </div>
+                            <div style={{ width: "100%", height: "4px", backgroundColor: "var(--negative)", borderRadius: "2px", overflow: "hidden", display: "flex" }}>
+                              <div style={{ width: `${buyPct}%`, height: "100%", backgroundColor: "var(--positive)" }} />
+                            </div>
                           </div>
-                          <div style={{ width: "100%", height: "4px", backgroundColor: "var(--negative)", borderRadius: "2px", overflow: "hidden", display: "flex" }}>
-                            <div style={{ width: `${buyPct}%`, height: "100%", backgroundColor: "var(--positive)" }} />
-                          </div>
-                        </div>
+                        )}
                       </td>
 
                       {/* 8. BUY/SELL QTY */}
                       <td
                         style={{ textAlign: "center", padding: "8px 10px", cursor: "pointer" }}
-                        onMouseEnter={(e) => handleSentimentMouseEnter(e, item, buyPct, buyQty, sellQty, changePct)}
+                        onMouseEnter={(e) => handleSentimentMouseEnter(e, item, buyPct ?? 50, buyQty, sellQty, changePct ?? 0)}
                         onMouseLeave={handleSentimentMouseLeave}
                       >
-                        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2px", width: "95px", margin: "0 auto" }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", width: "100%", fontSize: "9px", fontWeight: "700" }}>
-                            <span style={{ color: "var(--positive)" }}>{fmtQty(buyQty)}</span>
-                            <span style={{ color: "var(--negative)" }}>{fmtQty(sellQty)}</span>
+                        {totalQty === 0 ? (
+                          <span style={{ color: "var(--text-faint)", fontSize: "10px" }}>—</span>
+                        ) : (
+                          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2px", width: "95px", margin: "0 auto" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", width: "100%", fontSize: "9px", fontWeight: "700" }}>
+                              <span style={{ color: "var(--positive)" }}>{fmtQty(buyQty)}</span>
+                              <span style={{ color: "var(--negative)" }}>{fmtQty(sellQty)}</span>
+                            </div>
+                            <div style={{ width: "100%", height: "4px", backgroundColor: "var(--negative)", borderRadius: "2px", overflow: "hidden", display: "flex" }}>
+                              <div style={{ width: `${(buyQty / totalQty) * 100}%`, height: "100%", backgroundColor: "var(--positive)" }} />
+                            </div>
+                            <div style={{ fontSize: "8px", color: "var(--text-faint)", fontWeight: "600" }}>
+                              Σ {fmtQty(totalQty)}
+                            </div>
                           </div>
-                          <div style={{ width: "100%", height: "4px", backgroundColor: "var(--negative)", borderRadius: "2px", overflow: "hidden", display: "flex" }}>
-                            <div style={{ width: `${(buyQty / totalQty) * 100}%`, height: "100%", backgroundColor: "var(--positive)" }} />
-                          </div>
-                          <div style={{ fontSize: "8px", color: "var(--text-faint)", fontWeight: "600" }}>
-                            Σ {fmtQty(totalQty)}
-                          </div>
-                        </div>
+                        )}
                       </td>
 
                       {/* 9. 2M SIGNAL */}
                       <td
                         style={{ textAlign: "center", padding: "8px 6px", cursor: "pointer" }}
-                        onMouseEnter={(e) => handleSentimentMouseEnter(e, item, buyPct, buyQty, sellQty, changePct)}
+                        onMouseEnter={(e) => handleSentimentMouseEnter(e, item, buyPct ?? 50, buyQty, sellQty, changePct ?? 0)}
                         onMouseLeave={handleSentimentMouseLeave}
                       >
-                        <div style={{
-                          display: "inline-flex",
-                          flexDirection: "column",
-                          alignItems: "center",
-                          padding: "3px 8px",
-                          borderRadius: "6px",
-                          backgroundColor: sigBg,
-                          border: `1px solid ${sigBorder}`,
-                          color: sigColor,
-                          fontSize: "10px",
-                          fontWeight: "800",
-                          lineHeight: "1.2"
-                        }}>
-                          <span>{sigRec}</span>
-                          <span style={{ fontSize: "7px", opacity: 0.8, fontWeight: "normal" }}>CONF: {sigConf}</span>
+                        <div
+                          title={`${sig.explanation}\n\nReliability Warning:\nThis micro-trend is based on high-frequency order-book data. Useful for near-term momentum, but vulnerable to spoofing. Use as helper, not standalone decision.`}
+                          style={{
+                            display: "inline-flex",
+                            flexDirection: "column",
+                            alignItems: "center",
+                            padding: "3px 8px",
+                            borderRadius: "6px",
+                            backgroundColor: sigBg,
+                            border: `1px solid ${sigBorder}`,
+                            color: sigColor,
+                            fontSize: "10px",
+                            fontWeight: "800",
+                            lineHeight: "1.2"
+                          }}>
+                          <span>{sig.recommendation}</span>
+                          <span style={{ fontSize: "7px", opacity: 0.8, fontWeight: "normal" }}>CONF: {sig.confidence}</span>
                         </div>
                       </td>
 

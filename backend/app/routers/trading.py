@@ -599,6 +599,27 @@ def sync_upcoming_earnings_now(db: Session = Depends(get_db)):
 
 # ─── Pending Financial-Result Order Prompts ─────────────────────────────────
 
+# A real Upstox key carries an ISIN: NSE_EQ|INE002A01018. Anything else in that
+# position is the synthetic NSE_EQ|<SYMBOL> form written before BSE-only scrips
+# were resolvable, which no quote or candle endpoint accepts.
+_ISIN_RE = re.compile(r"^[A-Z]{2}[A-Z0-9]{9}[0-9]$")
+
+
+def _usable_instrument_key(p: PendingResultOrder) -> Optional[str]:
+    """The stored key, re-resolved on the way out when it is the synthetic form."""
+    key = p.instrument_key or ""
+    if key and _ISIN_RE.match(key.split("|")[-1]):
+        return key
+    try:
+        from app.main import resolve_instrument_keys
+        resolved = resolve_instrument_keys(p.symbol or "")
+        if resolved:
+            return resolved[0]
+    except Exception:
+        pass
+    return key or None
+
+
 def _serialize_pending(p: PendingResultOrder, ai_log: Optional[TradeAILog] = None) -> dict:
     return {
         "id": p.id,
@@ -614,7 +635,7 @@ def _serialize_pending(p: PendingResultOrder, ai_log: Optional[TradeAILog] = Non
         "alert_sent_at": p.alert_sent_at.isoformat() if p.alert_sent_at else None,
         "ai_requested_at": p.ai_requested_at.isoformat() if p.ai_requested_at else None,
         "ai_completed_at": p.ai_completed_at.isoformat() if p.ai_completed_at else None,
-        "instrument_key": p.instrument_key,
+        "instrument_key": _usable_instrument_key(p),
         "isin": p.isin,
         "exchange": p.exchange,
         "title": p.title,
