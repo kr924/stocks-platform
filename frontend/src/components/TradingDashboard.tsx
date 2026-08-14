@@ -1138,17 +1138,48 @@ export function TradingDashboard() {
     upcomingEarningsRef.current = upcomingEarnings;
   }, [upcomingEarnings]);
 
+  /**
+   * Mon–Fri, 09:00–15:35 IST — the window quotes are worth spending on.
+   * Read in Asia/Kolkata rather than the browser's zone, matching the tracker.
+   */
+  const isMarketHours = () => {
+    try {
+      const ist = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+      if (ist.getDay() === 0 || ist.getDay() === 6) return false;
+      const mins = ist.getHours() * 60 + ist.getMinutes();
+      return mins >= 540 && mins <= 935; // 9:00 AM to 3:35 PM
+    } catch {
+      return true;
+    }
+  };
+
   useEffect(() => {
     fetchData();
     fetchUpcomingEarnings();
     fetchMarketQuotes();
-    const intervalFast = setInterval(() => {
+
+    // Card data is a SQLite read and costs nothing upstream, so a new filing
+    // still appears within 3s.
+    const intervalCards = setInterval(() => {
       fetchData();
-      fetchMarketQuotes();
       fetchUpcomingEarnings();
-    }, 3000); // Fast 3-second live price stream for all panels including Upcoming Earnings
+    }, 3000);
+
+    // Quotes are metered by Upstox. At 3s this panel alone spent the entire
+    // 30-minute allowance — which starved the result baselines of the one quote
+    // call each of them needs, so polling harder produced fewer prices, not
+    // more. 10s matches the stock tracker's own cadence.
+    let lastQuoteAt = 0;
+    const intervalQuotes = setInterval(() => {
+      const gap = isMarketHours() ? 10000 : 60000;
+      if (Date.now() - lastQuoteAt < gap) return;
+      lastQuoteAt = Date.now();
+      fetchMarketQuotes();
+    }, 1000);
+
     return () => {
-      clearInterval(intervalFast);
+      clearInterval(intervalCards);
+      clearInterval(intervalQuotes);
     };
   }, []);
 
