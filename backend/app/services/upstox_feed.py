@@ -1,4 +1,5 @@
 import requests
+import time
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from app.services.base_feed import BaseMarketFeed
@@ -12,10 +13,24 @@ class UpstoxAuthError(Exception):
     pass
 
 class UpstoxMarketFeed(BaseMarketFeed):
+    # Upstox rate limiting (UDAPI10005) was blanking prices and starving the
+    # result baselines of a price to compare against. The dashboard polls every
+    # 3s and each tick costs two upstream calls — watchlist and quotes — which
+    # alone exceeds the quota, before the tracker, the intelligence feed, extra
+    # browser tabs, or a results burst add anything.
+    #
+    # This must sit above the client poll interval, not below it, or every tick
+    # still misses: at 5s against a 3s poll alternate ticks are served from
+    # cache, roughly halving upstream traffic, and concurrent callers — a second
+    # tab, a burst of filings each wanting an LTP — collapse into one fetch
+    # rather than multiplying. The cost is that a price can be up to 5s old.
+    QUOTE_TTL_SECONDS = 5.0
+
     def __init__(self):
         self.access_token = None
         self.base_url = "https://api.upstox.com/v2"
         self._quotes_cache: Dict[str, Dict[str, Any]] = {}
+        self._quote_fetched_at: Dict[str, float] = {}
 
     def _is_market_hours(self) -> bool:
         """Check if current time is within market hours (Mon-Fri 9:00 AM - 3:35 PM IST)."""
@@ -82,21 +97,37 @@ class UpstoxMarketFeed(BaseMarketFeed):
             if len(cached_result) == len(instrument_keys):
                 return cached_result
 
+        # Serve keys fetched within the TTL from cache and ask upstream only for
+        # the rest, so concurrent pollers collapse into one request per key.
+        now = time.monotonic()
+        fresh: Dict[str, Dict[str, Any]] = {}
+        stale_keys: List[str] = []
+        for k in instrument_keys:
+            cached = self._quotes_cache.get(k)
+            if cached is not None and (now - self._quote_fetched_at.get(k, 0.0)) <= self.QUOTE_TTL_SECONDS:
+                fresh[k] = cached
+            else:
+                stale_keys.append(k)
+        if not stale_keys:
+            return fresh
+
         # Upstox supports up to 500 comma separated instrument keys in one call
         url = f"{self.base_url}/market-quote/quotes"
-        params = {"instrument_key": ",".join(instrument_keys)}
-        
+        params = {"instrument_key": ",".join(stale_keys)}
+
         response = requests.get(url, headers=self._get_headers(), params=params)
         if response.status_code == 401:
             raise UpstoxAuthError(f"Unauthorized Upstox API call: {response.text}")
         elif response.status_code != 200:
-            # If request fails off-market, return cache if available
-            if self._quotes_cache:
-                return {k: self._quotes_cache[k] for k in instrument_keys if k in self._quotes_cache}
+            # Rate limiting lands here too, so fall back to the last known quote
+            # for anything we have ever seen rather than failing the batch.
+            served = {k: self._quotes_cache[k] for k in instrument_keys if k in self._quotes_cache}
+            if served:
+                return served
             raise Exception(f"Failed to fetch Upstox quotes: {response.text}")
-            
+
         data = response.json().get("data", {})
-        result = {}
+        result = dict(fresh)
         for key, val in data.items():
             # Use instrument_token if available (it matches the requested key like 'NSE_EQ|INE002A01018')
             resolved_key = val.get("instrument_token") or key
@@ -163,20 +194,20 @@ class UpstoxMarketFeed(BaseMarketFeed):
                 "total_buy_qty": total_buy_qty_raw,
                 "total_sell_qty": total_sell_qty_raw
             }
-            result[resolved_key] = item_quote
-            self._quotes_cache[resolved_key] = item_quote
-
+            # One quote is reachable under several handles — the resolved token,
+            # the key as requested, and the trading symbol. All of them are
+            # stamped, so a lookup by any handle counts as fresh.
+            handles = [resolved_key]
             if key:
-                result[key] = item_quote
-                pipe_key = key.replace(":", "|")
-                result[pipe_key] = item_quote
-                self._quotes_cache[pipe_key] = item_quote
-
+                handles += [key, key.replace(":", "|")]
             sym_name = val.get("trading_symbol") or val.get("symbol")
             if sym_name:
-                sym_upper = sym_name.upper()
-                result[sym_upper] = item_quote
-                self._quotes_cache[sym_upper] = item_quote
+                handles.append(sym_name.upper())
+
+            for handle in handles:
+                result[handle] = item_quote
+                self._quotes_cache[handle] = item_quote
+                self._quote_fetched_at[handle] = now
         return result
 
     def get_historical_candles(self, instrument_key: str, interval: str, to_date: str, from_date: Optional[str] = None) -> List[List[Any]]:
