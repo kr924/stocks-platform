@@ -1,5 +1,6 @@
 import requests
 import time
+import threading
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from app.services.base_feed import BaseMarketFeed
@@ -19,22 +20,29 @@ class UpstoxMarketFeed(BaseMarketFeed):
     # alone exceeds the quota, before the tracker, the intelligence feed, extra
     # browser tabs, or a results burst add anything.
     #
-    # This must sit above the client poll interval, not below it, or every tick
-    # still misses. 5s was not enough: the cache only collapses identical key
-    # sets, and a cycle makes four distinct calls — watchlist, movers, indices,
-    # pending results — so one open tab sat at roughly 30 requests a minute,
-    # exactly at the ceiling, and a second tab pushed it over. At 15s against a
-    # 10s poll two cycles out of three are served from cache.
+    # One background loop owns the Upstox quote endpoint, the way exchange_hub
+    # owns the announcement endpoints. Every panel reads its cache instead of
+    # fetching, so the metered request rate is set by this interval alone and
+    # does not grow with panels, browser tabs or a burst of filings.
     #
-    # Because the cache lives here rather than in the browser, N tabs cost the
-    # same as one.
-    QUOTE_TTL_SECONDS = 15.0
+    # Upstox takes 500 keys per call, and a full screen — watchlist, movers,
+    # indices, and every pending result — fits in one. A 3s cycle is therefore
+    # about 20 requests a minute total, well inside the limit that repeatedly
+    # blanked the screen when four callers polled on their own timers.
+    REFRESH_INTERVAL = 3.0
+    IDLE_REFRESH_INTERVAL = 60.0      # outside market hours nothing is moving
+    STALE_AFTER_SECONDS = 10.0        # serve older than this, but re-request it
+    INTEREST_TTL_SECONDS = 300.0      # stop refreshing what nothing has asked for
+    MAX_KEYS_PER_REQUEST = 450
 
     def __init__(self):
         self.access_token = None
         self.base_url = "https://api.upstox.com/v2"
         self._quotes_cache: Dict[str, Dict[str, Any]] = {}
         self._quote_fetched_at: Dict[str, float] = {}
+        self._interest: Dict[str, float] = {}
+        self._refresher: Optional[threading.Thread] = None
+        self._refresher_lock = threading.Lock()
 
     def _is_market_hours(self) -> bool:
         """Check if current time is within market hours (Mon-Fri 9:00 AM - 3:35 PM IST)."""
@@ -93,31 +101,52 @@ class UpstoxMarketFeed(BaseMarketFeed):
             "Authorization": f"Bearer {self.access_token}"
         }
 
-    def get_quotes(self, instrument_keys: List[str]) -> Dict[str, Dict[str, Any]]:
-        # If outside market hours (3:35 PM to 9:00 AM IST) and we have cached quotes for requested keys,
-        # return the cached quotes directly to avoid unnecessary Upstox API calls when market is closed.
-        if not self._is_market_hours() and self._quotes_cache:
-            cached_result = {k: self._quotes_cache[k] for k in instrument_keys if k in self._quotes_cache}
-            if len(cached_result) == len(instrument_keys):
-                return cached_result
-
-        # Serve keys fetched within the TTL from cache and ask upstream only for
-        # the rest, so concurrent pollers collapse into one request per key.
+    def _note_interest(self, instrument_keys: List[str]) -> None:
+        """Remember that something on screen wants these keys kept warm."""
         now = time.monotonic()
-        fresh: Dict[str, Dict[str, Any]] = {}
-        stale_keys: List[str] = []
         for k in instrument_keys:
-            cached = self._quotes_cache.get(k)
-            if cached is not None and (now - self._quote_fetched_at.get(k, 0.0)) <= self.QUOTE_TTL_SECONDS:
-                fresh[k] = cached
-            else:
-                stale_keys.append(k)
-        if not stale_keys:
-            return fresh
+            if "|" in k:  # request form only; symbols and colon forms are lookup aliases
+                self._interest[k] = now
 
-        # Upstox supports up to 500 comma separated instrument keys in one call
+    def _start_refresher(self) -> None:
+        """One background loop refreshes every key anyone has asked for."""
+        if self._refresher and self._refresher.is_alive():
+            return
+        with self._refresher_lock:
+            if self._refresher and self._refresher.is_alive():
+                return
+            self._refresher = threading.Thread(
+                target=self._refresh_loop, name="upstox-quote-refresher", daemon=True
+            )
+            self._refresher.start()
+
+    def _refresh_loop(self) -> None:
+        while True:
+            interval = self.REFRESH_INTERVAL if self._is_market_hours() else self.IDLE_REFRESH_INTERVAL
+            try:
+                now = time.monotonic()
+                keys = [k for k, seen in list(self._interest.items())
+                        if now - seen <= self.INTEREST_TTL_SECONDS]
+                for k in [k for k, seen in list(self._interest.items())
+                          if now - seen > self.INTEREST_TTL_SECONDS]:
+                    self._interest.pop(k, None)
+
+                if keys and self.access_token:
+                    # Upstox accepts 500 keys per call, so the whole screen —
+                    # watchlist, movers, indices and every pending result —
+                    # usually costs exactly one request per cycle.
+                    for i in range(0, len(keys), self.MAX_KEYS_PER_REQUEST):
+                        self._fetch_and_cache(keys[i:i + self.MAX_KEYS_PER_REQUEST])
+            except UpstoxAuthError:
+                pass  # token expired; endpoints surface this on their own path
+            except Exception as e:
+                print(f"Quote refresher cycle failed: {e}")
+            time.sleep(interval)
+
+    def _fetch_and_cache(self, instrument_keys: List[str]) -> Dict[str, Dict[str, Any]]:
+        """One upstream call: fetch, parse and store. The only place that hits Upstox."""
         url = f"{self.base_url}/market-quote/quotes"
-        params = {"instrument_key": ",".join(stale_keys)}
+        params = {"instrument_key": ",".join(instrument_keys)}
 
         response = requests.get(url, headers=self._get_headers(), params=params)
         if response.status_code == 401:
@@ -131,7 +160,8 @@ class UpstoxMarketFeed(BaseMarketFeed):
             raise Exception(f"Failed to fetch Upstox quotes: {response.text}")
 
         data = response.json().get("data", {})
-        result = dict(fresh)
+        result: Dict[str, Dict[str, Any]] = {}
+        now = time.monotonic()
         for key, val in data.items():
             # Use instrument_token if available (it matches the requested key like 'NSE_EQ|INE002A01018')
             resolved_key = val.get("instrument_token") or key
@@ -212,6 +242,52 @@ class UpstoxMarketFeed(BaseMarketFeed):
                 result[handle] = item_quote
                 self._quotes_cache[handle] = item_quote
                 self._quote_fetched_at[handle] = now
+        return result
+
+    def get_quotes(self, instrument_keys: List[str]) -> Dict[str, Dict[str, Any]]:
+        """
+        Quotes for these keys, served from the shared cache the background
+        refresher keeps warm.
+
+        Callers used to fetch independently, which is what exhausted the rate
+        limit: four panels on their own timers meant four metered calls per
+        cycle, and the account has one allowance between them. Now every caller
+        registers interest and reads the same cache, so the request rate is set
+        by the refresher's interval rather than by how many panels are open.
+
+        Anything the refresher has not reached yet — a symbol just added, the
+        first call after a restart — is fetched directly, so a cold cache still
+        answers correctly rather than returning nothing.
+        """
+        self._note_interest(instrument_keys)
+        self._start_refresher()
+
+        now = time.monotonic()
+        result: Dict[str, Dict[str, Any]] = {}
+        missing: List[str] = []
+        for k in instrument_keys:
+            cached = self._quotes_cache.get(k)
+            if cached is None:
+                missing.append(k)
+            elif (now - self._quote_fetched_at.get(k, 0.0)) <= self.STALE_AFTER_SECONDS:
+                result[k] = cached
+            else:
+                # Past its freshness window: serve it, but ask for a new one.
+                result[k] = cached
+                missing.append(k)
+
+        if missing:
+            request_keys = [k for k in missing if "|" in k]
+            try:
+                if request_keys:
+                    result.update(self._fetch_and_cache(request_keys[:self.MAX_KEYS_PER_REQUEST]))
+            except UpstoxAuthError:
+                raise
+            except Exception:
+                # Rate limited or upstream down. Whatever the cache holds is
+                # better than an empty panel; only raise if it holds nothing.
+                if not result:
+                    raise
         return result
 
     def get_historical_candles(self, instrument_key: str, interval: str, to_date: str, from_date: Optional[str] = None) -> List[List[Any]]:

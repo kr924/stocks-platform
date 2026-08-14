@@ -1166,13 +1166,13 @@ export function TradingDashboard() {
       fetchUpcomingEarnings();
     }, 3000);
 
-    // Quotes are metered by Upstox. At 3s this panel alone spent the entire
-    // 30-minute allowance — which starved the result baselines of the one quote
-    // call each of them needs, so polling harder produced fewer prices, not
-    // more. 10s matches the stock tracker's own cadence.
+    // Quotes come from the backend's shared cache, which a single background
+    // loop keeps ~3s fresh for every panel at once. Polling here no longer
+    // costs an Upstox request, so this tracks that cache closely instead of
+    // rationing itself the way it had to when each panel fetched its own.
     let lastQuoteAt = 0;
     const intervalQuotes = setInterval(() => {
-      const gap = isMarketHours() ? 10000 : 60000;
+      const gap = isMarketHours() ? 3000 : 60000;
       if (Date.now() - lastQuoteAt < gap) return;
       lastQuoteAt = Date.now();
       fetchMarketQuotes();
