@@ -106,22 +106,37 @@ def _is_armed(db: Session, symbol: str) -> bool:
 
 
 def get_ltp(instrument_key: str, symbol: str = "") -> Optional[float]:
-    """Current traded price, or None when the feed cannot supply one."""
+    """
+    Current traded price, or None when the feed cannot supply one.
+
+    This is the baseline for "move since result", so it is captured once and
+    never recomputed — a miss here leaves that column blank for the life of the
+    row. The fallback key must therefore be resolved rather than synthesised:
+    `NSE_EQ|<SYMBOL>` fails the whole request, which is why every BSE-listed
+    filing was landing without a baseline while NSE ones were fine.
+    """
     try:
-        from app.main import get_active_feed
+        from app.main import get_active_feed, resolve_instrument_keys
         feed = get_active_feed()
         keys = []
         if instrument_key:
             keys += [instrument_key, instrument_key.replace("|", ":")]
-        if symbol:
-            keys.append(f"NSE_EQ|{symbol.upper()}")
-        quotes = feed.get_quotes([k for k in keys if k])
+        for k in resolve_instrument_keys(symbol):
+            if k not in keys:
+                keys.append(k)
+        if not keys:
+            logger.warning(f"No instrument key resolves for {symbol} — no price baseline captured")
+            return None
+        quotes = feed.get_quotes(keys)
         for q in quotes.values():
             price = q.get("last_price")
             if price:
                 return round(float(price), 2)
+        logger.warning(f"No price in feed response for {symbol or instrument_key} ({keys})")
     except Exception as e:
-        logger.debug(f"LTP lookup failed for {symbol or instrument_key}: {e}")
+        # Not debug: a silent miss here is invisible until someone notices the
+        # column is empty, which is how this went unnoticed.
+        logger.warning(f"LTP lookup failed for {symbol or instrument_key}: {e}")
     return None
 
 
