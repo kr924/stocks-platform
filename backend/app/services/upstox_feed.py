@@ -102,9 +102,14 @@ class UpstoxMarketFeed(BaseMarketFeed):
             resolved_key = val.get("instrument_token") or key
             last_price = val.get("last_price", 0.0)
             net_change = val.get("net_change", 0.0)
+            # Illiquid scrips come back with "ohlc": null. A default only applies
+            # when the key is absent, so `.get("ohlc", {})` hands back None there
+            # and the AttributeError takes down the whole batch — every price on
+            # the screen, not just this one.
+            ohlc = val.get("ohlc") or {}
             # If net_change is non-zero, compute previous close dynamically to get correct non-zero daily change%
-            prev_close = last_price - net_change if net_change != 0.0 else val.get("ohlc", {}).get("close", 0.0)
-            
+            prev_close = last_price - net_change if net_change != 0.0 else ohlc.get("close", 0.0)
+
             # Parse depth for buyer vs seller sentiment
             depth = val.get("depth", {}) or {}
             buy_levels = depth.get("buy", []) or []
@@ -144,9 +149,9 @@ class UpstoxMarketFeed(BaseMarketFeed):
                 "last_price": last_price,
                 "volume": val.get("volume", 0),
                 "ohlc": {
-                    "open": val.get("ohlc", {}).get("open", 0.0),
-                    "high": val.get("ohlc", {}).get("high", 0.0),
-                    "low": val.get("ohlc", {}).get("low", 0.0),
+                    "open": ohlc.get("open", 0.0),
+                    "high": ohlc.get("high", 0.0),
+                    "low": ohlc.get("low", 0.0),
                     "close": round(prev_close, 2),
                 },
                 "depth": {

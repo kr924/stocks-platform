@@ -1671,6 +1671,10 @@ export function TradingDashboard() {
                     )}
                   </div>
 
+                  {/* Quote and timing belong to the stock, not to the AI verdict:
+                      how long ago the filing landed decides whether the move is
+                      still tradeable, and it has to be readable without opening
+                      anything. */}
                   <div style={{ marginBottom: "10px" }}>
                     <ResultQuoteStrip
                       p={pending}
@@ -1678,6 +1682,7 @@ export function TradingDashboard() {
                       signal={get2MinSignal(pending.symbol, quote)}
                       flash={priceFlash[pending.symbol.toUpperCase()]}
                     />
+                    <LifecycleStrip p={pending} />
                   </div>
 
                   {/* Order form */}
@@ -1791,7 +1796,6 @@ export function TradingDashboard() {
 
                     {isOpen && (
                       <div style={{ marginTop: "10px" }}>
-                        <LifecycleStrip p={pending} />
                         {pending.ai_status === "done" && ai ? (
                           <div style={{ marginTop: "8px" }}>
                             <MetricsTable metrics={ai.metrics} />
