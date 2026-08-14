@@ -20,11 +20,15 @@ class UpstoxMarketFeed(BaseMarketFeed):
     # browser tabs, or a results burst add anything.
     #
     # This must sit above the client poll interval, not below it, or every tick
-    # still misses: at 5s against a 3s poll alternate ticks are served from
-    # cache, roughly halving upstream traffic, and concurrent callers — a second
-    # tab, a burst of filings each wanting an LTP — collapse into one fetch
-    # rather than multiplying. The cost is that a price can be up to 5s old.
-    QUOTE_TTL_SECONDS = 5.0
+    # still misses. 5s was not enough: the cache only collapses identical key
+    # sets, and a cycle makes four distinct calls — watchlist, movers, indices,
+    # pending results — so one open tab sat at roughly 30 requests a minute,
+    # exactly at the ceiling, and a second tab pushed it over. At 15s against a
+    # 10s poll two cycles out of three are served from cache.
+    #
+    # Because the cache lives here rather than in the browser, N tabs cost the
+    # same as one.
+    QUOTE_TTL_SECONDS = 15.0
 
     def __init__(self):
         self.access_token = None

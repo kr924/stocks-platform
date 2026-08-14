@@ -1616,10 +1616,10 @@ export default function App() {
                             )}
                           </td>
                           <td style={{ textAlign: "right", color: "var(--text-secondary)", fontSize: "11px" }}>
-                            ₹{(item.close || 0).toFixed(2)}
+                            {item.close ? `₹${item.close.toFixed(2)}` : "—"}
                           </td>
                           <td style={{ textAlign: "right", color: "var(--positive-strong)", fontWeight: 600, fontSize: "11px" }}>
-                            ₹{(item.high || 0).toFixed(2)}
+                            {item.high ? `₹${item.high.toFixed(2)}` : "—"}
                           </td>
                           <td
                             style={{ verticalAlign: "middle", padding: "8px 12px" }}
@@ -1902,10 +1902,10 @@ export default function App() {
                             </span>
                           </td>
                           <td style={{ textAlign: "right", color: "var(--text-secondary)", fontSize: "11px" }}>
-                            ₹{(item.close || 0).toFixed(2)}
+                            {item.close ? `₹${item.close.toFixed(2)}` : "—"}
                           </td>
                           <td style={{ textAlign: "right", color: "var(--positive-strong)", fontWeight: 600, fontSize: "11px" }}>
-                            ₹{(item.high || 0).toFixed(2)}
+                            {item.high ? `₹${item.high.toFixed(2)}` : "—"}
                           </td>
                           <td
                             style={{ verticalAlign: "middle", padding: "8px 12px" }}

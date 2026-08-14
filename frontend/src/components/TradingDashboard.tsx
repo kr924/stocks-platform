@@ -1101,9 +1101,10 @@ export function TradingDashboard() {
         const uniqueSyms = Array.from(new Set(quoteSymbols.map(s => s.toUpperCase())));
         // Chunked because a heavy results day carries well past 100 symbols and
         // the whole panel, not just the overflow, goes priceless if the URL is
-        // rejected for length.
-        for (let i = 0; i < uniqueSyms.length; i += 80) {
-          const symStr = uniqueSyms.slice(i, i + 80).join(",");
+        // rejected for length. 250 keeps a full day inside a single request —
+        // at 80 the list split into three, tripling the metered calls per tick.
+        for (let i = 0; i < uniqueSyms.length; i += 250) {
+          const symStr = uniqueSyms.slice(i, i + 250).join(",");
           const resBatch = await fetch(`${API_BASE}/api/market/quotes-by-symbols?symbols=${encodeURIComponent(symStr)}`);
           if (!resBatch.ok) continue;
           const batchQuotes = await resBatch.json();
