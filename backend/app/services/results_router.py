@@ -118,9 +118,12 @@ def get_ltp(instrument_key: str, symbol: str = "") -> Optional[float]:
     try:
         from app.main import get_active_feed, resolve_instrument_keys
         feed = get_active_feed()
+        # Pipe form only. `BSE_EQ:INE...` is how quotes come back keyed, not a
+        # key the API accepts — sending it returns UDAPI1087 for the whole
+        # request, including the keys that were fine.
         keys = []
         if instrument_key:
-            keys += [instrument_key, instrument_key.replace("|", ":")]
+            keys.append(instrument_key.replace(":", "|"))
         for k in resolve_instrument_keys(symbol):
             if k not in keys:
                 keys.append(k)
