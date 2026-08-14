@@ -155,7 +155,11 @@ def _send_result_alert(ann, event, pending_id=None, instrument_key: str = "", pe
             company_name=ann.company_name,
             exchange=ann.exchange,
             title=ann.title or "Financial Results",
-            last_price=last_price if last_price is not None else get_ltp(instrument_key, ann.symbol),
+            # No second lookup when the caller's came back empty. The only
+            # reason it is empty during a results burst is that Upstox is rate
+            # limiting us, and retrying immediately doubles the pressure that
+            # caused it — the alert can go out without a price.
+            last_price=last_price,
             url=ann.url,
             pending_id=pending_id,
             tracking_ref=getattr(pending, "tracking_ref", None),
