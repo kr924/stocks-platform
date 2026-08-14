@@ -113,8 +113,19 @@ def _company_block(r: dict, st: dict) -> list:
     flow.append(Paragraph(
         f"<b>Result announced:</b> {_ist(p.event_time)} &nbsp;·&nbsp; "
         f"<b>Exchange:</b> {(p.exchange or '').upper()} &nbsp;·&nbsp; "
-        f"<b>Window:</b> {'after 15:25 cutoff' if p.deferred else 'intraday'}",
+        f"<b>Window:</b> {'outside 09:00-15:30' if p.deferred else 'intraday'}",
         st["meta"]))
+
+    # For a filing that arrived outside market hours this is the only signal on
+    # the page — the AI never ran on it.
+    sig = r.get("screener_signal") or {}
+    if sig:
+        scolour = ("#1a7f4f" if sig.get("tone") == "pos"
+                   else "#c23934" if sig.get("tone") == "neg" else "#8b95a6")
+        flow.append(Paragraph(
+            f'<b>Screener read:</b> <font color="{scolour}"><b>{_safe(sig.get("label", "NA"))}</b></font>'
+            f'&nbsp;&nbsp;<font color="#8b95a6">{_safe(sig.get("reason", ""))}</font>',
+            st["meta"]))
     if analysed:
         flow.append(Paragraph(
             f"<b>AI sent:</b> {_ist(p.ai_requested_at)} &nbsp;·&nbsp; "
