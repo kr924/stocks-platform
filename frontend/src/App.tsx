@@ -11,7 +11,10 @@ import {
   X,
   Send,
   Briefcase,
-  Layers
+  Layers,
+  Play,
+  Pause,
+  TrendingUp
 } from "lucide-react";
 import { Chart } from "./components/Chart";
 import { IntelligenceDashboard } from "./components/IntelligenceDashboard";
@@ -98,6 +101,59 @@ interface StockDetail {
   analysis?: StockAnalysis | null;
 }
 
+
+/**
+ * Live/Paused switch for a table's automatic quote polling.
+ *
+ * Upstox meters quote requests per account, and the whole account shares one
+ * allowance — so a table polling in the background is spending the budget the
+ * results panel needs for the filing being decided on. Pausing a table stops
+ * its automatic fetches; rows can still be refreshed one at a time, and the
+ * whole table on demand.
+ */
+function LivePriceToggle({ paused, onToggle, onRefreshAll, label }: {
+  paused: boolean;
+  onToggle: () => void;
+  onRefreshAll: () => void;
+  label: string;
+}) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+      <button
+        onClick={onToggle}
+        title={paused
+          ? `Automatic price updates are off for the ${label}. Click to resume 10s polling.`
+          : `Prices update every 10s. Click to pause and free up Upstox quota.`}
+        style={{
+          display: "inline-flex", alignItems: "center", gap: "5px",
+          padding: "4px 10px", borderRadius: "6px", cursor: "pointer",
+          fontSize: "10px", fontWeight: 700, letterSpacing: "0.3px",
+          background: paused ? "rgba(224, 163, 62, 0.12)" : "rgba(63, 191, 135, 0.12)",
+          border: `1px solid ${paused ? "rgba(224, 163, 62, 0.35)" : "rgba(63, 191, 135, 0.35)"}`,
+          color: paused ? "var(--warning)" : "var(--positive)",
+        }}
+      >
+        {paused ? <Play size={11} /> : <Pause size={11} />}
+        {paused ? "PAUSED" : "LIVE"}
+      </button>
+      {paused && (
+        <button
+          onClick={onRefreshAll}
+          title={`Fetch prices for the whole ${label} once`}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: "4px",
+            padding: "4px 8px", borderRadius: "6px", cursor: "pointer",
+            fontSize: "10px", fontWeight: 600,
+            background: "transparent", border: "1px solid rgba(255,255,255,0.15)",
+            color: "var(--text-secondary)",
+          }}
+        >
+          <RefreshCw size={10} /> Refresh all
+        </button>
+      )}
+    </div>
+  );
+}
 
 const formatQty = (qty: number): string => {
   if (qty >= 10000000) return (qty / 10000000).toFixed(2) + "Cr";
@@ -390,6 +446,29 @@ export default function App() {
   const watchlistPeriodRef = useRef<string>("today");
   const moversPeriodRef = useRef<string>("today");
 
+  // Paused sections stop fetching quotes automatically; rows are then refreshed
+  // one at a time on demand. The choice survives a reload — the reason to pause
+  // is that quota is scarce, and that is still true after F5.
+  const [watchlistPaused, setWatchlistPaused] = useState<boolean>(
+    () => localStorage.getItem("watchlistPaused") === "1"
+  );
+  const [moversPaused, setMoversPaused] = useState<boolean>(
+    () => localStorage.getItem("moversPaused") === "1"
+  );
+  const watchlistPausedRef = useRef(watchlistPaused);
+  const moversPausedRef = useRef(moversPaused);
+  const [rowRefreshing, setRowRefreshing] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    watchlistPausedRef.current = watchlistPaused;
+    localStorage.setItem("watchlistPaused", watchlistPaused ? "1" : "0");
+  }, [watchlistPaused]);
+
+  useEffect(() => {
+    moversPausedRef.current = moversPaused;
+    localStorage.setItem("moversPaused", moversPaused ? "1" : "0");
+  }, [moversPaused]);
+
   useEffect(() => {
     selectedKeyRef.current = selectedKey;
   }, [selectedKey]);
@@ -437,21 +516,28 @@ export default function App() {
       }
     };
 
-    // Auto-refresh quotes every 10 seconds during market hours
+    // Auto-refresh quotes every 10 seconds during market hours. Each section can
+    // be paused independently: Upstox meters quote requests per account, so a
+    // table left polling in a background tab is quota the results panel cannot
+    // then spend on the filing you are actually deciding on.
     const interval = setInterval(() => {
       if (checkIsMarketHours()) {
-        refreshLiveQuotes();
-        refreshLiveMovers();
-        fetchIndices();
+        if (!watchlistPausedRef.current) {
+          refreshLiveQuotes();
+          fetchIndices();
+        }
+        if (!moversPausedRef.current) refreshLiveMovers();
       }
     }, 10000);
 
     // Off-market refresh (every 5 minutes) to conserve API calls when trading is closed
     const offMarketInterval = setInterval(() => {
       if (!checkIsMarketHours()) {
-        refreshLiveQuotes();
-        refreshLiveMovers();
-        fetchIndices();
+        if (!watchlistPausedRef.current) {
+          refreshLiveQuotes();
+          fetchIndices();
+        }
+        if (!moversPausedRef.current) refreshLiveMovers();
       }
     }, 300000);
 
@@ -703,6 +789,71 @@ export default function App() {
       }
     } catch (err) {
       console.error("Background quote update error:", err);
+    }
+  };
+
+  /**
+   * Refresh one stock's quote, for use while a section is paused.
+   *
+   * Costs a single upstream request instead of the whole table, and folds the
+   * result through the same flash and sentiment bookkeeping the bulk refresh
+   * uses, so a hand-refreshed row behaves like any other.
+   */
+  const refreshSingleQuote = async (item: { symbol: string; instrument_key: string }, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const key = item.instrument_key;
+    setRowRefreshing((prev) => ({ ...prev, [key]: true }));
+    try {
+      const res = await fetch(`${API_BASE}/api/market/quotes-by-symbols?symbols=${encodeURIComponent(item.symbol)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const q = data[item.symbol.toUpperCase()];
+      if (!q || !q.last_price) {
+        setToast({ message: `No live quote available for ${item.symbol}.`, type: "error" });
+        return;
+      }
+
+      const prev = prevPricesRef.current[key];
+      if (prev !== undefined && prev !== q.last_price) {
+        setPriceFlash((p) => ({ ...p, [key]: q.last_price > prev ? "up" : "down" }));
+        setTimeout(() => setPriceFlash({}), 800);
+      }
+      prevPricesRef.current[key] = q.last_price;
+
+      const range = (q.high || 0) - (q.low || 0);
+      const priceBuyPct = range > 0 ? ((q.last_price - q.low) / range) * 100 : 50;
+      const depthBuyPct = q.depth_buy_pct !== undefined ? q.depth_buy_pct : 50;
+      const compositeBuyPct = Math.round((priceBuyPct * 0.15) + (depthBuyPct * 0.85));
+      const hist = sentimentHistoryRef.current[key] || [];
+      sentimentHistoryRef.current[key] = [...hist, compositeBuyPct].slice(-15);
+      const qHist = quantityHistoryRef.current[key] || { buy: [], sell: [] };
+      quantityHistoryRef.current[key] = {
+        buy: [...qHist.buy, q.total_buy_qty || 0].slice(-15),
+        sell: [...qHist.sell, q.total_sell_qty || 0].slice(-15),
+      };
+
+      const merge = (row: any) =>
+        row.instrument_key === key
+          ? {
+              ...row,
+              last_price: q.last_price,
+              change: q.change,
+              close: q.close,
+              high: q.high,
+              low: q.low,
+              depth_buy_pct: q.depth_buy_pct,
+              depth_sell_pct: q.depth_sell_pct,
+              total_buy_qty: q.total_buy_qty,
+              total_sell_qty: q.total_sell_qty,
+            }
+          : row;
+      setWatchlist((prevRows) => prevRows.map(merge));
+      setGainers((prevRows) => prevRows.map(merge));
+      setLosers((prevRows) => prevRows.map(merge));
+    } catch (err) {
+      console.error("Single quote refresh failed:", err);
+    } finally {
+      setRowRefreshing((prev) => ({ ...prev, [key]: false }));
     }
   };
 
@@ -1348,6 +1499,13 @@ export default function App() {
                 </button>
               </div>
 
+              <LivePriceToggle
+                paused={watchlistPaused}
+                onToggle={() => setWatchlistPaused((v) => !v)}
+                onRefreshAll={refreshLiveQuotes}
+                label="watchlist"
+              />
+
               <div className="period-bar">
                 {periods.map((p) => (
                   <button
@@ -1564,6 +1722,14 @@ export default function App() {
                           <td>
                             <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end", alignItems: "center" }}>
                               <button
+                                onClick={(e) => refreshSingleQuote(item, e)}
+                                className="action-btn-refresh"
+                                disabled={rowRefreshing[item.instrument_key]}
+                                title="Refresh this stock's price — one request, works while paused"
+                              >
+                                <TrendingUp size={12} className={rowRefreshing[item.instrument_key] ? "animate-spin" : ""} />
+                              </button>
+                              <button
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   handleFetchNewsAndAI(item.instrument_key);
@@ -1610,6 +1776,13 @@ export default function App() {
                   Losers
                 </button>
               </div>
+
+              <LivePriceToggle
+                paused={moversPaused}
+                onToggle={() => setMoversPaused((v) => !v)}
+                onRefreshAll={refreshLiveMovers}
+                label="movers"
+              />
 
               <div className="period-bar">
                 {periods.map((p) => (
@@ -1834,6 +2007,14 @@ export default function App() {
                           </td>
                           <td>
                             <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end", alignItems: "center" }}>
+                              <button
+                                onClick={(e) => refreshSingleQuote(item, e)}
+                                className="action-btn-refresh"
+                                disabled={rowRefreshing[item.instrument_key]}
+                                title="Refresh this stock's price — one request, works while paused"
+                              >
+                                <TrendingUp size={12} className={rowRefreshing[item.instrument_key] ? "animate-spin" : ""} />
+                              </button>
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
