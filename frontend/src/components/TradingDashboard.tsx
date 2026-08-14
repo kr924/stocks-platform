@@ -762,9 +762,51 @@ export function TradingDashboard() {
     return pendingResults.filter(p =>
       p.symbol.toLowerCase().includes(q) ||
       (p.company_name || "").toLowerCase().includes(q) ||
-      (p.title || "").toLowerCase().includes(q)
+      (p.title || "").toLowerCase().includes(q) ||
+      // The ref is the chip beside the symbol on every card and the code on the
+      // Telegram alert, so it is the obvious thing to paste in here. The box
+      // has always offered it; only the server-side filter implemented it.
+      (p.tracking_ref || "").toLowerCase().includes(q)
     );
   }, [pendingResults, pendingSearch]);
+
+  /**
+   * Today's filings grouped by the hour they were announced, each symbol
+   * carrying its move since the result.
+   *
+   * A hundred-plus cards is too many to read one at a time. Bucketing by hour
+   * says which part of the day is still worth attention — an 11:00 batch that
+   * has already repriced needs nothing, a 15:00 one may still be live — and the
+   * colour is the same "since result" number the card shows, so scanning the
+   * strip and reading a card cannot disagree.
+   */
+  const resultsByHour = useMemo(() => {
+    const buckets = new Map<string, { hour: string; items: { symbol: string; since: number | null }[] }>();
+    for (const p of visiblePendingResults) {
+      const iso = p.announced_at || p.event_time || p.ingested_at;
+      if (!iso) continue;
+      const d = new Date(iso.endsWith("Z") || iso.includes("+") ? iso : iso + "Z");
+      if (isNaN(d.getTime())) continue;
+      const hour = `${String(d.getHours()).padStart(2, "0")}:00`;
+
+      const quote = marketQuotesMap[p.symbol.toUpperCase()];
+      const base = p.price_at_announcement;
+      const ltp = quote?.last_price;
+      const since = ltp && base ? ((ltp - base) / base) * 100 : null;
+
+      if (!buckets.has(hour)) buckets.set(hour, { hour, items: [] });
+      buckets.get(hour)!.items.push({ symbol: p.symbol, since });
+    }
+    return [...buckets.values()]
+      .map(b => ({
+        ...b,
+        // Biggest movers first: the reason to look at an hour is what moved in it.
+        items: b.items.sort((a, z) => Math.abs(z.since ?? -1) - Math.abs(a.since ?? -1)),
+        up: b.items.filter(i => (i.since ?? 0) > 0).length,
+        down: b.items.filter(i => (i.since ?? 0) < 0).length,
+      }))
+      .sort((a, z) => z.hour.localeCompare(a.hour));
+  }, [visiblePendingResults, marketQuotesMap]);
 
   // The digest is fetched on demand rather than on the 3s poll: it hits
   // screener.in per company, so refetching it every few seconds would hammer
@@ -1623,6 +1665,59 @@ export function TradingDashboard() {
               </span>
             </div>
           </div>
+
+          {/* Hour-by-hour overview. Click a symbol to filter the list to it. */}
+          {resultsByHour.length > 0 && (
+            <div style={{
+              marginBottom: "14px", padding: "10px 12px", borderRadius: "10px",
+              background: "rgba(10, 13, 18, 0.45)", border: "1px solid rgba(255,255,255,0.06)",
+              maxHeight: "190px", overflowY: "auto",
+            }}>
+              {resultsByHour.map(bucket => (
+                <div key={bucket.hour} style={{ display: "flex", gap: "10px", alignItems: "flex-start", padding: "4px 0" }}>
+                  <span style={{
+                    minWidth: "96px", fontSize: "11px", fontWeight: 700, color: "var(--text-secondary)",
+                    fontVariantNumeric: "tabular-nums", paddingTop: "3px", whiteSpace: "nowrap",
+                  }}>
+                    {bucket.hour}
+                    <span style={{ color: "var(--text-faint)", fontWeight: 500 }}> · {bucket.items.length}</span>
+                    {bucket.up > 0 && <span style={{ color: "var(--positive)", fontWeight: 700 }}> ↑{bucket.up}</span>}
+                    {bucket.down > 0 && <span style={{ color: "var(--negative)", fontWeight: 700 }}> ↓{bucket.down}</span>}
+                  </span>
+                  <span style={{ display: "flex", flexWrap: "wrap", gap: "4px", flex: 1 }}>
+                    {bucket.items.map(item => {
+                      const tone = item.since == null ? "faint" : item.since > 0 ? "up" : item.since < 0 ? "down" : "flat";
+                      const color = tone === "up" ? "var(--positive)"
+                        : tone === "down" ? "var(--negative)" : "var(--text-faint)";
+                      const bg = tone === "up" ? "rgba(63, 191, 135, 0.12)"
+                        : tone === "down" ? "rgba(240, 115, 111, 0.12)" : "rgba(125, 135, 153, 0.10)";
+                      const selected = pendingSearch.trim().toLowerCase() === item.symbol.toLowerCase();
+                      return (
+                        <button
+                          key={item.symbol}
+                          onClick={() => setPendingSearch(selected ? "" : item.symbol)}
+                          title={item.since == null
+                            ? `${item.symbol} — no move recorded yet (no baseline price or no live quote)`
+                            : `${item.symbol} — ${item.since > 0 ? "+" : ""}${item.since.toFixed(2)}% since the result landed`}
+                          style={{
+                            display: "inline-flex", alignItems: "baseline", gap: "4px",
+                            padding: "2px 7px", borderRadius: "5px", cursor: "pointer",
+                            background: bg, color,
+                            border: `1px solid ${selected ? color : "transparent"}`,
+                            fontSize: "10px", fontWeight: 700, fontVariantNumeric: "tabular-nums",
+                          }}>
+                          {item.symbol}
+                          <span style={{ fontSize: "9px", opacity: 0.9 }}>
+                            {item.since == null ? "—" : `${item.since > 0 ? "+" : ""}${item.since.toFixed(1)}%`}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Capped height: a heavy results day can produce hundreds of prompts,
               and the panel must not push the rest of the dashboard off-screen. */}
