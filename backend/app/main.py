@@ -214,6 +214,17 @@ async def _intelligence_scheduler():
                 now_ist = dt_cls.now(ist)
                 today_str = now_ist.strftime("%Y-%m-%d")
 
+                # 01:00 — drop result prompts older than 72h. Overnight, so a
+                # deletion never races the panel someone is deciding on.
+                if now_ist.hour >= 1 and last_run.get("pending_purge_date") != today_str:
+                    last_run["pending_purge_date"] = today_str
+                    await asyncio.to_thread(_run_pending_purge)
+
+                # 02:00 — retire target configs whose date has passed
+                if now_ist.hour >= 2 and last_run.get("config_expiry_date") != today_str:
+                    last_run["config_expiry_date"] = today_str
+                    await asyncio.to_thread(_run_config_expiry)
+
                 # 06:00 — sync upcoming earnings into the watchlist
                 if now_ist.hour >= 6 and last_run.get("earnings_sync_date") != today_str:
                     last_run["earnings_sync_date"] = today_str
@@ -270,6 +281,34 @@ def _single_flight(name: str):
                 lock.release()
         return wrapper
     return decorator
+
+
+@_single_flight("pending_purge")
+def _run_pending_purge():
+    """01:00 IST — bound how long result prompts are kept."""
+    try:
+        from app.services.results_router import purge_old_pending
+        db = next(get_db())
+        try:
+            purge_old_pending(db, hours=72)
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"Pending purge error: {e}")
+
+
+@_single_flight("config_expiry")
+def _run_config_expiry():
+    """02:00 IST — retire target configs whose target date has passed."""
+    try:
+        from app.services.results_router import expire_stale_configs
+        db = next(get_db())
+        try:
+            expire_stale_configs(db)
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"Config expiry error: {e}")
 
 
 @_single_flight("earnings_sync")

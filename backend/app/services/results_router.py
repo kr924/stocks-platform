@@ -20,6 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import PendingResultOrder, TradeConfig
@@ -364,6 +365,70 @@ def route_financial_result(db: Session, ann, event, dedup_key: str):
         None,
         pending.id,
     )
+
+
+def purge_old_pending(db: Session, hours: int = 72) -> int:
+    """
+    Delete result prompts older than `hours`, so the table does not grow without
+    bound on a platform that ingests a few hundred filings a day.
+
+    Rows that led to an order are kept regardless of age: they carry the
+    config_id linking a filing to a position that may still be open, and that
+    trail is the only record of why the trade was placed.
+
+    Note this is retention, not the panel filter — the panel already shows one
+    trade date at a time. What this bounds is how far back the date picker can
+    reach, which is three days.
+    """
+    cutoff = datetime.utcnow() - timedelta(hours=hours)
+    try:
+        rows = db.query(PendingResultOrder).filter(
+            PendingResultOrder.config_id.is_(None),
+            func.coalesce(PendingResultOrder.event_time,
+                          PendingResultOrder.created_at) < cutoff,
+        ).all()
+        if not rows:
+            return 0
+        for row in rows:
+            db.delete(row)
+        db.commit()
+        logger.info(f"Purged {len(rows)} result prompts older than {hours}h.")
+        return len(rows)
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to purge old result prompts: {e}")
+        return 0
+
+
+def expire_stale_configs(db: Session) -> int:
+    """
+    Retire target configurations whose target date has passed.
+
+    An open position is never touched. A config in `bought` or `holding` is a
+    stock actually owned, and quietly dropping it from the table would lose the
+    stoploss watcher's subject along with any record that the position exists —
+    the target date being yesterday says nothing about whether it has been sold.
+    """
+    today = datetime.now(IST).strftime("%Y-%m-%d")
+    protected = ("bought", "holding")
+    try:
+        stale = db.query(TradeConfig).filter(
+            TradeConfig.purchase_date < today,
+            TradeConfig.status.notin_(protected),
+            TradeConfig.status != "expired",
+        ).all()
+        if not stale:
+            return 0
+        for row in stale:
+            row.status = "expired"
+            row.is_active = False
+        db.commit()
+        logger.info(f"Retired {len(stale)} target configs dated before {today}.")
+        return len(stale)
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to retire stale target configs: {e}")
+        return 0
 
 
 def expire_stale_pending(db: Session) -> int:

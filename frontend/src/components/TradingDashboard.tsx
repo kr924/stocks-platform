@@ -21,7 +21,8 @@ import {
   ExternalLink,
   Calendar,
   Sparkles,
-  ChevronRight
+  ChevronRight,
+  Pause
 } from "lucide-react";
 
 const API_BASE = import.meta.env.VITE_API_BASE || (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" ? "http://localhost:8000" : "");
@@ -65,8 +66,19 @@ interface MetricCell {
 
 type MetricGrid = Record<string, MetricCell>;
 
+interface TradePosition {
+  config_id: number;
+  status: string;
+  quantity: number | null;
+  buy_price: number | null;
+  sell_price: number | null;
+  pnl: number | null;
+  can_sell: boolean;
+}
+
 interface PendingResult {
   id: number;
+  position: TradePosition | null;
   symbol: string;
   company_name: string | null;
   tracking_ref: string | null;
@@ -599,6 +611,30 @@ export function TradingDashboard() {
   const pendingResultsRef = useRef<PendingResult[]>([]);
   const upcomingEarningsRef = useRef<UpcomingEarningsItem[]>([]);
 
+  // Which trade date the results panel is showing. Quotes are only fetched for
+  // today: a past day's prices are whatever they are now, which says nothing
+  // about the decision that was in front of you then, and spends metered
+  // requests to say it.
+  const [resultsDate, setResultsDate] = useState<string>(todayStr);
+  const resultsDateRef = useRef<string>(todayStr);
+  const isToday = resultsDate === todayStr;
+
+  useEffect(() => {
+    resultsDateRef.current = resultsDate;
+    fetchData();
+  }, [resultsDate]);
+
+  // Upcoming earnings quotes can be paused independently, same reasoning as the
+  // tracker's tables: the allowance is shared across every panel.
+  const [earningsPaused, setEarningsPaused] = useState<boolean>(
+    () => localStorage.getItem("earningsQuotesPaused") === "1"
+  );
+  const earningsPausedRef = useRef(earningsPaused);
+  useEffect(() => {
+    earningsPausedRef.current = earningsPaused;
+    localStorage.setItem("earningsQuotesPaused", earningsPaused ? "1" : "0");
+  }, [earningsPaused]);
+
   // Hover Sentiment Popover State
   const [hoveredSentiment, setHoveredSentiment] = useState<{
     symbol: string;
@@ -757,9 +793,12 @@ export function TradingDashboard() {
   // Pending results are filtered client-side: the list is small and already
   // scoped to today, so this keeps typing instant.
   const visiblePendingResults = useMemo(() => {
+    // Dismissed and expired rows stay out; an ordered one stays in, because the
+    // position it opened still needs somewhere to be sold from.
+    const live = pendingResults.filter(p => p.status === "pending" || p.status === "ordered");
     const q = pendingSearch.trim().toLowerCase();
-    if (!q) return pendingResults;
-    return pendingResults.filter(p =>
+    if (!q) return live;
+    return live.filter(p =>
       p.symbol.toLowerCase().includes(q) ||
       (p.company_name || "").toLowerCase().includes(q) ||
       (p.title || "").toLowerCase().includes(q) ||
@@ -841,7 +880,9 @@ export function TradingDashboard() {
         fetch(`${API_BASE}/api/trading/settings`),
         // Financial results live here, not in the AI Intelligence feed
         fetch(`${API_BASE}/api/intelligence/feed?hours=24&category=financial_results`),
-        fetch(`${API_BASE}/api/trading/pending-results?status=pending`),
+        // status=all so a filing that has been ordered stays on screen with a
+        // sell control, instead of vanishing the moment the buy goes through.
+        fetch(`${API_BASE}/api/trading/pending-results?status=all&trade_date=${resultsDateRef.current}`),
       ]);
 
       if (configsRes.ok) {
@@ -925,6 +966,39 @@ export function TradingDashboard() {
       alert(`Order failed for ${pending.symbol}. See console for details.`);
     } finally {
       setActionLoading(prev => ({ ...prev, [`result_${pending.id}`]: false }));
+    }
+  };
+
+  /**
+   * Sell the position a result prompt opened.
+   *
+   * Confirmed first: this places a real market order, and the card sits in a
+   * list of hundreds where a misplaced click is easy.
+   */
+  const handleSellResultPosition = async (pending: PendingResult) => {
+    const pos = pending.position;
+    if (!pos?.config_id) return;
+    const qty = pos.quantity ?? 0;
+    const at = pos.buy_price ? ` bought at ₹${pos.buy_price}` : "";
+    if (!window.confirm(`Sell ${qty} ${pending.symbol}${at}?\n\nThis places a real market order.`)) return;
+
+    setActionLoading(prev => ({ ...prev, [`sell_${pending.id}`]: true }));
+    try {
+      const res = await fetch(`${API_BASE}/api/trading/configs/${pos.config_id}/sell`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ side: "SELL", quantity: qty }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.success === false) {
+        alert(`Sell failed for ${pending.symbol}: ${data.message || data.detail || "Unknown error"}`);
+      }
+      await fetchData();
+    } catch (err) {
+      console.error("Error selling result position:", err);
+      alert(`Sell failed for ${pending.symbol}. See console for details.`);
+    } finally {
+      setActionLoading(prev => ({ ...prev, [`sell_${pending.id}`]: false }));
     }
   };
 
@@ -1140,8 +1214,9 @@ export function TradingDashboard() {
 
       // 2. Batch fetch live Upstox market quotes for earnings + pending results
       const quoteSymbols = [
-        ...upcomingEarningsRef.current.map(item => item.symbol),
-        ...pendingResultsRef.current.map(p => p.symbol),
+        ...(earningsPausedRef.current ? [] : upcomingEarningsRef.current.map(item => item.symbol)),
+        // Only today's results carry live prices — see resultsDate.
+        ...(resultsDateRef.current === todayStr ? pendingResultsRef.current.map(p => p.symbol) : []),
       ].filter(Boolean);
       if (quoteSymbols.length > 0) {
         const uniqueSyms = Array.from(new Set(quoteSymbols.map(s => s.toUpperCase())));
@@ -1664,8 +1739,33 @@ export function TradingDashboard() {
                   Clear
                 </button>
               )}
-              <span style={{ fontSize: "11px", color: "var(--warning)", background: "rgba(224, 163, 62,0.12)", padding: "4px 10px", borderRadius: "20px", whiteSpace: "nowrap" }}>
-                Today only · not armed
+
+              <input
+                type="date"
+                value={resultsDate}
+                max={todayStr}
+                onChange={e => setResultsDate(e.target.value || todayStr)}
+                title="Trade date to show. Only today carries live prices; earlier days are kept for three days."
+                style={{
+                  padding: "6px 10px", fontSize: "12px",
+                  background: "rgba(10, 13, 18,0.8)",
+                  border: `1px solid ${isToday ? "rgba(224, 163, 62,0.3)" : "var(--accent-border)"}`,
+                  borderRadius: "6px", color: "var(--text-primary)",
+                }}
+              />
+              {!isToday && (
+                <button onClick={() => setResultsDate(todayStr)}
+                  style={{ padding: "6px 10px", background: "var(--accent-bg)", border: "1px solid var(--accent-border)", borderRadius: "6px", color: "var(--accent)", fontSize: "11px", fontWeight: 700, cursor: "pointer" }}>
+                  Today
+                </button>
+              )}
+
+              <span style={{
+                fontSize: "11px", padding: "4px 10px", borderRadius: "20px", whiteSpace: "nowrap",
+                color: isToday ? "var(--warning)" : "var(--text-muted)",
+                background: isToday ? "rgba(224, 163, 62,0.12)" : "rgba(125, 135, 153,0.12)",
+              }}>
+                {isToday ? "Today · not armed" : "Past date · prices not fetched"}
               </span>
             </div>
           </div>
@@ -1760,7 +1860,28 @@ export function TradingDashboard() {
                 }}>
                   {/* Header line */}
                   <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "10px", marginBottom: "10px" }}>
-                    <span style={{ fontSize: "16px", fontWeight: 800, color: "var(--text-primary)" }}>{pending.symbol}</span>
+                    {/* Blue means an order was placed against this filing, so the
+                        row can be picked out of a list of hundreds at a glance. */}
+                    <span style={{
+                      fontSize: "16px", fontWeight: 800,
+                      color: pending.position ? "var(--accent)" : "var(--text-primary)",
+                    }}>
+                      {pending.symbol}
+                    </span>
+                    {pending.position && (
+                      <span title={`Order placed from this filing · config #${pending.position.config_id}`}
+                        style={{
+                          fontSize: "10px", fontWeight: 700, letterSpacing: "0.4px",
+                          color: "var(--accent)", background: "var(--accent-bg)",
+                          border: "1px solid var(--accent-border)",
+                          padding: "2px 7px", borderRadius: "4px",
+                        }}>
+                        {pending.position.status.toUpperCase()}
+                        {pending.position.quantity ? ` · ${pending.position.quantity}` : ""}
+                        {pending.position.buy_price ? ` @ ₹${pending.position.buy_price}` : ""}
+                        {pending.position.pnl != null ? ` · P&L ₹${pending.position.pnl}` : ""}
+                      </span>
+                    )}
                     <span style={{
                       fontSize: "10px", fontWeight: 700, letterSpacing: "0.5px",
                       color: pending.exchange === "nse" ? "var(--accent)" : "var(--ai)",
@@ -1866,14 +1987,38 @@ export function TradingDashboard() {
                       </select>
                     </label>
 
-                    <button onClick={() => handlePlaceResultOrder(pending)} disabled={busy}
-                      style={{
-                        padding: "8px 16px", background: busy ? "rgba(63, 191, 135,0.4)" : "var(--positive)",
-                        border: "none", borderRadius: "6px", color: "var(--on-accent)", fontSize: "12px", fontWeight: 700,
-                        cursor: busy ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: "6px"
-                      }}>
-                      <ShoppingBag size={14} /> {busy ? "Placing…" : "Place Buy Order"}
-                    </button>
+                    {/* Once a position exists the buy is done; the only action
+                        left on this filing is getting out of it. */}
+                    {!pending.position && (
+                      <button onClick={() => handlePlaceResultOrder(pending)} disabled={busy}
+                        style={{
+                          padding: "8px 16px", background: busy ? "rgba(63, 191, 135,0.4)" : "var(--positive)",
+                          border: "none", borderRadius: "6px", color: "var(--on-accent)", fontSize: "12px", fontWeight: 700,
+                          cursor: busy ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: "6px"
+                        }}>
+                        <ShoppingBag size={14} /> {busy ? "Placing…" : "Place Buy Order"}
+                      </button>
+                    )}
+                    {pending.position?.can_sell && (
+                      <button onClick={() => handleSellResultPosition(pending)}
+                        disabled={!!actionLoading[`sell_${pending.id}`]}
+                        style={{
+                          padding: "8px 16px",
+                          background: actionLoading[`sell_${pending.id}`] ? "rgba(240, 115, 111,0.4)" : "var(--negative)",
+                          border: "none", borderRadius: "6px", color: "var(--on-accent)", fontSize: "12px", fontWeight: 700,
+                          cursor: actionLoading[`sell_${pending.id}`] ? "not-allowed" : "pointer",
+                          display: "flex", alignItems: "center", gap: "6px"
+                        }}>
+                        <DollarSign size={14} /> {actionLoading[`sell_${pending.id}`] ? "Selling…" : "Sell Now"}
+                      </button>
+                    )}
+                    {pending.position && !pending.position.can_sell && (
+                      <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
+                        {pending.position.status === "sold"
+                          ? `Sold${pending.position.sell_price ? ` at ₹${pending.position.sell_price}` : ""}`
+                          : `Position is '${pending.position.status}' — sell available once the buy fills`}
+                      </span>
+                    )}
                     <button onClick={() => handleDismissResult(pending.id)} disabled={busy}
                       style={{
                         padding: "8px 14px", background: "transparent",
@@ -2194,6 +2339,26 @@ export function TradingDashboard() {
             >
               <RefreshCw size={12} className={syncingQuotes ? "animate-spin" : ""} />
               {syncingQuotes ? "Syncing Quotes..." : "🔄 Sync Live Quotes"}
+            </button>
+
+            {/* Same lever as the tracker's tables: this calendar can run to 139
+                symbols, and the quote allowance is shared with the results panel. */}
+            <button
+              onClick={() => setEarningsPaused(v => !v)}
+              title={earningsPaused
+                ? "Automatic price updates are off for this calendar. Click to resume."
+                : "Prices update with the other panels. Click to pause and free up Upstox quota."}
+              style={{
+                display: "inline-flex", alignItems: "center", gap: "5px",
+                padding: "5px 10px", borderRadius: "8px", cursor: "pointer",
+                fontSize: "11px", fontWeight: 700,
+                background: earningsPaused ? "rgba(224, 163, 62, 0.12)" : "rgba(63, 191, 135, 0.12)",
+                border: `1px solid ${earningsPaused ? "rgba(224, 163, 62, 0.35)" : "rgba(63, 191, 135, 0.35)"}`,
+                color: earningsPaused ? "var(--warning)" : "var(--positive)",
+              }}
+            >
+              {earningsPaused ? <Play size={12} /> : <Pause size={12} />}
+              {earningsPaused ? "PAUSED" : "LIVE"}
             </button>
           </div>
 

@@ -174,12 +174,22 @@ def _serialize_ai_log(a: TradeAILog) -> dict:
 @router.get("/configs")
 def list_configs(
     status: Optional[str] = None,
+    include_expired: bool = False,
     db: Session = Depends(get_db)
 ):
-    """List all trade configurations."""
+    """
+    Trade configurations, most recent first.
+
+    Configs retired by the 02:00 sweep are hidden unless asked for: their target
+    date has passed, so they are history rather than something to act on, and
+    they are kept in the database rather than deleted because some of them
+    record real orders.
+    """
     q = db.query(TradeConfig).order_by(TradeConfig.created_at.desc())
     if status:
         q = q.filter(TradeConfig.status == status)
+    elif not include_expired:
+        q = q.filter(TradeConfig.status != "expired")
     configs = q.all()
     return {"configs": [_serialize_config(c) for c in configs]}
 
@@ -620,9 +630,35 @@ def _usable_instrument_key(p: PendingResultOrder) -> Optional[str]:
     return key or None
 
 
-def _serialize_pending(p: PendingResultOrder, ai_log: Optional[TradeAILog] = None) -> dict:
+def _position_for(p: PendingResultOrder, db: Session) -> Optional[dict]:
+    """
+    The trade this filing led to, when there is one.
+
+    The panel has to distinguish "decision still open" from "already bought" —
+    without it the same card offers to buy a stock that is already held, and
+    there is nowhere to sell it from.
+    """
+    if not p.config_id:
+        return None
+    c = db.query(TradeConfig).filter(TradeConfig.id == p.config_id).first()
+    if not c:
+        return None
+    return {
+        "config_id": c.id,
+        "status": c.status,
+        "quantity": c.quantity,
+        "buy_price": c.buy_price,
+        "sell_price": c.sell_price,
+        "pnl": c.pnl,
+        "can_sell": c.status == "bought",
+    }
+
+
+def _serialize_pending(p: PendingResultOrder, ai_log: Optional[TradeAILog] = None,
+                       db: Session = None) -> dict:
     return {
         "id": p.id,
+        "position": _position_for(p, db) if db is not None else None,
         "symbol": p.symbol,
         "company_name": p.company_name,
         "tracking_ref": p.tracking_ref,
@@ -703,7 +739,7 @@ def list_pending_results(
             logs[log.id] = log
 
     return {
-        "pending": [_serialize_pending(p, logs.get(p.ai_log_id)) for p in pendings],
+        "pending": [_serialize_pending(p, logs.get(p.ai_log_id), db) for p in pendings],
         "total": len(pendings),
     }
 
@@ -798,7 +834,7 @@ def place_pending_result_order(
     return {
         "success": result.success,
         "message": result.message,
-        "pending": _serialize_pending(pending),
+        "pending": _serialize_pending(pending, None, db),
         "config": _serialize_config(config),
         "order": _serialize_order(order),
     }
@@ -814,7 +850,7 @@ def dismiss_pending_result(pending_id: int, db: Session = Depends(get_db)):
     pending.status = "dismissed"
     pending.resolved_at = datetime.utcnow()
     db.commit()
-    return {"status": "success", "pending": _serialize_pending(pending)}
+    return {"status": "success", "pending": _serialize_pending(pending, None, db)}
 
 
 # ─── Morning results digest ─────────────────────────────────────────────────
