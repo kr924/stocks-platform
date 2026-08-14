@@ -781,7 +781,10 @@ export function TradingDashboard() {
    * strip and reading a card cannot disagree.
    */
   const resultsByHour = useMemo(() => {
-    const buckets = new Map<string, { hour: string; items: { symbol: string; since: number | null }[] }>();
+    const buckets = new Map<string, {
+      hour: string;
+      items: { symbol: string; since: number | null; day: number | null }[];
+    }>();
     for (const p of visiblePendingResults) {
       const iso = p.announced_at || p.event_time || p.ingested_at;
       if (!iso) continue;
@@ -793,9 +796,10 @@ export function TradingDashboard() {
       const base = p.price_at_announcement;
       const ltp = quote?.last_price;
       const since = ltp && base ? ((ltp - base) / base) * 100 : null;
+      const day = quote?.change ?? null;
 
       if (!buckets.has(hour)) buckets.set(hour, { hour, items: [] });
-      buckets.get(hour)!.items.push({ symbol: p.symbol, since });
+      buckets.get(hour)!.items.push({ symbol: p.symbol, since, day });
     }
     return [...buckets.values()]
       .map(b => ({
@@ -1696,9 +1700,9 @@ export function TradingDashboard() {
                         <button
                           key={item.symbol}
                           onClick={() => setPendingSearch(selected ? "" : item.symbol)}
-                          title={item.since == null
-                            ? `${item.symbol} — no move recorded yet (no baseline price or no live quote)`
-                            : `${item.symbol} — ${item.since > 0 ? "+" : ""}${item.since.toFixed(2)}% since the result landed`}
+                          title={`${item.symbol}\n`
+                            + `Since result: ${item.since == null ? "not recorded (no baseline or no live quote)" : `${item.since > 0 ? "+" : ""}${item.since.toFixed(2)}%`}\n`
+                            + `Day: ${item.day == null ? "no quote" : `${item.day > 0 ? "+" : ""}${item.day.toFixed(2)}%`}`}
                           style={{
                             display: "inline-flex", alignItems: "baseline", gap: "4px",
                             padding: "2px 7px", borderRadius: "5px", cursor: "pointer",
@@ -1709,6 +1713,15 @@ export function TradingDashboard() {
                           {item.symbol}
                           <span style={{ fontSize: "9px", opacity: 0.9 }}>
                             {item.since == null ? "—" : `${item.since > 0 ? "+" : ""}${item.since.toFixed(1)}%`}
+                          </span>
+                          {/* Day change, dimmed: the move since the result is the
+                              decision, the day's change is the context it sits in. */}
+                          <span style={{
+                            fontSize: "9px", fontWeight: 600, opacity: 0.75,
+                            color: item.day == null ? "var(--text-faint)"
+                              : item.day > 0 ? "var(--positive)" : item.day < 0 ? "var(--negative)" : "var(--text-faint)",
+                          }}>
+                            {item.day == null ? "· —" : `· ${item.day > 0 ? "+" : ""}${item.day.toFixed(1)}%d`}
                           </span>
                         </button>
                       );

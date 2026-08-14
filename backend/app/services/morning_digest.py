@@ -10,7 +10,7 @@ collected here instead:
 The page lists every company whose results were announced the previous day and
 shows Screener.in's reported figures for the quarter. Our AI's extraction sits
 beside them *only where it exists* — that is, where the filing arrived before the
-15:25 cutoff and was analysed live. Filings that landed after the cutoff are
+09:00-15:30 window and was analysed live. Filings outside it are
 never analysed, so their AI column reads "not analysed", and Screener is the
 single source for them.
 """
@@ -21,10 +21,13 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import PendingResultOrder, TradeAILog
-from app.services.screener_quarters import compare, fetch_latest_quarter, parse_ai_value
+from app.services.screener_quarters import (
+    compare, fetch_latest_quarter, parse_ai_value, screener_signal,
+)
 from app.services.trade_ai_analyzer import (
     METRIC_ROWS, _ROW_LABELS, normalize_metrics,
 )
@@ -50,22 +53,48 @@ def _ist_str(dt) -> str:
     return dt.astimezone(IST).strftime("%d %b %H:%M:%S")
 
 
+DIGEST_WINDOW_HOUR = 8  # IST
+
+
+def digest_window(now_ist: datetime = None) -> tuple:
+    """
+    The 08:00-to-08:00 IST window this digest reports on, as naive UTC bounds.
+
+    The 08:00 run covers everything filed from 08:00 the previous day up to
+    08:00 today, so a filing belongs to exactly one digest and the boundary sits
+    where nobody is trading rather than at midnight, mid-way through the
+    overnight batch.
+    """
+    now = now_ist or datetime.now(IST)
+    end_ist = now.replace(hour=DIGEST_WINDOW_HOUR, minute=0, second=0, microsecond=0)
+    if now < end_ist:                      # a run before 08:00 belongs to the previous window
+        end_ist -= timedelta(days=1)
+    start_ist = end_ist - timedelta(days=1)
+    return (start_ist.astimezone(timezone.utc).replace(tzinfo=None),
+            end_ist.astimezone(timezone.utc).replace(tzinfo=None))
+
+
 def collect_for_digest(db: Session, lookback_days: int = 4) -> List[PendingResultOrder]:
     """
-    Everything not yet reported in a digest, oldest first.
+    Everything in this digest's 08:00-to-08:00 window, oldest first.
 
-    Selected on "not yet digested" rather than a fixed previous-calendar-day
-    window, so a Monday morning naturally rolls up Friday evening through Sunday
-    instead of silently dropping the weekend. Both intraday and post-cutoff
-    filings are included: the difference between them is whether an AI analysis
-    exists, not whether they are reported.
+    Anything older that was never digested is included too — a weekend, or a
+    morning the job did not run, would otherwise vanish silently, and a filing
+    reported late is better than one never reported. On an ordinary weekday that
+    tail is empty and the digest is exactly the window.
+
+    Both intraday and out-of-hours filings appear: the difference between them
+    is whether an AI analysis exists, not whether they are reported.
     """
+    start, end = digest_window()
     since = datetime.utcnow() - timedelta(days=lookback_days)
+    filed_at = func.coalesce(PendingResultOrder.event_time, PendingResultOrder.created_at)
     return (
         db.query(PendingResultOrder)
         .filter(
             PendingResultOrder.created_at >= since,
             PendingResultOrder.digest_sent_at.is_(None),
+            filed_at < end,
         )
         .order_by(PendingResultOrder.event_time.asc())
         .all()
@@ -169,6 +198,7 @@ def _build_rows(db: Session, pendings: List[PendingResultOrder]) -> List[dict]:
             "pending": p,
             "log": log,
             "screener": screener,
+            "screener_signal": screener_signal(screener),
             "comparison": comparison,
             "validation": validation,
             "analysed": analysed,
@@ -235,8 +265,13 @@ def render_html(rows: List[dict], for_date: str) -> str:
         cls = ("b-pos" if verdict.upper() in ("BUY", "BEATS ESTIMATES")
                else "b-neg" if verdict.upper() in ("SELL", "MISSES ESTIMATES")
                else "b-na")
-        badge_title = ("Filed after the 15:25 cutoff, so it was not analysed — Screener is the source here"
+        badge_title = ("Filed outside 09:00-15:30 IST, so it was not analysed — Screener is the source here"
                        if not r["analysed"] else "Verdict from our AI analysis")
+
+        # The Screener read stands on its own: it is the only signal available
+        # for a filing that arrived outside market hours and was never analysed.
+        sig = r["screener_signal"]
+        sig_cls = "b-pos" if sig["tone"] == "pos" else "b-neg" if sig["tone"] == "neg" else "b-na"
 
         body = []
         for c in r["comparison"]:
@@ -273,6 +308,9 @@ def render_html(rows: List[dict], for_date: str) -> str:
     <span class="sym">{e(p.symbol)}</span>
     <span class="co">{e(p.company_name or '')}</span>
     <span class="badge {cls}" title="{e(badge_title)}">{e(verdict)}</span>
+    <span class="badge {sig_cls}" title="{e('Mechanical read of Screener year-on-year figures: ' + sig['reason'])}">
+      SCREENER {e(sig['label'])}
+    </span>
     <span class="ref">{e(p.tracking_ref or '')}</span>
   </div>
   <div class="title">{e((p.title or '')[:190])}</div>
@@ -281,7 +319,7 @@ def render_html(rows: List[dict], for_date: str) -> str:
     <span><b>Loaded</b> {_ist_str(p.created_at)}</span>
     <span><b>AI sent</b> {_ist_str(p.ai_requested_at)}</span>
     <span><b>AI received</b> {_ist_str(p.ai_completed_at)}</span>
-    <span><b>Window</b> {'intraday' if not p.deferred else 'after 15:25 cutoff'}</span>
+    <span><b>Window</b> {'intraday' if not p.deferred else 'outside 09:00-15:30'}</span>
     <span><b>Exchange</b> {e(p.exchange.upper())}</span>
   </div>
   <table>
@@ -291,7 +329,7 @@ def render_html(rows: List[dict], for_date: str) -> str:
     </tr></thead>
     <tbody>{''.join(body)}</tbody>
   </table>
-  <div class="src">{src}</div>
+  <div class="src">{src} · <b>Screener read</b> {e(sig['reason'])}</div>
 </div>""")
 
     content = "".join(cards) if cards else '<div class="empty">No results were filed after yesterday\'s cutoff.</div>'
@@ -305,12 +343,12 @@ def render_html(rows: List[dict], for_date: str) -> str:
 <h1>Results announced {e(for_date)}</h1>
 <div class="sub">{len(rows)} compan{'y' if len(rows) == 1 else 'ies'} ·
  {sum(1 for r in rows if r['analysed'])} analysed intraday ·
- {sum(1 for r in rows if not r['analysed'])} filed after the 15:25 cutoff (Screener only)</div>
+ {sum(1 for r in rows if not r['analysed'])} filed outside market hours (Screener only)</div>
 <div class="legend">
   <span><b style="color:var(--pos)">match</b> within 2% of Screener</span>
   <span><b style="color:var(--neg)">±n%</b> our figure differs by that much</span>
   <span><b style="color:var(--na)">—</b> one side missing, so no comparison is possible</span>
-  <span><b style="color:var(--na)">not analysed</b> filed after 15:25; no AI is run on those</span>
+  <span><b style="color:var(--na)">not analysed</b> filed outside 09:00-15:30; no AI is run on those</span>
   <span>All Screener values in ₹ crore, consolidated where available</span>
 </div>
 {content}

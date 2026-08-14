@@ -35,27 +35,33 @@ IST = timezone(timedelta(hours=5, minutes=30))
 _ai_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="earnings-ai")
 
 
-# Results filed after this IST time get no alert and no AI analysis. The market
-# closes at 15:30, so there is no session left to act in; they are reported in
-# the next morning's digest from Screener's figures instead.
+# Alerts and AI analysis run only while the market is open: 09:00 to 15:30 IST.
+# Outside that there is no session to act in, so a filing raises no alert and
+# consumes no AI budget; it is reported in the next 08:00 digest from Screener's
+# figures instead.
+MARKET_OPEN_HOUR = 9
+MARKET_OPEN_MINUTE = 0
 INTRADAY_CUTOFF_HOUR = 15
-INTRADAY_CUTOFF_MINUTE = 25
+INTRADAY_CUTOFF_MINUTE = 30
 
 
 def is_within_action_window(now_ist: datetime = None) -> bool:
     """
     True when a result arriving now can still be acted on today.
 
-    False after 15:25 on a working day, and false all day at weekends — in both
-    cases there is no session left to trade into, so the result raises no alert
-    and consumes no AI budget. It appears in the next 08:00 digest instead.
+    False before the open and after the close on a working day, and false all
+    day at weekends. A pre-open filing is deliberately not analysed on arrival:
+    the verdict would be hours stale by the time it could be traded, and the
+    08:00 digest is where the overnight batch is meant to be read.
     """
     now = now_ist or datetime.now(IST)
     if now.weekday() > 4:                       # Saturday / Sunday
         return False
+    opens = now.replace(hour=MARKET_OPEN_HOUR, minute=MARKET_OPEN_MINUTE,
+                        second=0, microsecond=0)
     cutoff = now.replace(hour=INTRADAY_CUTOFF_HOUR, minute=INTRADAY_CUTOFF_MINUTE,
                          second=0, microsecond=0)
-    return now <= cutoff
+    return opens <= now <= cutoff
 
 
 def make_tracking_ref(symbol: str, when: datetime = None) -> str:
@@ -324,7 +330,7 @@ def route_financial_result(db: Session, ann, event, dedup_key: str):
     if not actionable:
         logger.info(
             f"🌙 [RESULT DEFERRED] {symbol} ({pending.tracking_ref}) arrived after the "
-            f"15:20 IST cutoff — no alert or AI now; held for the 08:00 digest."
+            f"outside the 09:00-15:30 IST window — no alert or AI now; held for the 08:00 digest."
         )
         return
 

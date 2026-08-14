@@ -51,12 +51,16 @@ Dedup keys are claimed under **every** identifier (ISIN, scrip code, ticker) —
 BSE and NSE expose different fields, so keying on "the best available" produces
 different keys for the same filing and the duplicate slips through.
 
-### The 15:25 cutoff
+### The 09:00-15:30 window
 
-Results filed after **15:25 IST** on a working day, or any time at weekends, get
-**no alert and no AI analysis** — there is no session left to trade into. They
-are marked `deferred`, stay visible in the app, and are reported in the 08:00
-digest from Screener's figures only.
+Alerts and AI analysis run only while the market is open, **09:00 to 15:30 IST**
+on a working day. Anything outside that — pre-open, post-close, or a weekend —
+gets **no alert and no AI analysis**, because there is no session left to trade
+into. Those are marked `deferred`, stay visible in the app, and are reported in
+the 08:00 digest from Screener's figures only.
+
+A filing between 08:00 and 09:00 therefore waits for the *next* morning's
+digest: it is past the current digest's window but before the AI opens.
 
 Nothing analyses them later. That is deliberate; a 07:00 batch job existed
 briefly and was removed for contradicting the cutoff.
@@ -64,7 +68,19 @@ briefly and was removed for contradicting the cutoff.
 ### Daily jobs (IST, guarded by last-run date)
 
 - **06:00** earnings sync into the watchlist
-- **08:00** morning digest — HTML page + PDF + one Telegram alert
+- **08:00** morning digest — HTML page + PDF + one Telegram alert. Covers a
+  rolling **08:00-to-08:00 IST** window, so every filing lands in exactly one
+  digest and the boundary falls where nobody is trading. Anything older that was
+  never digested is swept in too, so a missed run or a weekend cannot lose rows.
+
+Screener is keyed by **BSE scrip code** for BSE-only companies — `LIMECHM` 404s
+where `507759` resolves — and answers 429 when called back to back, so requests
+are paced. Both together took digest coverage from 4/14 to 6/6 on a sample.
+
+The digest's mechanical `screener_signal` refuses any comparison against a base
+under ₹1 crore. A micro-cap moving from ₹0.02 Cr profit to ₹0.06 Cr loss is
+arithmetically -400% and means nothing; it reads NA, like every other
+uncertainty in this codebase.
 
 ---
 
