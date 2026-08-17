@@ -168,7 +168,23 @@ def _build_rows(db: Session, pendings: List[PendingResultOrder],
             except Exception:
                 ai_metrics = {}
 
-        screener = fetch_latest_quarter(p.symbol, cache_only=cache_only)
+        # Screener figures are fetched once and kept on the row. A published
+        # quarter does not change, and fetching is paced at roughly a company a
+        # second — so re-reading a past day must not mean re-fetching it.
+        screener = None
+        if getattr(p, "screener_json", None):
+            try:
+                screener = json.loads(p.screener_json)
+            except Exception:
+                screener = None
+        if screener is None:
+            screener = fetch_latest_quarter(p.symbol, cache_only=cache_only)
+            if screener.get("ok"):
+                try:
+                    p.screener_json = json.dumps(screener)
+                    db.commit()
+                except Exception:
+                    db.rollback()
 
         comparison = []
         for key in METRIC_ROWS:

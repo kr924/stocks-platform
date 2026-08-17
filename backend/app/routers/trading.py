@@ -918,11 +918,12 @@ def _start_digest_build(for_date: str) -> None:
             return
 
         def build():
+            # Walks the day once, storing each company's Screener figures on its
+            # row. Nothing is written to disk: the rows are the store, and the
+            # next request for this date — or any view of these filings — reads
+            # them without touching Screener again.
             from app.database import SessionLocal
-            from app.services.morning_digest import (
-                _DIGEST_DIR, _build_rows, serialize_digest_rows,
-            )
-            import os as _os
+            from app.services.morning_digest import _build_rows
             db = SessionLocal()
             try:
                 pendings = (db.query(PendingResultOrder)
@@ -931,21 +932,10 @@ def _start_digest_build(for_date: str) -> None:
                 if not pendings:
                     return
                 rows = _build_rows(db, pendings)
-                payload = {
-                    "date": for_date,
-                    "total": len(rows),
-                    "analysed": sum(1 for r in rows if r["analysed"]),
-                    "companies": serialize_digest_rows(rows),
-                    "building": False,
-                    "pending_screener": 0,
-                }
-                _os.makedirs(_DIGEST_DIR, exist_ok=True)
-                with open(_os.path.join(_DIGEST_DIR, f"digest_{for_date}.json"), "w",
-                          encoding="utf-8") as f:
-                    json.dump(payload, f, default=str)
-                logger.info(f"[DIGEST] Background build complete for {for_date}: {len(rows)} companies")
+                got = sum(1 for r in rows if (r.get("screener") or {}).get("ok"))
+                logger.info(f"[DIGEST] Screener backfill for {for_date}: {got}/{len(rows)} companies")
             except Exception as e:
-                logger.error(f"[DIGEST] Background build failed for {for_date}: {e}")
+                logger.error(f"[DIGEST] Screener backfill failed for {for_date}: {e}")
             finally:
                 db.close()
 
@@ -975,13 +965,11 @@ def get_digest_data(for_date: str, limit: int = 40, db: Session = Depends(get_db
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", for_date):
         raise HTTPException(status_code=400, detail="Date must be YYYY-MM-DD")
 
-    saved = os.path.join(_DIGEST_DIR, f"digest_{for_date}.json")
-    if os.path.exists(saved):
-        try:
-            with open(saved, encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            logger.error(f"Unreadable digest file for {for_date}: {e}")
+    # Deliberately not reading digest_<date>.json here. That file is named for
+    # the morning the digest ran, and covers the 08:00-to-08:00 window ending
+    # that morning — so it never holds "results announced on <date>", which is
+    # what this endpoint is asked for. Screener figures live on the rows now,
+    # which makes rebuilding from the database cheap and correctly dated.
 
     # A past date reads back what was reported that day; today builds live.
     q = db.query(PendingResultOrder).filter(PendingResultOrder.trade_date == for_date)

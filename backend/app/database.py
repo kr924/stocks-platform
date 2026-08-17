@@ -397,6 +397,11 @@ class PendingResultOrder(Base):
     # next morning digest rather than firing overnight.
     deferred = Column(Boolean, default=False, index=True)
     digest_sent_at = Column(DateTime, nullable=True)
+    # Screener's figures for this filing, fetched once and kept. The digest and
+    # the panel both read them from here: fetching is rate limited to roughly
+    # one company a second, so re-fetching a past day on demand is minutes of
+    # waiting for numbers that cannot have changed.
+    screener_json = Column(Text, nullable=True)
 
     dedup_key = Column(String(200), unique=True, index=True, nullable=False)
     # pending → ordered | dismissed | expired
@@ -473,6 +478,7 @@ def init_db():
         _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN ai_completed_at DATETIME")
         _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN validation_json TEXT")
         _safe_alter(conn, "ALTER TABLE pending_result_orders ADD COLUMN price_at_announcement FLOAT")
+        _safe_alter(conn, "ALTER TABLE pending_result_orders ADD COLUMN screener_json TEXT")
 
 
 def _safe_alter(conn, sql: str):
