@@ -111,11 +111,12 @@ interface StockDetail {
  * its automatic fetches; rows can still be refreshed one at a time, and the
  * whole table on demand.
  */
-function LivePriceToggle({ paused, onToggle, onRefreshAll, label }: {
+function LivePriceToggle({ paused, onToggle, onRefreshAll, label, name }: {
   paused: boolean;
   onToggle: () => void;
   onRefreshAll: () => void;
   label: string;
+  name?: string;
 }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
@@ -134,7 +135,7 @@ function LivePriceToggle({ paused, onToggle, onRefreshAll, label }: {
         }}
       >
         {paused ? <Play size={11} /> : <Pause size={11} />}
-        {paused ? "PAUSED" : "LIVE"}
+        {name ? `${name} · ` : ""}{paused ? "PAUSED" : "LIVE"}
       </button>
       {paused && (
         <button
@@ -455,8 +456,15 @@ export default function App() {
   const [moversPaused, setMoversPaused] = useState<boolean>(
     () => localStorage.getItem("moversPaused") === "1"
   );
+  // Holdings are stock actually owned, so they keep updating even when the rest
+  // of the watchlist is paused — the reason to pause is to save quota on stocks
+  // being watched, not on money currently at risk.
+  const [holdingsPaused, setHoldingsPaused] = useState<boolean>(
+    () => localStorage.getItem("holdingsPaused") === "1"
+  );
   const watchlistPausedRef = useRef(watchlistPaused);
   const moversPausedRef = useRef(moversPaused);
+  const holdingsPausedRef = useRef(holdingsPaused);
   const [rowRefreshing, setRowRefreshing] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -468,6 +476,11 @@ export default function App() {
     moversPausedRef.current = moversPaused;
     localStorage.setItem("moversPaused", moversPaused ? "1" : "0");
   }, [moversPaused]);
+
+  useEffect(() => {
+    holdingsPausedRef.current = holdingsPaused;
+    localStorage.setItem("holdingsPaused", holdingsPaused ? "1" : "0");
+  }, [holdingsPaused]);
 
   useEffect(() => {
     selectedKeyRef.current = selectedKey;
@@ -522,10 +535,12 @@ export default function App() {
     // then spend on the filing you are actually deciding on.
     const interval = setInterval(() => {
       if (checkIsMarketHours()) {
-        if (!watchlistPausedRef.current) {
+        // The watchlist endpoint returns holdings too, so one request serves
+        // both; the pauses decide which rows are allowed to change.
+        if (!watchlistPausedRef.current || !holdingsPausedRef.current) {
           refreshLiveQuotes();
-          fetchIndices();
         }
+        if (!watchlistPausedRef.current) fetchIndices();
         if (!moversPausedRef.current) refreshLiveMovers();
       }
     }, 10000);
@@ -533,10 +548,10 @@ export default function App() {
     // Off-market refresh (every 5 minutes) to conserve API calls when trading is closed
     const offMarketInterval = setInterval(() => {
       if (!checkIsMarketHours()) {
-        if (!watchlistPausedRef.current) {
+        if (!watchlistPausedRef.current || !holdingsPausedRef.current) {
           refreshLiveQuotes();
-          fetchIndices();
         }
+        if (!watchlistPausedRef.current) fetchIndices();
         if (!moversPausedRef.current) refreshLiveMovers();
       }
     }, 300000);
@@ -781,7 +796,17 @@ export default function App() {
       if (Object.keys(newTrends).length > 0) {
         setSentimentTrend((prev) => ({ ...prev, ...newTrends }));
       }
-      setWatchlist(wlData);
+      // A paused section keeps its previous prices. Holdings and the rest of
+      // the watchlist arrive in the same payload, so the merge is per row.
+      setWatchlist(prev => {
+        if (!watchlistPausedRef.current && !holdingsPausedRef.current) return wlData;
+        const byKey = new Map(prev.map((r: WatchlistItem) => [r.instrument_key, r]));
+        return wlData.map((row: WatchlistItem) => {
+          const frozen = row.is_holding ? holdingsPausedRef.current : watchlistPausedRef.current;
+          const previous = byKey.get(row.instrument_key);
+          return frozen && previous ? previous : row;
+        });
+      });
 
       // Also refresh the selected stock detail quote
       if (currentSelectedKey) {
@@ -1504,6 +1529,16 @@ export default function App() {
                 onToggle={() => setWatchlistPaused((v) => !v)}
                 onRefreshAll={refreshLiveQuotes}
                 label="watchlist"
+                name="WATCHED"
+              />
+              {/* Separate on purpose: pausing the stocks you are watching should
+                  not stop the prices of the stocks you own. */}
+              <LivePriceToggle
+                paused={holdingsPaused}
+                onToggle={() => setHoldingsPaused((v) => !v)}
+                onRefreshAll={refreshLiveQuotes}
+                label="holdings"
+                name="HOLDINGS"
               />
 
               <div className="period-bar">

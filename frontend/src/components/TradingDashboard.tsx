@@ -2544,6 +2544,24 @@ export function TradingDashboard() {
                   <span style={{ fontSize: "10px", fontFamily: "ui-monospace, Menlo, monospace", color: "var(--text-muted)", background: "var(--surface-2)", padding: "2px 6px", borderRadius: "4px" }}>{c.tracking_ref}</span>
                 )}
                 <button
+                  onClick={() => {
+                    // Prefill and scroll the buy form into view: the digest is a
+                    // list of decisions, and acting on one should not mean
+                    // retyping its symbol somewhere else.
+                    setBuyForm(prev => ({ ...prev, symbol: c.symbol }));
+                    setShowBuyForm(true);
+                    document.getElementById("auto-trading-configs")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }}
+                  title={`Buy ${c.symbol} — opens the order form with the symbol filled in`}
+                  style={{
+                    padding: "3px 9px", background: "rgba(63, 191, 135, 0.14)",
+                    border: "1px solid rgba(63, 191, 135, 0.35)", borderRadius: "5px",
+                    color: "var(--positive)", fontSize: "10px", fontWeight: 700,
+                    cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px",
+                  }}>
+                  <ShoppingBag size={11} /> Buy
+                </button>
+                <button
                   onClick={() => openEarningsChart(c.symbol, (c as any).instrument_key || undefined)}
                   title={`Open the price chart for ${c.symbol}`}
                   style={{
@@ -3294,7 +3312,7 @@ export function TradingDashboard() {
           border: "1px solid rgba(255, 255, 255, 0.05)"
         }}
       >
-        <h2 style={{ fontSize: "16px", fontWeight: "700", color: "var(--text-primary)", display: "flex", alignItems: "center", gap: "8px" }}>
+        <h2 id="auto-trading-configs" style={{ fontSize: "16px", fontWeight: "700", color: "var(--text-primary)", display: "flex", alignItems: "center", gap: "8px", scrollMarginTop: "16px" }}>
           ⚡ Auto-Trading Target Stock Configurations
         </h2>
         <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>

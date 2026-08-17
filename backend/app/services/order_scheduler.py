@@ -111,6 +111,8 @@ def execute_buy(db: Session, config: TradeConfig) -> dict:
         config.buy_price = result.price
         config.bought_at = datetime.utcnow()
         config.scheduled_for = None
+        from app.services.holdings import mark_as_holding
+        mark_as_holding(db, config.symbol, config.instrument_key or "")
     else:
         # Left scheduled would mean retrying every sweep against a broker that
         # has already refused it. The failure is recorded and the config stops.
