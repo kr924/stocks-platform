@@ -67,6 +67,18 @@ class AutoTradingSettingsUpdate(BaseModel):
     premium_openrouter_model: Optional[str] = None
 
 
+class DirectBuyRequest(BaseModel):
+    """A buy placed straight away, with no filing to wait for and no arming."""
+    symbol: str
+    instrument_key: Optional[str] = None
+    quantity: int = 1
+    order_type: str = "MARKET"
+    limit_price: Optional[float] = None
+    stoploss_pct: float = 2.0
+    stoploss_type: str = "software"
+    broker: str = "upstox"
+
+
 class PendingResultOrderRequest(BaseModel):
     """Order details supplied from the results order screen."""
     quantity: int = 1
@@ -300,6 +312,81 @@ def disarm_config(config_id: int, db: Session = Depends(get_db)):
 
 
 # ─── Manual Buy / Sell ───────────────────────────────────────────────────────
+
+@router.post("/buy-now")
+def direct_buy(body: DirectBuyRequest, db: Session = Depends(get_db)):
+    """
+    Buy a stock outright — no target, no arming, no waiting for a filing.
+
+    Inside 09:15-15:30 IST on a weekday the order goes to the broker now.
+    Outside it, the config is stored as `scheduled` for the next open, because
+    a broker rejects an order sent to a shut exchange and the intent should not
+    be lost to the user having to remember at 09:15 the next morning.
+
+    Either way a TradeConfig is created, so the order appears in the targets
+    table alongside everything else rather than in a parallel list.
+    """
+    from app.main import resolve_instrument_keys
+    from app.services.order_scheduler import execute_buy, schedule_or_now
+
+    symbol = body.symbol.upper().strip()
+    if not symbol:
+        raise HTTPException(status_code=400, detail="Symbol is required")
+    if body.quantity < 1:
+        raise HTTPException(status_code=400, detail="Quantity must be at least 1")
+    if body.order_type.upper() == "LIMIT" and not body.limit_price:
+        raise HTTPException(status_code=400, detail="A LIMIT order needs a limit price")
+
+    key = body.instrument_key
+    if not key or not _ISIN_RE.match(key.split("|")[-1]):
+        resolved = resolve_instrument_keys(symbol)
+        if not resolved:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{symbol} does not resolve to an instrument on NSE or BSE",
+            )
+        key = resolved[0]
+
+    now, scheduled_for = schedule_or_now()
+    config = TradeConfig(
+        symbol=symbol,
+        instrument_key=key,
+        purchase_date=datetime.utcnow().strftime("%Y-%m-%d"),
+        quantity=body.quantity,
+        stoploss_pct=body.stoploss_pct,
+        stoploss_type=body.stoploss_type,
+        broker=body.broker.lower(),
+        order_type=body.order_type.upper(),
+        limit_price=body.limit_price,
+        status="triggered" if now else "scheduled",
+        scheduled_for=scheduled_for,
+        trigger_subject="Direct buy",
+        notes="Placed directly" if now else "Queued for the next market open",
+        triggered_at=datetime.utcnow(),
+    )
+    db.add(config)
+    db.commit()
+    db.refresh(config)
+
+    if not now:
+        logger.info(f"⏰ [SCHEDULED BUY] {symbol} x{body.quantity} queued for {scheduled_for} UTC")
+        return {
+            "success": True,
+            "scheduled": True,
+            "scheduled_for": scheduled_for.isoformat(),
+            "message": f"Market is closed — {symbol} is queued for the next open (09:15 IST).",
+            "config": _serialize_config(config),
+        }
+
+    outcome = execute_buy(db, config)
+    db.refresh(config)
+    return {
+        "success": outcome["success"],
+        "scheduled": False,
+        "message": outcome["message"],
+        "config": _serialize_config(config),
+    }
+
 
 @router.post("/configs/{config_id}/buy")
 def manual_buy(config_id: int, body: ManualOrderRequest = None, db: Session = Depends(get_db)):
@@ -780,6 +867,31 @@ def place_pending_result_order(
         notes=f"Created from financial result #{pending.id}",
         triggered_at=datetime.utcnow(),
     )
+    # Outside trading hours the broker would reject this outright. The intent is
+    # real, so it is queued for the next open exactly like a direct buy — the
+    # filing that prompted it does not stop being a reason to buy at 15:31.
+    from app.services.order_scheduler import schedule_or_now
+    can_place, scheduled_for = schedule_or_now()
+    if not can_place:
+        config.status = "scheduled"
+        config.scheduled_for = scheduled_for
+        config.notes = f"Queued for the next market open — from financial result #{pending.id}"
+        pending.status = "ordered"
+        pending.config_id = config.id
+        pending.resolved_at = datetime.utcnow()
+        db.add(config)
+        db.commit()
+        db.refresh(config)
+        logger.info(f"⏰ [SCHEDULED BUY] {pending.symbol} queued for {scheduled_for} UTC from result #{pending.id}")
+        return {
+            "success": True,
+            "scheduled": True,
+            "message": f"Market is closed — {pending.symbol} is queued for the next open (09:15 IST).",
+            "pending": _serialize_pending(pending, None, db),
+            "config": _serialize_config(config),
+            "order": None,
+        }
+
     db.add(config)
     db.commit()
     db.refresh(config)

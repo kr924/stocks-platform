@@ -594,6 +594,75 @@ export function TradingDashboard() {
 
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
+
+  // Direct buy: no target, no arming, no filing to wait for.
+  const [showBuyForm, setShowBuyForm] = useState(false);
+  const [buyBusy, setBuyBusy] = useState(false);
+  const [buyForm, setBuyForm] = useState({
+    symbol: "", quantity: 1, order_type: "MARKET", limit_price: "",
+    stoploss_pct: 2, stoploss_type: "software", broker: "upstox",
+  });
+
+  /**
+   * NSE continuous trading, 09:15-15:30 IST on a weekday.
+   *
+   * Tighter than the 09:00 the results panel uses: the pre-open auction runs
+   * 09:00-09:15 and does not take the plain market orders placed here. This
+   * only decides what the button *says* — the backend decides what happens.
+   */
+  const canTradeNow = () => {
+    try {
+      const ist = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+      if (ist.getDay() === 0 || ist.getDay() === 6) return false;
+      const mins = ist.getHours() * 60 + ist.getMinutes();
+      return mins >= 555 && mins <= 930;   // 09:15 to 15:30
+    } catch {
+      return true;
+    }
+  };
+
+  const handleDirectBuy = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const symbol = buyForm.symbol.trim().toUpperCase();
+    if (!symbol) return;
+
+    const when = canTradeNow()
+      ? "This places a real order now."
+      : "The market is closed, so this will be queued for the next open at 09:15 IST.";
+    if (!window.confirm(`Buy ${buyForm.quantity} ${symbol} (${buyForm.order_type})?\n\n${when}`)) return;
+
+    setBuyBusy(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/trading/buy-now`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          symbol,
+          quantity: buyForm.quantity,
+          order_type: buyForm.order_type,
+          limit_price: buyForm.order_type === "LIMIT" && buyForm.limit_price
+            ? parseFloat(buyForm.limit_price) : null,
+          stoploss_pct: buyForm.stoploss_pct,
+          stoploss_type: buyForm.stoploss_type,
+          broker: buyForm.broker,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.success === false) {
+        alert(`Buy failed for ${symbol}: ${data.message || data.detail || "Unknown error"}`);
+      } else {
+        alert(data.message || `Order placed for ${symbol}.`);
+        setShowBuyForm(false);
+        setBuyForm(prev => ({ ...prev, symbol: "", limit_price: "" }));
+      }
+      await fetchData();
+    } catch (err) {
+      console.error("Direct buy failed:", err);
+      alert(`Buy failed for ${symbol}. See console for details.`);
+    } finally {
+      setBuyBusy(false);
+    }
+  };
   const [autoArmOnSave, setAutoArmOnSave] = useState(true);
   const [hoveredOrder, setHoveredOrder] = useState<{ order: TradeOrder; x: number; y: number } | null>(null);
 
@@ -2200,7 +2269,8 @@ export function TradingDashboard() {
                           border: "none", borderRadius: "6px", color: "var(--on-accent)", fontSize: "12px", fontWeight: 700,
                           cursor: busy ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: "6px"
                         }}>
-                        <ShoppingBag size={14} /> {busy ? "Placing…" : "Place Buy Order"}
+                        <ShoppingBag size={14} />
+                        {busy ? "Placing…" : canTradeNow() ? "Place Buy Order" : "Queue Buy for 09:15"}
                       </button>
                     )}
                     {pending.position?.can_sell && (
@@ -3289,6 +3359,20 @@ export function TradingDashboard() {
             {showAddForm ? "Cancel" : "Add Target Stock"}
           </button>
           <button
+            onClick={() => setShowBuyForm(!showBuyForm)}
+            title="Buy a stock outright — no target, no arming, no filing to wait for"
+            style={{
+              display: "flex", alignItems: "center", gap: "6px",
+              padding: "8px 16px", fontSize: "12px", fontWeight: 700, borderRadius: "8px",
+              backgroundColor: showBuyForm ? "var(--text-faint)" : "var(--positive)",
+              color: "var(--on-accent)", border: "none", cursor: "pointer",
+              boxShadow: "0 2px 8px rgba(63, 191, 135,0.3)",
+            }}
+          >
+            <ShoppingBag size={15} />
+            {showBuyForm ? "Cancel" : "Buy Stock"}
+          </button>
+          <button
             onClick={fetchData}
             style={{
               padding: "8px 12px",
@@ -3306,6 +3390,81 @@ export function TradingDashboard() {
 
 
       {/* ADD TARGET STOCK FORM */}
+      {showBuyForm && (
+        <form onSubmit={handleDirectBuy} style={{
+          background: "var(--surface-1)", border: "1px solid rgba(63, 191, 135,0.3)",
+          borderRadius: "12px", padding: "16px", marginBottom: "16px",
+          display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: "12px",
+        }}>
+          <label style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 700 }}>
+            SYMBOL
+            <input
+              autoFocus
+              value={buyForm.symbol}
+              onChange={e => setBuyForm(p => ({ ...p, symbol: e.target.value.toUpperCase() }))}
+              placeholder="e.g. RELIANCE"
+              style={{ display: "block", width: "160px", marginTop: "4px", padding: "8px 10px", background: "var(--bg-sunken)", border: "1px solid var(--border-default)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "13px", fontWeight: 700 }}
+            />
+          </label>
+          <label style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 700 }}>
+            QTY
+            <input type="number" min={1} value={buyForm.quantity}
+              onChange={e => setBuyForm(p => ({ ...p, quantity: parseInt(e.target.value) || 1 }))}
+              style={{ display: "block", width: "80px", marginTop: "4px", padding: "8px 10px", background: "var(--bg-sunken)", border: "1px solid var(--border-default)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "13px" }} />
+          </label>
+          <label style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 700 }}>
+            TYPE
+            <select value={buyForm.order_type}
+              onChange={e => setBuyForm(p => ({ ...p, order_type: e.target.value }))}
+              style={{ display: "block", marginTop: "4px", padding: "8px 10px", background: "var(--bg-sunken)", border: "1px solid var(--border-default)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "13px" }}>
+              <option value="MARKET">MARKET</option>
+              <option value="LIMIT">LIMIT</option>
+            </select>
+          </label>
+          {buyForm.order_type === "LIMIT" && (
+            <label style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 700 }}>
+              LIMIT ₹
+              <input type="number" step="0.05" value={buyForm.limit_price}
+                onChange={e => setBuyForm(p => ({ ...p, limit_price: e.target.value }))}
+                style={{ display: "block", width: "110px", marginTop: "4px", padding: "8px 10px", background: "var(--bg-sunken)", border: "1px solid var(--border-default)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "13px" }} />
+            </label>
+          )}
+          <label style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 700 }}>
+            SL %
+            <input type="number" step="0.5" min={0.5} value={buyForm.stoploss_pct}
+              onChange={e => setBuyForm(p => ({ ...p, stoploss_pct: parseFloat(e.target.value) || 2 }))}
+              style={{ display: "block", width: "80px", marginTop: "4px", padding: "8px 10px", background: "var(--bg-sunken)", border: "1px solid var(--border-default)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "13px" }} />
+          </label>
+          <label style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 700 }}>
+            BROKER
+            <select value={buyForm.broker}
+              onChange={e => setBuyForm(p => ({ ...p, broker: e.target.value }))}
+              style={{ display: "block", marginTop: "4px", padding: "8px 10px", background: "var(--bg-sunken)", border: "1px solid var(--border-default)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "13px" }}>
+              <option value="upstox">Upstox</option>
+              <option value="zerodha">Zerodha</option>
+            </select>
+          </label>
+
+          <button type="submit" disabled={buyBusy || !buyForm.symbol.trim()}
+            style={{
+              padding: "9px 18px", borderRadius: "8px", border: "none",
+              background: buyBusy ? "rgba(63, 191, 135,0.4)" : "var(--positive)",
+              color: "var(--on-accent)", fontSize: "12px", fontWeight: 700,
+              cursor: buyBusy ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: "6px",
+            }}>
+            <ShoppingBag size={14} />
+            {buyBusy ? "Placing…" : canTradeNow() ? "Buy Now" : "Queue for 09:15"}
+          </button>
+
+          {/* Says which of the two will happen before the click, not after. */}
+          <span style={{ fontSize: "11px", color: canTradeNow() ? "var(--positive)" : "var(--warning)" }}>
+            {canTradeNow()
+              ? "Market is open — this order goes to the broker immediately."
+              : "Market is closed — this will be queued for the next trading day at 09:15 IST."}
+          </span>
+        </form>
+      )}
+
       {showAddForm && (
         <form onSubmit={handleAddConfig} style={{
           background: "rgba(22, 27, 36, 0.8)",

@@ -153,6 +153,7 @@ async def _intelligence_scheduler():
         "social": 0.0,
         "filings": 0.0,
         "ai_analysis": 0.0,
+        "scheduled_buys": 0.0,
     }
 
     while True:
@@ -201,6 +202,12 @@ async def _intelligence_scheduler():
 
             if due("filings", "company_filings", 1800):
                 asyncio.create_task(asyncio.to_thread(_run_filings_scraper))
+
+            # Scheduled buys: orders placed while the market was shut, waiting
+            # for the open. Checked every 30s so one fires within half a minute
+            # of 09:15 rather than whenever the next slow task happens to run.
+            if due("scheduled_buys", "scheduled_buys", 30, scaled=False):
+                asyncio.create_task(asyncio.to_thread(_run_scheduled_buys))
 
             # AI queue drains on its own cadence, independent of market hours
             if due("ai_analysis", "ai_analysis_queue", 120, scaled=False):
@@ -281,6 +288,20 @@ def _single_flight(name: str):
                 lock.release()
         return wrapper
     return decorator
+
+
+@_single_flight("scheduled_buys")
+def _run_scheduled_buys():
+    """Place buys that were queued while the market was closed."""
+    try:
+        from app.services.order_scheduler import run_due_scheduled_buys
+        db = next(get_db())
+        try:
+            run_due_scheduled_buys(db)
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"Scheduled buy sweep error: {e}")
 
 
 @_single_flight("pending_purge")

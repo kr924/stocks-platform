@@ -265,6 +265,9 @@ class TradeConfig(Base):
     triggered_at = Column(DateTime, nullable=True)                    # when NSE news was detected
     bought_at = Column(DateTime, nullable=True)
     sold_at = Column(DateTime, nullable=True)
+    # When a buy was requested outside trading hours: the order waits here until
+    # the next open rather than being sent to a broker that will reject it.
+    scheduled_for = Column(DateTime, nullable=True)
 
 
 class TradeOrder(Base):
@@ -479,6 +482,7 @@ def init_db():
         _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN validation_json TEXT")
         _safe_alter(conn, "ALTER TABLE pending_result_orders ADD COLUMN price_at_announcement FLOAT")
         _safe_alter(conn, "ALTER TABLE pending_result_orders ADD COLUMN screener_json TEXT")
+        _safe_alter(conn, "ALTER TABLE trade_configs ADD COLUMN scheduled_for DATETIME")
 
 
 def _safe_alter(conn, sql: str):
