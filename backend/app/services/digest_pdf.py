@@ -135,7 +135,7 @@ def _company_block(r: dict, st: dict) -> list:
 
     sc = r.get("screener") or {}
     head = ["", "Our AI", f"Screener ({sc.get('quarter') or 'latest qtr'})", "Variance",
-            "AI YoY", "Screener YoY"]
+            "AI YoY", "Scr YoY", "Scr QoQ"]
     data = [head]
     styles = [
         ("BACKGROUND", (0, 0), (-1, 0), _HEAD_BG),
@@ -170,12 +170,13 @@ def _company_block(r: dict, st: dict) -> list:
             _safe(c["label"]), ai_cell, _num(c.get("actual")), var,
             _safe(c.get("ai_yoy") or "NA") if analysed else "-",
             f"{c['actual_yoy']:.1f}%" if c.get("actual_yoy") is not None else "-",
+            f"{c['actual_qoq']:.1f}%" if c.get("actual_qoq") is not None else "-",
         ])
         styles.append(("TEXTCOLOR", (3, i), (3, i), vcol))
         if ai_cell in ("not analysed", "NA"):
             styles.append(("TEXTCOLOR", (1, i), (1, i), _NA))
 
-    table = Table(data, colWidths=[26 * mm, 34 * mm, 34 * mm, 20 * mm, 22 * mm, 24 * mm])
+    table = Table(data, colWidths=[24 * mm, 31 * mm, 31 * mm, 18 * mm, 19 * mm, 19 * mm, 19 * mm])
     table.setStyle(TableStyle(styles))
     flow.append(table)
 

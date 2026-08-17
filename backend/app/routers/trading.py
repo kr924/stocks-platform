@@ -901,64 +901,64 @@ def list_digests():
 
 
 @router.get("/digest/{for_date}/data")
-def get_digest_data(for_date: str, db: Session = Depends(get_db)):
+def get_digest_data(for_date: str, limit: int = 40, db: Session = Depends(get_db)):
     """
     The digest as JSON, for the dashboard panel.
 
-    Serves the same rows the page and the PDF are built from, so the three views
-    cannot drift apart.
+    Served from the file the 08:00 run wrote whenever there is one. Building it
+    live walks Screener once per company at the pacing Screener demands, which
+    on a heavy day is many minutes — long enough that the panel timed out and
+    reported the day as having no results at all.
+
+    A date with no saved file is built live but capped, so the panel answers
+    quickly and says plainly that it is showing part of the day.
     """
-    import json as _json
-    from app.services.morning_digest import _build_rows, collect_for_digest
+    import os
+    from app.services.morning_digest import (
+        _DIGEST_DIR, _build_rows, collect_for_digest, serialize_digest_rows,
+    )
 
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", for_date):
         raise HTTPException(status_code=400, detail="Date must be YYYY-MM-DD")
+
+    saved = os.path.join(_DIGEST_DIR, f"digest_{for_date}.json")
+    if os.path.exists(saved):
+        try:
+            with open(saved, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error(f"Unreadable digest file for {for_date}: {e}")
 
     # A past date reads back what was reported that day; today builds live.
     q = db.query(PendingResultOrder).filter(PendingResultOrder.trade_date == for_date)
     pendings = q.order_by(PendingResultOrder.event_time.asc()).all()
     if not pendings:
-        pendings = collect_for_digest(db)
-        pendings = [p for p in pendings
+        pendings = [p for p in collect_for_digest(db)
                     if p.event_time and p.event_time.strftime("%Y-%m-%d") == for_date]
 
-    rows = _build_rows(db, pendings)
-    out = []
-    for r in rows:
-        p, log = r["pending"], r.get("log")
-        out.append({
-            "symbol": p.symbol,
-            "company_name": p.company_name,
-            "exchange": p.exchange,
-            "tracking_ref": p.tracking_ref,
-            "announced_at": p.event_time.isoformat() if p.event_time else None,
-            "ingested_at": p.created_at.isoformat() if p.created_at else None,
-            "ai_requested_at": p.ai_requested_at.isoformat() if p.ai_requested_at else None,
-            "ai_completed_at": p.ai_completed_at.isoformat() if p.ai_completed_at else None,
-            "deferred": bool(p.deferred),
-            "analysed": r["analysed"],
-            "verdict": r["verdict"],
-            "title": p.title,
-            "attachment_url": p.attachment_url,
-            "screener": {
-                "ok": r["screener"].get("ok"),
-                "quarter": r["screener"].get("quarter"),
-                "source_url": r["screener"].get("source_url"),
-                "error": r["screener"].get("error"),
-            },
-            "comparison": r["comparison"],
-            "validation": r.get("validation"),
-            "ai_summary": log.ai_summary if log else None,
-            "future_growth_outlook": log.future_growth_outlook if log else None,
-            "future_projected_numbers": log.future_projected_numbers if log else None,
-            "broker_estimates": log.broker_estimates if log else None,
-        })
-    return {
+    total = len(pendings)
+    truncated = total > limit
+    rows = _build_rows(db, pendings[:limit])
+    companies = serialize_digest_rows(rows)
+    payload = {
         "date": for_date,
-        "total": len(out),
-        "analysed": sum(1 for r in out if r["analysed"]),
-        "companies": out,
+        "total": total,
+        "shown": len(companies),
+        "truncated": truncated,
+        "analysed": sum(1 for r in companies if r["analysed"]),
+        "companies": companies,
     }
+
+    # Save a complete build so the next open of this date is instant. A capped
+    # one is not saved: it would masquerade as the whole day forever after.
+    if companies and not truncated:
+        try:
+            os.makedirs(_DIGEST_DIR, exist_ok=True)
+            with open(saved, "w", encoding="utf-8") as f:
+                json.dump(payload, f, default=str)
+        except Exception as e:
+            logger.error(f"Could not cache digest JSON for {for_date}: {e}")
+    return payload
 
 
 @router.get("/digest/{for_date}/pdf")

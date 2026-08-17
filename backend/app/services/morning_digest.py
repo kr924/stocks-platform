@@ -174,12 +174,14 @@ def _build_rows(db: Session, pendings: List[PendingResultOrder]) -> List[dict]:
             ai_num = parse_ai_value(ai_cell)
             actual = (screener.get("metrics", {}).get(key) or {}).get("current_qtr")
             actual_yoy = (screener.get("metrics", {}).get(key) or {}).get("yoy_change_pct")
+            actual_qoq = (screener.get("metrics", {}).get(key) or {}).get("qoq_change_pct")
             comparison.append({
                 "label": _ROW_LABELS[key],
                 "ai_text": ai_cell,
                 "ai_num": ai_num,
                 "actual": actual,
                 "actual_yoy": actual_yoy,
+                "actual_qoq": actual_qoq,
                 "ai_yoy": (ai_metrics.get(key) or {}).get("yoy_change_pct", "NA"),
                 **compare(ai_num, actual),
             })
@@ -295,6 +297,7 @@ def render_html(rows: List[dict], for_date: str) -> str:
                 f"<td>{verdict_cell}</td>"
                 f"<td>{e(str(c['ai_yoy']))}</td>"
                 f"<td>{('%.1f%%' % c['actual_yoy']) if c['actual_yoy'] is not None else '<span class=na>NA</span>'}</td>"
+                f"<td>{('%.1f%%' % c['actual_qoq']) if c.get('actual_qoq') is not None else '<span class=na>NA</span>'}</td>"
                 f"</tr>"
             )
 
@@ -325,7 +328,8 @@ def render_html(rows: List[dict], for_date: str) -> str:
   <table>
     <thead><tr>
       <th></th><th>Our AI</th><th>Screener (₹ Cr)</th><th>Variance</th>
-      <th>AI YoY</th><th>Screener YoY</th>
+      <th>AI YoY</th><th title="Against the same quarter last year">Screener YoY</th>
+      <th title="Against the previous quarter — sequential momentum">Screener QoQ</th>
     </tr></thead>
     <tbody>{''.join(body)}</tbody>
   </table>
@@ -355,6 +359,48 @@ def render_html(rows: List[dict], for_date: str) -> str:
 </body></html>"""
 
 
+def serialize_digest_rows(rows: List[dict]) -> List[dict]:
+    """
+    Digest rows as plain JSON, for the dashboard panel and the saved file.
+
+    One shape, used by the page, the PDF and the API, so the three views cannot
+    drift apart.
+    """
+    out = []
+    for r in rows:
+        p, log = r["pending"], r.get("log")
+        out.append({
+            "symbol": p.symbol,
+            "company_name": p.company_name,
+            "exchange": p.exchange,
+            "tracking_ref": p.tracking_ref,
+            "announced_at": p.event_time.isoformat() if p.event_time else None,
+            "ingested_at": p.created_at.isoformat() if p.created_at else None,
+            "ai_requested_at": p.ai_requested_at.isoformat() if p.ai_requested_at else None,
+            "ai_completed_at": p.ai_completed_at.isoformat() if p.ai_completed_at else None,
+            "deferred": bool(p.deferred),
+            "analysed": r["analysed"],
+            "verdict": r["verdict"],
+            "screener_signal": r.get("screener_signal"),
+            "title": p.title,
+            "attachment_url": p.attachment_url,
+            "screener": {
+                "ok": r["screener"].get("ok"),
+                "quarter": r["screener"].get("quarter"),
+                "prev_quarter": r["screener"].get("prev_quarter"),
+                "source_url": r["screener"].get("source_url"),
+                "error": r["screener"].get("error"),
+            },
+            "comparison": r["comparison"],
+            "validation": r.get("validation"),
+            "ai_summary": log.ai_summary if log else None,
+            "future_growth_outlook": log.future_growth_outlook if log else None,
+            "future_projected_numbers": log.future_projected_numbers if log else None,
+            "broker_estimates": log.broker_estimates if log else None,
+        })
+    return out
+
+
 def build_and_publish(db: Session, for_date: Optional[str] = None) -> dict:
     """
     Build the digest page and return {path, url_path, count, date}.
@@ -381,6 +427,22 @@ def build_and_publish(db: Session, for_date: Optional[str] = None) -> dict:
     except Exception as e:
         logger.error(f"[DIGEST] PDF generation failed: {e}")
         pdf_path = None
+
+    # The dashboard panel reads this rather than rebuilding: assembling it walks
+    # Screener once per company, which at the pacing Screener requires is many
+    # minutes for a heavy day — long enough that the panel gave up and reported
+    # the day as empty.
+    try:
+        with open(os.path.join(_DIGEST_DIR, f"digest_{for_date}.json"), "w", encoding="utf-8") as f:
+            json.dump({
+                "date": for_date,
+                "total": len(rows),
+                "analysed": sum(1 for r in rows if r["analysed"]),
+                "companies": serialize_digest_rows(rows),
+                "built_at": datetime.utcnow().isoformat(),
+            }, f, default=str)
+    except Exception as e:
+        logger.error(f"[DIGEST] Could not persist JSON for {for_date}: {e}")
 
     stamp = datetime.utcnow()
     for p in pendings:

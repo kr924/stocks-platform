@@ -49,6 +49,13 @@ def _get(url: str) -> Optional[requests.Response]:
     return None
 
 
+# Screener publishes a quarter once; re-fetching it minutes later cannot return
+# anything new, and at 1.5s a request the digest's few hundred companies are the
+# difference between a page that loads and one that times out.
+_QUARTER_CACHE_TTL = 6 * 3600
+_quarter_cache: Dict[str, tuple] = {}
+
+
 _bse_code_index: Optional[Dict[str, str]] = None
 
 
@@ -169,6 +176,10 @@ def fetch_latest_quarter(symbol: str) -> dict:
         return out
 
     sym = str(symbol).strip().upper()
+
+    cached = _quarter_cache.get(sym)
+    if cached and (time.monotonic() - cached[0]) <= _QUARTER_CACHE_TTL:
+        return cached[1]
     # Ticker first, then the BSE scrip code — Screener indexes BSE-only
     # companies under the code, and most of a results day is BSE-only.
     slugs = [sym] + _bse_codes_for(sym)
@@ -200,31 +211,44 @@ def fetch_latest_quarter(symbol: str) -> dict:
                 if series:
                     break
             if not series:
-                metrics[key] = {"current_qtr": None, "last_year_same_qtr": None, "yoy_change_pct": None}
+                metrics[key] = {"current_qtr": None, "last_year_same_qtr": None,
+                                "yoy_change_pct": None, "prev_qtr": None, "qoq_change_pct": None}
                 continue
+
+            def pct(cur, base):
+                if cur is None or base in (None, 0):
+                    return None
+                return round((cur - base) / abs(base) * 100, 1)
 
             current = series[-1] if series else None
             # Four columns back is the same quarter a year earlier.
             year_ago = series[-5] if len(series) >= 5 else None
-            change = None
-            if current is not None and year_ago not in (None, 0):
-                change = round((current - year_ago) / abs(year_ago) * 100, 1)
+            # One column back is the quarter immediately before this one. It
+            # answers a different question from YoY — sequential momentum rather
+            # than annual growth — and for a seasonal business the two routinely
+            # disagree, which is the point of showing both.
+            prev_qtr = series[-2] if len(series) >= 2 else None
             metrics[key] = {
                 "current_qtr": current,
                 "last_year_same_qtr": year_ago,
-                "yoy_change_pct": change,
+                "yoy_change_pct": pct(current, year_ago),
+                "prev_qtr": prev_qtr,
+                "qoq_change_pct": pct(current, prev_qtr),
             }
 
         out.update({
             "ok": any(m["current_qtr"] is not None for m in metrics.values()),
             "source_url": url,
             "quarter": headings[-1] if headings else "",
+            "prev_quarter": headings[-2] if len(headings) >= 2 else "",
             "metrics": metrics,
             "error": "" if metrics else out["error"],
         })
         if out["ok"]:
+            _quarter_cache[sym] = (time.monotonic(), out)
             return out
 
+    _quarter_cache[sym] = (time.monotonic(), out)
     return out
 
 

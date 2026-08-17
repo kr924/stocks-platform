@@ -22,7 +22,9 @@ import {
   Calendar,
   Sparkles,
   ChevronRight,
-  Pause
+  Pause,
+  Bell,
+  BellOff
 } from "lucide-react";
 
 const API_BASE = import.meta.env.VITE_API_BASE || (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" ? "http://localhost:8000" : "");
@@ -624,6 +626,113 @@ export function TradingDashboard() {
     fetchData();
   }, [resultsDate]);
 
+  /**
+   * Desktop notification with a short tone when a result lands.
+   *
+   * A filing is only tradeable for as long as the session lasts, and this panel
+   * is not always the focused tab. Both the permission prompt and the audio
+   * context need a user gesture to start, which is what the toggle is for —
+   * browsers ignore either if a background poll tries to open them.
+   */
+  const [alertsOn, setAlertsOn] = useState<boolean>(
+    () => localStorage.getItem("resultAlertsOn") === "1"
+  );
+  const alertsOnRef = useRef(alertsOn);
+  const seenResultIdsRef = useRef<Set<number> | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+
+  useEffect(() => {
+    alertsOnRef.current = alertsOn;
+    localStorage.setItem("resultAlertsOn", alertsOn ? "1" : "0");
+  }, [alertsOn]);
+
+  const enableAlerts = async () => {
+    if (alertsOn) {
+      setAlertsOn(false);
+      return;
+    }
+    try {
+      const perm = await Notification.requestPermission();
+      if (perm !== "granted") {
+        alert("Browser notifications are blocked for this site — enable them in the address-bar site settings.");
+        return;
+      }
+      // Created inside the click so the browser lets it make sound later.
+      audioCtxRef.current = audioCtxRef.current || new AudioContext();
+      await audioCtxRef.current.resume();
+      setAlertsOn(true);
+    } catch (err) {
+      console.error("Could not enable result alerts:", err);
+    }
+  };
+
+  /** Two short notes — audible without being alarming on a heavy results day. */
+  const playAlertTone = () => {
+    const ctx = audioCtxRef.current;
+    if (!ctx) return;
+    try {
+      [0, 0.18].forEach((offset, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.value = i === 0 ? 880 : 1174;
+        gain.gain.setValueAtTime(0.0001, ctx.currentTime + offset);
+        gain.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + offset + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + offset + 0.16);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(ctx.currentTime + offset);
+        osc.stop(ctx.currentTime + offset + 0.18);
+      });
+    } catch (err) {
+      console.error("Alert tone failed:", err);
+    }
+  };
+
+  /**
+   * Fire for filings that appeared since the last poll.
+   *
+   * The first poll after a reload only seeds the set — otherwise opening the
+   * page on a day with 300 filings would fire 300 notifications.
+   */
+  const notifyNewResults = (rows: PendingResult[]) => {
+    if (seenResultIdsRef.current === null) {
+      seenResultIdsRef.current = new Set(rows.map(r => r.id));
+      return;
+    }
+    const seen = seenResultIdsRef.current;
+    const fresh = rows.filter(r => !seen.has(r.id));
+    rows.forEach(r => seen.add(r.id));
+    if (!fresh.length || !alertsOnRef.current) return;
+
+    playAlertTone();
+    // One notification for a batch: a results burst can carry dozens at once,
+    // and dozens of toasts bury the thing they are announcing.
+    if (fresh.length === 1) {
+      const r = fresh[0];
+      new Notification(`${r.symbol} — financial result`, {
+        body: (r.company_name ? `${r.company_name}\n` : "") + (r.title || "").slice(0, 120),
+        tag: `result-${r.id}`,
+      });
+    } else {
+      new Notification(`${fresh.length} financial results just landed`, {
+        body: fresh.slice(0, 8).map(r => r.symbol).join(", ") + (fresh.length > 8 ? "…" : ""),
+        tag: "result-batch",
+      });
+    }
+  };
+
+  /**
+   * Cash on hand, so a card can say what an order costs and what is left.
+   * Kept in the browser: it is a planning figure the user types, not a balance
+   * fetched from the broker, and it should not look like one.
+   */
+  const [availableFunds, setAvailableFunds] = useState<string>(
+    () => localStorage.getItem("availableFunds") || ""
+  );
+  useEffect(() => {
+    localStorage.setItem("availableFunds", availableFunds);
+  }, [availableFunds]);
+
   // Upcoming earnings quotes can be paused independently, same reasoning as the
   // tracker's tables: the allowance is shared across every panel.
   const [earningsPaused, setEarningsPaused] = useState<boolean>(
@@ -919,7 +1028,13 @@ export function TradingDashboard() {
       }
       if (pendingRes.ok) {
         const data = await pendingRes.json();
-        setPendingResults(data.pending || []);
+        const rows: PendingResult[] = data.pending || [];
+        // Only today's view announces arrivals; browsing an earlier date is
+        // reading history, not watching for something to act on.
+        if (resultsDateRef.current === todayStr) {
+          notifyNewResults(rows.filter(r => r.status === "pending"));
+        }
+        setPendingResults(rows);
       }
     } catch (err) {
       console.error("Error loading trading dashboard data:", err);
@@ -1740,6 +1855,40 @@ export function TradingDashboard() {
                 </button>
               )}
 
+              <button
+                onClick={enableAlerts}
+                title={alertsOn
+                  ? "Desktop notification and a short tone when a result lands. Click to turn off."
+                  : "Notify me when a result lands (asks for browser permission)"}
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: "5px",
+                  padding: "6px 10px", borderRadius: "6px", cursor: "pointer",
+                  fontSize: "11px", fontWeight: 700,
+                  background: alertsOn ? "rgba(63, 191, 135, 0.12)" : "transparent",
+                  border: `1px solid ${alertsOn ? "rgba(63, 191, 135, 0.35)" : "rgba(125, 135, 153,0.3)"}`,
+                  color: alertsOn ? "var(--positive)" : "var(--text-muted)",
+                }}>
+                {alertsOn ? <Bell size={12} /> : <BellOff size={12} />}
+                {alertsOn ? "ALERTS ON" : "Alerts off"}
+              </button>
+
+              <label title="Cash you have available. Each card shows what its order costs and what would be left."
+                style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "11px", color: "var(--text-muted)" }}>
+                ₹
+                <input
+                  type="number"
+                  min={0}
+                  value={availableFunds}
+                  onChange={e => setAvailableFunds(e.target.value)}
+                  placeholder="funds"
+                  style={{
+                    width: "96px", padding: "6px 8px", fontSize: "12px",
+                    background: "rgba(10, 13, 18,0.8)", border: "1px solid rgba(125, 135, 153,0.3)",
+                    borderRadius: "6px", color: "var(--text-primary)",
+                  }}
+                />
+              </label>
+
               <input
                 type="date"
                 value={resultsDate}
@@ -2019,6 +2168,36 @@ export function TradingDashboard() {
                           : `Position is '${pending.position.status}' — sell available once the buy fills`}
                       </span>
                     )}
+                    {/* What this order costs, against what you said you have.
+                        Priced at the live LTP, so it moves with the quote and is
+                        an estimate for a MARKET order, not a quotation. */}
+                    {(() => {
+                      const ltp = quote?.last_price || 0;
+                      if (!ltp || !form.quantity) return null;
+                      const cost = ltp * form.quantity;
+                      const funds = parseFloat(availableFunds);
+                      const haveFunds = isFinite(funds) && funds > 0;
+                      const left = haveFunds ? funds - cost : null;
+                      const short = left != null && left < 0;
+                      const money = (v: number) =>
+                        `₹${Math.abs(v).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+                      return (
+                        <span style={{ fontSize: "11px", lineHeight: 1.35, whiteSpace: "nowrap" }}
+                          title={`${form.quantity} × ₹${ltp.toFixed(2)} at the current price`}>
+                          <span style={{ color: "var(--text-muted)" }}>Needs </span>
+                          <b style={{ color: "var(--text-primary)", fontVariantNumeric: "tabular-nums" }}>{money(cost)}</b>
+                          {left != null && (
+                            <>
+                              <span style={{ color: "var(--text-muted)" }}>{short ? " · short by " : " · leaves "}</span>
+                              <b style={{ color: short ? "var(--negative)" : "var(--positive)", fontVariantNumeric: "tabular-nums" }}>
+                                {money(left)}
+                              </b>
+                            </>
+                          )}
+                        </span>
+                      );
+                    })()}
+
                     <button onClick={() => handleDismissResult(pending.id)} disabled={busy}
                       style={{
                         padding: "8px 14px", background: "transparent",
