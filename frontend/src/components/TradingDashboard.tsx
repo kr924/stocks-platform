@@ -49,13 +49,15 @@ interface DigestCompany {
   screener: { ok: boolean; quarter: string | null; source_url: string | null; error: string | null };
   comparison: {
     label: string; ai_text: string; actual: number | null;
-    ai_yoy: string; actual_yoy: number | null;
+    ai_yoy: string; actual_yoy: number | null; actual_qoq: number | null;
     match: boolean | null; diff_pct: number | null;
   }[];
   ai_summary: string | null;
   future_growth_outlook: string | null;
   future_projected_numbers: string | null;
   broker_estimates: string | null;
+  screener_signal?: { label: string; tone: string; reason: string } | null;
+  all_positive?: boolean;
 }
 
 interface MetricCell {
@@ -545,7 +547,35 @@ export function TradingDashboard() {
   const [aiLogDateFrom, setAiLogDateFrom] = useState("");
   const [aiLogDateTo, setAiLogDateTo] = useState("");
   const [digestDate, setDigestDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [digest, setDigest] = useState<{ date: string; total: number; analysed: number; companies: DigestCompany[] } | null>(null);
+  const [digest, setDigest] = useState<{
+    date: string; total: number; analysed: number; companies: DigestCompany[];
+    building?: boolean; pending_screener?: number;
+  } | null>(null);
+
+  // Digest filters. A results day runs to several hundred companies, so the
+  // panel is unusable without a way to cut it down to the ones worth reading.
+  const [digestSearch, setDigestSearch] = useState("");
+  const [digestSignal, setDigestSignal] = useState<"all" | "BUY" | "SELL" | "NA">("all");
+  const [digestExchange, setDigestExchange] = useState<"all" | "nse" | "bse">("all");
+  const [digestOnlyPositive, setDigestOnlyPositive] = useState(false);
+  const [digestOnlyScreener, setDigestOnlyScreener] = useState(false);
+  const [digestOnlyAnalysed, setDigestOnlyAnalysed] = useState(false);
+
+  const visibleDigest = useMemo(() => {
+    const list = digest?.companies || [];
+    const q = digestSearch.trim().toLowerCase();
+    return list.filter(c => {
+      if (q && !(c.symbol.toLowerCase().includes(q)
+        || (c.company_name || "").toLowerCase().includes(q)
+        || (c.tracking_ref || "").toLowerCase().includes(q))) return false;
+      if (digestSignal !== "all" && (c.screener_signal?.label || "NA") !== digestSignal) return false;
+      if (digestExchange !== "all" && c.exchange !== digestExchange) return false;
+      if (digestOnlyPositive && !c.all_positive) return false;
+      if (digestOnlyScreener && !c.screener?.ok) return false;
+      if (digestOnlyAnalysed && !c.analysed) return false;
+      return true;
+    });
+  }, [digest, digestSearch, digestSignal, digestExchange, digestOnlyPositive, digestOnlyScreener, digestOnlyAnalysed]);
   const [digestLoading, setDigestLoading] = useState(false);
   // Per-prompt order form state, keyed by pending-result id
   const [resultOrderForm, setResultOrderForm] = useState<Record<number, {
@@ -2314,6 +2344,60 @@ export function TradingDashboard() {
           </div>
         </div>
 
+        {/* Filters. Everything here narrows the same list; the count in the
+            heading says how much of the day is left after filtering. */}
+        {digest && digest.companies.length > 0 && (
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px", marginBottom: "12px" }}>
+            <input
+              value={digestSearch}
+              onChange={e => setDigestSearch(e.target.value)}
+              placeholder="Symbol, company or ref…"
+              style={{ padding: "6px 10px", minWidth: "200px", fontSize: "12px", background: "var(--bg-sunken)", border: "1px solid var(--border-default)", borderRadius: "6px", color: "var(--text-primary)" }}
+            />
+            <select value={digestSignal} onChange={e => setDigestSignal(e.target.value as any)}
+              title="Mechanical read of Screener's year-on-year figures"
+              style={{ padding: "6px 8px", fontSize: "11px", background: "var(--bg-sunken)", border: "1px solid var(--border-default)", borderRadius: "6px", color: "var(--text-primary)" }}>
+              <option value="all">Screener: any</option>
+              <option value="BUY">BUY only</option>
+              <option value="SELL">SELL only</option>
+              <option value="NA">NA only</option>
+            </select>
+            <select value={digestExchange} onChange={e => setDigestExchange(e.target.value as any)}
+              style={{ padding: "6px 8px", fontSize: "11px", background: "var(--bg-sunken)", border: "1px solid var(--border-default)", borderRadius: "6px", color: "var(--text-primary)" }}>
+              <option value="all">Both exchanges</option>
+              <option value="nse">NSE only</option>
+              <option value="bse">BSE only</option>
+            </select>
+            {([
+              ["All positive", digestOnlyPositive, setDigestOnlyPositive,
+               "Revenue and profit both up year-on-year and quarter-on-quarter"],
+              ["Has Screener", digestOnlyScreener, setDigestOnlyScreener,
+               "Hide companies whose figures could not be fetched"],
+              ["AI analysed", digestOnlyAnalysed, setDigestOnlyAnalysed,
+               "Only filings that arrived inside market hours and were analysed"],
+            ] as [string, boolean, (v: boolean) => void, string][]).map(([label, on, set, tip]) => (
+              <button key={label} onClick={() => set(!on)} title={tip}
+                style={{
+                  padding: "6px 10px", borderRadius: "6px", fontSize: "11px", fontWeight: 700, cursor: "pointer",
+                  background: on ? "rgba(63, 191, 135, 0.12)" : "transparent",
+                  border: `1px solid ${on ? "rgba(63, 191, 135, 0.35)" : "var(--border-default)"}`,
+                  color: on ? "var(--positive)" : "var(--text-muted)",
+                }}>
+                {label}
+              </button>
+            ))}
+            <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
+              {visibleDigest.length} of {digest.companies.length}
+            </span>
+            {digest.building && (
+              <span title="Screener is fetched one company at a time to stay inside its rate limit. Refresh in a few minutes."
+                style={{ fontSize: "11px", color: "var(--warning)", background: "var(--warning-bg)", padding: "4px 10px", borderRadius: "20px" }}>
+                Screener figures still arriving — {digest.pending_screener} to go
+              </span>
+            )}
+          </div>
+        )}
+
         <div style={{ maxHeight: "620px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "12px", paddingRight: "6px" }}>
           {digestLoading && <div style={{ padding: "24px", textAlign: "center", color: "var(--text-muted)", fontSize: "12px" }}>Loading digest…</div>}
           {!digestLoading && (!digest || digest.companies.length === 0) && (
@@ -2321,7 +2405,12 @@ export function TradingDashboard() {
               No results announced on {digestDate}.
             </div>
           )}
-          {!digestLoading && digest?.companies.map((c, ci) => (
+          {!digestLoading && digest && digest.companies.length > 0 && visibleDigest.length === 0 && (
+            <div style={{ padding: "24px", textAlign: "center", color: "var(--text-muted)", fontSize: "12px" }}>
+              No companies match these filters.
+            </div>
+          )}
+          {!digestLoading && visibleDigest.map((c, ci) => (
             <div key={`${c.symbol}-${ci}`} style={{ background: "var(--bg-sunken)", border: "1px solid var(--border-subtle)", borderRadius: "10px", padding: "14px" }}>
               <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "10px", marginBottom: "6px" }}>
                 <span style={{ fontSize: "15px", fontWeight: 800, color: "var(--text-primary)" }}>{c.symbol}</span>
@@ -2338,9 +2427,37 @@ export function TradingDashboard() {
                     NOT ANALYSED
                   </span>
                 )}
+                {c.screener_signal && (
+                  <span title={`Screener read: ${c.screener_signal.reason}`}
+                    style={{
+                      fontSize: "10px", fontWeight: 700, padding: "2px 7px", borderRadius: "4px",
+                      color: c.screener_signal.tone === "pos" ? "var(--positive)"
+                        : c.screener_signal.tone === "neg" ? "var(--negative)" : "var(--text-muted)",
+                      background: c.screener_signal.tone === "pos" ? "rgba(63, 191, 135, 0.12)"
+                        : c.screener_signal.tone === "neg" ? "rgba(240, 115, 111, 0.12)" : "var(--surface-2)",
+                    }}>
+                    SCREENER {c.screener_signal.label}
+                  </span>
+                )}
+                {c.all_positive && (
+                  <span title="Revenue and profit both up year-on-year and quarter-on-quarter"
+                    style={{ fontSize: "10px", fontWeight: 800, padding: "2px 7px", borderRadius: "4px", color: "var(--positive-strong)", background: "rgba(63, 191, 135, 0.18)" }}>
+                    ALL POSITIVE
+                  </span>
+                )}
                 {c.tracking_ref && (
                   <span style={{ fontSize: "10px", fontFamily: "ui-monospace, Menlo, monospace", color: "var(--text-muted)", background: "var(--surface-2)", padding: "2px 6px", borderRadius: "4px" }}>{c.tracking_ref}</span>
                 )}
+                <button
+                  onClick={() => openEarningsChart(c.symbol)}
+                  title={`Open the price chart for ${c.symbol}`}
+                  style={{
+                    padding: "3px 9px", background: "var(--accent-bg)", border: "1px solid var(--accent-border)",
+                    borderRadius: "5px", color: "var(--accent)", fontSize: "10px", fontWeight: 700,
+                    cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px",
+                  }}>
+                  <TrendingUp size={11} /> Chart
+                </button>
               </div>
 
               <div style={{ display: "flex", flexWrap: "wrap", gap: "14px", fontSize: "10px", color: "var(--text-muted)", marginBottom: "8px" }}>
@@ -2349,11 +2466,19 @@ export function TradingDashboard() {
                 {c.attachment_url && <a href={c.attachment_url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: "4px" }}><ExternalLink size={11} /> Filing</a>}
               </div>
 
+              {!c.screener?.ok && (
+                <div style={{ fontSize: "10px", color: "var(--text-muted)", marginBottom: "6px" }}>
+                  {c.screener?.error === "not fetched yet"
+                    ? "Screener figures still being fetched for this company — refresh shortly."
+                    : `Screener unavailable — ${c.screener?.error || "no data"}`}
+                </div>
+              )}
+
               <div style={{ overflowX: "auto" }}>
-                <table style={{ borderCollapse: "collapse", fontSize: "11px", width: "100%", minWidth: "520px" }}>
+                <table style={{ borderCollapse: "collapse", fontSize: "11px", width: "100%", minWidth: "560px" }}>
                   <thead>
                     <tr>
-                      {["", "Our AI", `Screener${c.screener.quarter ? ` (${c.screener.quarter})` : ""}`, "Variance", "AI YoY", "Screener YoY"].map((h, i) => (
+                      {["", "Our AI", `Screener${c.screener.quarter ? ` (${c.screener.quarter})` : ""}`, "Variance", "AI YoY", "Screener YoY", "Screener QoQ"].map((h, i) => (
                         <th key={i} style={{ textAlign: i === 0 ? "left" : "right", padding: "4px 8px", color: "var(--text-muted)", fontWeight: 600, fontSize: "10px", borderBottom: "1px solid var(--border-subtle)", whiteSpace: "nowrap" }}>{h}</th>
                       ))}
                     </tr>
@@ -2374,7 +2499,12 @@ export function TradingDashboard() {
                             {row.match === true ? "match" : row.match === false ? `${row.diff_pct! > 0 ? "+" : ""}${row.diff_pct}%` : "—"}
                           </td>
                           <td style={{ padding: "4px 8px", textAlign: "right", color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{c.analysed ? (row.ai_yoy || "NA") : "—"}</td>
-                          <td style={{ padding: "4px 8px", textAlign: "right", color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{row.actual_yoy === null ? "—" : `${row.actual_yoy}%`}</td>
+                          <td style={{ padding: "4px 8px", textAlign: "right", whiteSpace: "nowrap", color: row.actual_yoy === null ? "var(--text-faint)" : row.actual_yoy > 0 ? "var(--positive)" : row.actual_yoy < 0 ? "var(--negative)" : "var(--text-secondary)" }}>
+                            {row.actual_yoy === null ? "—" : `${row.actual_yoy > 0 ? "+" : ""}${row.actual_yoy.toFixed(2)}%`}
+                          </td>
+                          <td style={{ padding: "4px 8px", textAlign: "right", whiteSpace: "nowrap", color: row.actual_qoq == null ? "var(--text-faint)" : row.actual_qoq > 0 ? "var(--positive)" : row.actual_qoq < 0 ? "var(--negative)" : "var(--text-secondary)" }}>
+                            {row.actual_qoq == null ? "—" : `${row.actual_qoq > 0 ? "+" : ""}${row.actual_qoq.toFixed(2)}%`}
+                          </td>
                         </tr>
                       );
                     })}

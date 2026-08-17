@@ -26,7 +26,8 @@ from sqlalchemy.orm import Session
 
 from app.database import PendingResultOrder, TradeAILog
 from app.services.screener_quarters import (
-    compare, fetch_latest_quarter, parse_ai_value, screener_signal,
+    compare, fetch_latest_quarter, parse_ai_value, screener_all_positive,
+    screener_signal,
 )
 from app.services.trade_ai_analyzer import (
     METRIC_ROWS, _ROW_LABELS, normalize_metrics,
@@ -202,6 +203,7 @@ def _build_rows(db: Session, pendings: List[PendingResultOrder],
             "log": log,
             "screener": screener,
             "screener_signal": screener_signal(screener),
+            "all_positive": screener_all_positive(screener),
             "comparison": comparison,
             "validation": validation,
             "analysed": analysed,
@@ -383,6 +385,7 @@ def serialize_digest_rows(rows: List[dict]) -> List[dict]:
             "analysed": r["analysed"],
             "verdict": r["verdict"],
             "screener_signal": r.get("screener_signal"),
+            "all_positive": bool(r.get("all_positive")),
             "title": p.title,
             "attachment_url": p.attachment_url,
             "screener": {

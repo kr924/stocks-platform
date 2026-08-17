@@ -22,7 +22,7 @@ logger = logging.getLogger("app.screener_quarters")
 # Screener answers 429 when called back to back, and the digest walks a couple
 # of hundred companies in a row. One request at a time, spaced, costs the digest
 # a few minutes it has to spare at 08:00 and keeps the data complete.
-_MIN_REQUEST_GAP = 1.5
+_MIN_REQUEST_GAP = 0.7
 _RETRY_AFTER_429 = 6.0
 _request_lock = threading.Lock()
 _last_request_at = 0.0
@@ -222,7 +222,9 @@ def fetch_latest_quarter(symbol: str, cache_only: bool = False) -> dict:
             def pct(cur, base):
                 if cur is None or base in (None, 0):
                     return None
-                return round((cur - base) / abs(base) * 100, 1)
+                # Two decimals: these are read beside the figures they come
+                # from, and one decimal quietly turns 0.04% into 0.0%.
+                return round((cur - base) / abs(base) * 100, 2)
 
             current = series[-1] if series else None
             # Four columns back is the same quarter a year earlier.
@@ -260,6 +262,22 @@ def fetch_latest_quarter(symbol: str, cache_only: bool = False) -> dict:
 # micro-cap going from ₹0.02 Cr profit to ₹0.06 Cr loss is "-400%", which reads
 # as catastrophic and is really a rounding difference on two lakh rupees.
 _MIN_MEANINGFUL_BASE = 1.0
+
+
+def screener_all_positive(screener: dict) -> bool:
+    """
+    True when revenue and profit are both up on the year *and* on the quarter.
+
+    Four numbers agreeing is a different statement from any one of them, and it
+    is the cheapest way to find the handful of filings worth reading first on a
+    day that produced seven hundred.
+    """
+    metrics = (screener or {}).get("metrics") or {}
+    checks = []
+    for key in ("revenue", "pat"):
+        m = metrics.get(key) or {}
+        checks += [m.get("yoy_change_pct"), m.get("qoq_change_pct")]
+    return bool(checks) and all(v is not None and v > 0 for v in checks)
 
 
 def screener_signal(screener: dict) -> dict:
