@@ -62,6 +62,19 @@ _RESULT_NEGATIVE = re.compile(
     # the results themselves, and it carries the same words. Matching only
     # "newspaper publication" missed both "News Paper Cutting" — the space is
     # how BSE writes it — and the reversed "Publication ... in Newspaper".
+    # A company explaining why it has NOT filed is the opposite of a result, and
+    # it says "financial results" twice while doing so.
+    r"|non[\s-]?submission"
+    r"|reasons?\s+for\s+delay"
+    r"|delay(?:ed)?\s+(?:in\s+)?(?:submission|filing)"
+    # Corrections and supplements to a result already filed. The original is
+    # what a decision was made on; re-firing on the correction buys twice.
+    r"|corrigendum"
+    r"|inadvertently\s+omitted"
+    # The call about the results is not the results.
+    r"|audio\s+recording"
+    r"|conference\s+call"
+    r"|transcript"
     r"|news\s?paper"
     r"|paper\s+cutting"
     r"|press\s+cutting"

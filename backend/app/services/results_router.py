@@ -23,7 +23,7 @@ from typing import Optional
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.database import PendingResultOrder, TradeConfig
+from app.database import MarketEvent, PendingResultOrder, TradeConfig
 from app.services.deduplication import to_iso_utc
 from app.services.sse_manager import sse_manager
 
@@ -281,6 +281,13 @@ def route_financial_result(db: Session, ann, event, dedup_key: str):
     if pending:
         return
 
+    if _already_prompted_this_quarter(db, symbol, getattr(event, "id", None)):
+        logger.info(
+            f"📄 [RESULT] {symbol} already raised a prompt for this results season — "
+            f"'{(ann.title or '')[:60]}' recorded but not prompted again."
+        )
+        return
+
     actionable = is_within_action_window()
 
     pending = PendingResultOrder(
@@ -365,6 +372,44 @@ def route_financial_result(db: Session, ann, event, dedup_key: str):
         None,
         pending.id,
     )
+
+
+# One earnings event produces several filings: the board outcome, the results
+# PDF itself, the newspaper advertisement, the investor presentation, the call
+# transcript — often across both exchanges over several days. Each is genuinely
+# a results filing, so classification alone cannot reduce them to one decision.
+RESULTS_SEASON_DAYS = 30
+
+
+def _already_prompted_this_quarter(db: Session, symbol: str, current_event_id=None) -> bool:
+    """
+    Have we already seen a results filing for this symbol this season?
+
+    The buy decision belongs to the quarter, not to the document. Without this, a
+    company filing its board outcome on Tuesday and the results PDF on Wednesday
+    raises two prompts for one event, and acting on both buys the same stock
+    twice on the same news.
+
+    Asked of market_events rather than the prompts themselves: prompts are purged
+    after 72 hours, so they cannot answer a question about the last month. Events
+    are kept, and "has this company reported yet" is a property of the filings,
+    not of whether we happened to prompt on one.
+
+    Deliberately generous at 30 days. Two genuine quarterly results 30 days apart
+    do not happen, and missing a second prompt costs far less than buying the
+    same story twice.
+    """
+    if not symbol:
+        return False
+    since = datetime.utcnow() - timedelta(days=RESULTS_SEASON_DAYS)
+    q = db.query(MarketEvent).filter(
+        MarketEvent.category == "financial_results",
+        MarketEvent.symbol == symbol.upper(),
+        MarketEvent.event_time >= since,
+    )
+    if current_event_id is not None:
+        q = q.filter(MarketEvent.id != current_event_id)
+    return q.first() is not None
 
 
 def purge_old_pending(db: Session, hours: int = 72) -> int:
