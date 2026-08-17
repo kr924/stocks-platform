@@ -606,6 +606,19 @@ def get_quotes_by_symbols(
         return {}
 
 
+@app.get("/api/market/resolve-symbol")
+def resolve_symbol(symbol: str = Query(...)):
+    """
+    Instrument keys for a symbol, NSE first.
+
+    Exists so the UI never has to guess one. `NSE_EQ|<SYMBOL>` looks like a key
+    and is accepted nowhere — it is why BSE-only scrips showed an empty chart.
+    Reads the cached index, so it costs no metered request.
+    """
+    keys = resolve_instrument_keys(symbol)
+    return {"symbol": symbol.upper(), "keys": keys, "key": keys[0] if keys else None}
+
+
 @app.get("/api/watchlist")
 def get_watchlist(
     period: str = "today",

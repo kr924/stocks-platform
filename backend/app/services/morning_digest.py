@@ -392,6 +392,7 @@ def serialize_digest_rows(rows: List[dict]) -> List[dict]:
             "symbol": p.symbol,
             "company_name": p.company_name,
             "exchange": p.exchange,
+            "instrument_key": p.instrument_key,
             "tracking_ref": p.tracking_ref,
             "announced_at": p.event_time.isoformat() if p.event_time else None,
             "ingested_at": p.created_at.isoformat() if p.created_at else None,

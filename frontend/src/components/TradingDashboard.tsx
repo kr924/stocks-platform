@@ -905,11 +905,36 @@ export function TradingDashboard() {
     }
   }, []);
 
-  const openEarningsChart = (symbol: string, instrumentKey?: string) => {
-    const key = instrumentKey || `NSE_EQ|${symbol}`;
+  /**
+   * Open the price chart for a symbol.
+   *
+   * A missing key is resolved, never invented. `NSE_EQ|<SYMBOL>` looks like a
+   * key and is accepted by nothing, so a BSE-only scrip opened an empty chart
+   * reading "chart data unavailable" — which says the stock has no data, when
+   * really we asked about a stock that does not exist.
+   */
+  const openEarningsChart = async (symbol: string, instrumentKey?: string) => {
     setChartSymbol(symbol);
-    setChartInstrumentKey(key);
     setChartPeriod("1D");
+
+    const looksReal = instrumentKey && /\|[A-Z]{2}[A-Z0-9]{9}[0-9]$/.test(instrumentKey);
+    let key = looksReal ? instrumentKey! : "";
+    if (!key) {
+      try {
+        const res = await fetch(`${API_BASE}/api/market/resolve-symbol?symbol=${encodeURIComponent(symbol)}`);
+        if (res.ok) key = (await res.json()).key || "";
+      } catch (err) {
+        console.error("Symbol resolution failed:", err);
+      }
+    }
+    if (!key) {
+      // Neither exchange lists it, so there is nothing to chart. Say that,
+      // rather than showing an empty chart the user will retry.
+      setChartInstrumentKey(null);
+      setChartCandles([]);
+      return;
+    }
+    setChartInstrumentKey(key);
     fetchChartCandles(key, "1D");
   };
 
@@ -2449,7 +2474,7 @@ export function TradingDashboard() {
                   <span style={{ fontSize: "10px", fontFamily: "ui-monospace, Menlo, monospace", color: "var(--text-muted)", background: "var(--surface-2)", padding: "2px 6px", borderRadius: "4px" }}>{c.tracking_ref}</span>
                 )}
                 <button
-                  onClick={() => openEarningsChart(c.symbol)}
+                  onClick={() => openEarningsChart(c.symbol, (c as any).instrument_key || undefined)}
                   title={`Open the price chart for ${c.symbol}`}
                   style={{
                     padding: "3px 9px", background: "var(--accent-bg)", border: "1px solid var(--accent-border)",
@@ -4285,8 +4310,12 @@ export function TradingDashboard() {
             ) : chartCandles && chartCandles.length > 0 ? (
               <Chart candles={chartCandles} period={chartPeriod} />
             ) : (
-              <div style={{ height: "400px", display: "flex", justifyContent: "center", alignItems: "center", fontSize: "12px", color: "var(--text-faint)" }}>
-                Chart data unavailable for {chartSymbol} ({chartPeriod}). Try a different period.
+              <div style={{ height: "400px", display: "flex", justifyContent: "center", alignItems: "center", fontSize: "12px", color: "var(--text-faint)", textAlign: "center", padding: "0 24px" }}>
+                {/* "No data for this period" and "this symbol lists nowhere" are
+                    different answers, and only one of them is worth retrying. */}
+                {chartInstrumentKey
+                  ? `Chart data unavailable for ${chartSymbol} (${chartPeriod}). Try a different period.`
+                  : `${chartSymbol} does not appear in Upstox's NSE or BSE instrument list, so there is no price history to chart.`}
               </div>
             )}
           </div>
