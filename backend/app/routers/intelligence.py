@@ -759,16 +759,23 @@ def get_upcoming_earnings(db: Session = Depends(get_db)):
     """Get stocks with upcoming earnings sorted chronologically by meeting date with 1-year returns."""
     import json, re, time
     from datetime import datetime, timedelta
-    from sqlalchemy import or_, desc
+    from sqlalchemy import or_, and_, desc
 
     today = datetime.utcnow().date()
     end_date = today + timedelta(days=30)
     
+    # NSE publishes a board-meeting calendar; BSE does not expose one we can
+    # reach, but it files an intimation per meeting through the announcement
+    # feed we already read. Both are needed: measured against what actually
+    # filed, NSE's calendar covered 99% of NSE filers and 25% of BSE ones, and
+    # BSE-only companies are two thirds of everything that reports.
     bms = db.query(MarketEvent).filter(
         or_(
             (MarketEvent.event_type == "board_meeting"),
             (MarketEvent.category == "earnings"),
-            (MarketEvent.category == "board_meeting")
+            (MarketEvent.category == "board_meeting"),
+            and_(MarketEvent.source == "bse",
+                 MarketEvent.raw_data.like('%"SUBCATNAME": "Board Meeting%')),
         )
     ).all()
     
@@ -818,6 +825,13 @@ def get_upcoming_earnings(db: Session = Depends(get_db)):
 
         m_date_str = raw.get("bm_date", raw.get("meetingDate", raw.get("bm_dt", "")))
         m_date = parse_date(m_date_str)
+        if not m_date and bm.source == "bse":
+            # BSE states the date in prose, not a field.
+            from app.services.nse_bse_scraper import extract_meeting_date
+            m_date = extract_meeting_date(
+                " ".join(str(raw.get(k) or "") for k in ("HEADLINE", "NEWSSUB"))
+                + " " + (bm.title or "") + " " + (bm.description or "")
+            )
         if not m_date:
             if bm.event_time and bm.event_time.date() >= (today - timedelta(days=1)):
                 m_date = bm.event_time.date()
