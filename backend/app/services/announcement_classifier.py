@@ -58,7 +58,14 @@ _RESULT_NEGATIVE = re.compile(
     r"|\besop\b"
     r"|\besps\b"
     r"|trading\s+window"
-    r"|newspaper\s+publication"
+    # A company publishing its results in the press files this separately from
+    # the results themselves, and it carries the same words. Matching only
+    # "newspaper publication" missed both "News Paper Cutting" — the space is
+    # how BSE writes it — and the reversed "Publication ... in Newspaper".
+    r"|news\s?paper"
+    r"|paper\s+cutting"
+    r"|press\s+cutting"
+    r"|newspaper\s+advertisement"
     r"|loss\s+of\s+share\s+certificate"
     r")",
     re.IGNORECASE,
@@ -101,6 +108,8 @@ _NON_RESULT_SUBCATEGORIES = (
     "press release",
     "media release",
     "newspaper",
+    "news paper",
+    "paper cutting",
     "earnings call",
     "transcript",
     "audio",
