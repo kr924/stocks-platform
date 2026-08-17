@@ -74,7 +74,7 @@ _RESULT_NEGATIVE = re.compile(
     # The call about the results is not the results.
     r"|audio\s+recording"
     r"|conference\s+call"
-    r"|transcript"
+    r"|transcript"
     r"|news\s?paper"
     r"|paper\s+cutting"
     r"|press\s+cutting"
