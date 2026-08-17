@@ -144,7 +144,8 @@ def run_deferred_analyses(db: Session) -> int:
     return done
 
 
-def _build_rows(db: Session, pendings: List[PendingResultOrder]) -> List[dict]:
+def _build_rows(db: Session, pendings: List[PendingResultOrder],
+                cache_only: bool = False) -> List[dict]:
     """Assemble per-company comparison data: our AI's figures against Screener's."""
     rows = []
     for p in pendings:
@@ -166,7 +167,7 @@ def _build_rows(db: Session, pendings: List[PendingResultOrder]) -> List[dict]:
             except Exception:
                 ai_metrics = {}
 
-        screener = fetch_latest_quarter(p.symbol)
+        screener = fetch_latest_quarter(p.symbol, cache_only=cache_only)
 
         comparison = []
         for key in METRIC_ROWS:

@@ -152,7 +152,7 @@ def _quarter_headings(html: str) -> list:
     return [_strip(c) for c in cells[1:] if _strip(c)]
 
 
-def fetch_latest_quarter(symbol: str) -> dict:
+def fetch_latest_quarter(symbol: str, cache_only: bool = False) -> dict:
     """
     Latest reported quarter for `symbol`, as values.
 
@@ -180,6 +180,10 @@ def fetch_latest_quarter(symbol: str) -> dict:
     cached = _quarter_cache.get(sym)
     if cached and (time.monotonic() - cached[0]) <= _QUARTER_CACHE_TTL:
         return cached[1]
+    if cache_only:
+        # Caller cannot afford a network round trip — say so rather than block.
+        out["error"] = "not fetched yet"
+        return out
     # Ticker first, then the BSE scrip code — Screener indexes BSE-only
     # companies under the code, and most of a results day is BSE-only.
     slugs = [sym] + _bse_codes_for(sym)

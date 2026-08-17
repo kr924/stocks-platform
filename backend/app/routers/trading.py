@@ -4,6 +4,7 @@ Trading Engine API Router — CRUD for TradeConfigs, order execution, AI logs, a
 import json
 import logging
 import re
+import threading
 from datetime import datetime
 from typing import Optional, List
 
@@ -900,6 +901,59 @@ def list_digests():
     return {"digests": [{"date": d, "url": f"/api/trading/digest/{d}"} for d in dates]}
 
 
+_digest_builds: dict = {}
+_digest_build_guard = threading.Lock()
+
+
+def _start_digest_build(for_date: str) -> None:
+    """
+    Fetch the day's Screener figures in the background and save the result.
+
+    Guarded per date: the panel polls, and every poll would otherwise start
+    another walk of the same few hundred companies.
+    """
+    with _digest_build_guard:
+        thread = _digest_builds.get(for_date)
+        if thread and thread.is_alive():
+            return
+
+        def build():
+            from app.database import SessionLocal
+            from app.services.morning_digest import (
+                _DIGEST_DIR, _build_rows, serialize_digest_rows,
+            )
+            import os as _os
+            db = SessionLocal()
+            try:
+                pendings = (db.query(PendingResultOrder)
+                            .filter(PendingResultOrder.trade_date == for_date)
+                            .order_by(PendingResultOrder.event_time.asc()).all())
+                if not pendings:
+                    return
+                rows = _build_rows(db, pendings)
+                payload = {
+                    "date": for_date,
+                    "total": len(rows),
+                    "analysed": sum(1 for r in rows if r["analysed"]),
+                    "companies": serialize_digest_rows(rows),
+                    "building": False,
+                    "pending_screener": 0,
+                }
+                _os.makedirs(_DIGEST_DIR, exist_ok=True)
+                with open(_os.path.join(_DIGEST_DIR, f"digest_{for_date}.json"), "w",
+                          encoding="utf-8") as f:
+                    json.dump(payload, f, default=str)
+                logger.info(f"[DIGEST] Background build complete for {for_date}: {len(rows)} companies")
+            except Exception as e:
+                logger.error(f"[DIGEST] Background build failed for {for_date}: {e}")
+            finally:
+                db.close()
+
+        th = threading.Thread(target=build, name=f"digest-build-{for_date}", daemon=True)
+        _digest_builds[for_date] = th
+        th.start()
+
+
 @router.get("/digest/{for_date}/data")
 def get_digest_data(for_date: str, limit: int = 40, db: Session = Depends(get_db)):
     """
@@ -936,29 +990,26 @@ def get_digest_data(for_date: str, limit: int = 40, db: Session = Depends(get_db
         pendings = [p for p in collect_for_digest(db)
                     if p.event_time and p.event_time.strftime("%Y-%m-%d") == for_date]
 
-    total = len(pendings)
-    truncated = total > limit
-    rows = _build_rows(db, pendings[:limit])
+    # Answer from whatever Screener data is already in memory and fetch the rest
+    # behind the request. Screener has to be called once per company and paced,
+    # which is minutes for a heavy day — far past what a panel can wait for, and
+    # waiting is what made it report the day as empty.
+    rows = _build_rows(db, pendings, cache_only=True)
     companies = serialize_digest_rows(rows)
-    payload = {
+    missing = sum(1 for c in companies if not (c["screener"] or {}).get("ok"))
+    if missing:
+        _start_digest_build(for_date)
+
+    return {
         "date": for_date,
-        "total": total,
-        "shown": len(companies),
-        "truncated": truncated,
+        "total": len(companies),
         "analysed": sum(1 for r in companies if r["analysed"]),
         "companies": companies,
+        # The panel can say "figures still arriving" rather than showing gaps
+        # that look like missing data.
+        "building": bool(missing),
+        "pending_screener": missing,
     }
-
-    # Save a complete build so the next open of this date is instant. A capped
-    # one is not saved: it would masquerade as the whole day forever after.
-    if companies and not truncated:
-        try:
-            os.makedirs(_DIGEST_DIR, exist_ok=True)
-            with open(saved, "w", encoding="utf-8") as f:
-                json.dump(payload, f, default=str)
-        except Exception as e:
-            logger.error(f"Could not cache digest JSON for {for_date}: {e}")
-    return payload
 
 
 @router.get("/digest/{for_date}/pdf")
