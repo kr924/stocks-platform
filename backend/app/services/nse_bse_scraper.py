@@ -562,6 +562,110 @@ def fetch_bulk_block_deals(db: Session) -> int:
 
 # ─── Board Meetings ────────────────────────────────────────────────────────
 
+def _canonical_symbol(nse_symbol: str = "", scrip_cd: str = "", scrip_id: str = "") -> str:
+    """
+    One identity for a company, whichever exchange announced it.
+
+    A dual-listed company schedules the same meeting on both exchanges, and
+    without this the calendar shows it twice — once as RELIANCE and once as
+    500325. The registry maps every identifier onto the NSE ticker where one
+    exists, so both rows dedupe onto the same symbol.
+    """
+    try:
+        from app.services import symbol_registry
+        rec = symbol_registry.resolve(scrip_cd=scrip_cd, nse_symbol=nse_symbol, scrip_id=scrip_id)
+        return (rec.get("nse_symbol") or rec.get("symbol") or nse_symbol or scrip_id or scrip_cd or "").upper()
+    except Exception:
+        return (nse_symbol or scrip_id or scrip_cd or "").upper()
+
+
+def fetch_bse_board_meetings(db: Session) -> int:
+    """
+    Upcoming board meetings from BSE.
+
+    NSE's calendar covers NSE-listed companies, which measured against filings
+    is 99% of NSE filers and 25% of BSE ones — and BSE-only companies are two
+    thirds of everything that files. Without this source a majority of results
+    arrive with no advance warning and cannot be armed.
+    """
+    config = get_intel_config()
+    if not config.is_source_enabled("nse_bse", "board_meetings"):
+        return 0
+
+    bse = _get_bse_session()
+    from_date = datetime.utcnow().strftime("%Y%m%d")
+    to_date = (datetime.utcnow() + timedelta(days=30)).strftime("%Y%m%d")
+    url = "https://api.bseindia.com/BseIndiaAPI/api/BoardMeeting/w"
+    params = {
+        "pageno": 1, "strCat": "-1", "strPrevDate": from_date, "strScrip": "",
+        "strSearch": "P", "strToDate": to_date, "strType": "C",
+    }
+
+    data = bse.get(url, params=params)
+    meetings = []
+    if isinstance(data, dict):
+        meetings = data.get("Table") or data.get("data") or []
+    elif isinstance(data, list):
+        meetings = data
+    if not meetings:
+        return 0
+
+    count = 0
+    for meeting in meetings:
+        try:
+            scrip_cd = str(meeting.get("scrip_Code") or meeting.get("SCRIP_CD") or "").strip()
+            scrip_id = (meeting.get("scrip_id") or meeting.get("SCRIP_ID") or "").strip().upper()
+            purpose = (meeting.get("Purpose") or meeting.get("PURPOSE")
+                       or meeting.get("BM_Purpose") or "Board Meeting").strip()
+            scheduled = (meeting.get("Meeting_Date") or meeting.get("MEETING_DT")
+                         or meeting.get("BM_Date") or "").strip()
+            if not purpose or not (scrip_cd or scrip_id):
+                continue
+
+            symbol = _canonical_symbol(scrip_cd=scrip_cd, scrip_id=scrip_id)
+            if not symbol:
+                continue
+
+            title = f"{symbol}: Board Meeting — {purpose}"
+            evt_time = _safe_datetime(scheduled) if scheduled else datetime.utcnow()
+            description = f"{purpose} | Scheduled: {scheduled}" if scheduled else purpose
+
+            # Hashed on the canonical symbol and the scheduled date rather than
+            # the source, so the same meeting announced on both exchanges is one
+            # event whichever arrives first.
+            h = event_hash("board_meeting_cal", symbol, purpose, str(scheduled))
+            if is_duplicate_event(db, h):
+                continue
+
+            payload = dict(meeting)
+            payload.setdefault("bm_symbol", symbol)
+            payload.setdefault("bm_date", scheduled)
+            payload.setdefault("bm_purpose", purpose)
+
+            event = MarketEvent(
+                event_type="board_meeting",
+                source="bse",
+                symbol=symbol,
+                title=title,
+                description=description,
+                raw_data=json.dumps(payload, default=str),
+                event_hash=h,
+                event_time=evt_time,
+                category=_classify_event_category("board_meeting", title),
+            )
+            db.add(event)
+            db.commit()
+            count += 1
+        except Exception as e:
+            db.rollback()
+            logger.debug(f"Error processing BSE board meeting: {e}")
+            continue
+
+    if count:
+        logger.info(f"Saved {count} new board meetings from BSE")
+    return count
+
+
 def fetch_board_meetings(db: Session) -> int:
     """Fetch upcoming/recent board meeting schedules from NSE. Returns count of new events."""
     config = get_intel_config()
@@ -593,6 +697,9 @@ def fetch_board_meetings(db: Session) -> int:
     for meeting in meetings:
         try:
             symbol = meeting.get("bm_symbol", meeting.get("symbol", meeting.get("sm_name", ""))).strip().upper()
+            # Canonical identity, so a dual-listed company is one calendar row
+            # rather than one per exchange.
+            symbol = _canonical_symbol(nse_symbol=symbol)
             purpose = meeting.get("purpose", meeting.get("bm_purpose", meeting.get("agenda", "Board Meeting"))).strip()
             # Use filing timestamp (when the intimation was submitted) as event_time
             filing_timestamp = meeting.get("bm_timestamp", meeting.get("sysTime", ""))
@@ -840,7 +947,7 @@ def fetch_all_nse_bse(db: Session) -> Dict[str, int]:
         results["bulk_block_deals"] = 0
 
     try:
-        results["board_meetings"] = fetch_board_meetings(db)
+        results["board_meetings"] = fetch_board_meetings(db) + fetch_bse_board_meetings(db)
     except Exception as e:
         logger.error(f"Board meetings fetch failed: {e}")
         results["board_meetings"] = 0

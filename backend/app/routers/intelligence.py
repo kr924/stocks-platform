@@ -800,6 +800,15 @@ def get_upcoming_earnings(db: Session = Depends(get_db)):
         if not symbol:
             continue
         symbol = symbol.strip().upper()
+        # Rows stored before both exchanges shared an identity may still carry a
+        # BSE scrip code where a ticker belongs.
+        try:
+            from app.services import symbol_registry
+            rec = symbol_registry.resolve(nse_symbol=symbol, scrip_id=symbol,
+                                          scrip_cd=symbol if symbol.isdigit() else "")
+            symbol = (rec.get("nse_symbol") or rec.get("symbol") or symbol).upper()
+        except Exception:
+            pass
         raw = {}
         if bm.raw_data:
             try:
@@ -817,9 +826,12 @@ def get_upcoming_earnings(db: Session = Depends(get_db)):
 
         # Filter strictly to earnings disclosures on or after today (clearing old past dates)
         if m_date >= today and m_date <= end_date:
-            key = (symbol, m_date)
-            if key not in seen:
-                seen.add(key)
+            # Keyed on the company alone. NSE and BSE announce the same meeting
+            # separately and occasionally disagree by a day, which as a
+            # (symbol, date) key produced two rows for one meeting. Events are
+            # ordered by date, so the first seen is the nearest.
+            if symbol not in seen:
+                seen.add(symbol)
                 purpose = raw.get("bm_purpose", raw.get("purpose", bm.title or "Financial Results"))
                 purpose_lower = str(purpose).lower()
                 is_earnings = any(k in purpose_lower for k in [
@@ -854,10 +866,24 @@ def get_upcoming_earnings(db: Session = Depends(get_db)):
         upcoming_keys = []
         for item in upcoming:
             sym = item["symbol"].upper()
-            ikey = sym_to_key.get(sym) or f"NSE_EQ|{sym}"
+            # Resolved, never synthesised: NSE_EQ|<SYMBOL> is accepted nowhere,
+            # and a BSE-only company has no NSE listing to fall back on.
+            ikey = sym_to_key.get(sym) or ""
+            if not ikey:
+                try:
+                    from app.main import resolve_instrument_keys
+                    resolved = resolve_instrument_keys(sym)
+                    ikey = resolved[0] if resolved else ""
+                except Exception:
+                    ikey = ""
+            if not ikey:
+                item["instrument_key"] = ""
+                continue
             item["instrument_key"] = ikey
+            # Pipe form only. The colon spelling is how quotes come back keyed,
+            # not a key the API accepts — sending it returns UDAPI1087 and voids
+            # the whole request, including the keys that were fine.
             upcoming_keys.append(ikey)
-            upcoming_keys.append(ikey.replace("|", ":"))
 
         if upcoming_keys:
             feed = get_active_feed()
