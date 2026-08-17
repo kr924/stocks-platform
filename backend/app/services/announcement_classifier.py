@@ -101,6 +101,11 @@ _FORWARD_LOOKING = re.compile(
     r"|board\s+meeting\s+intimation"
     r"|prior\s+intimation"
     r"|schedule\s+of\s+board\s+meeting"
+    # NSE's board-meeting calendar publishes entries as
+    # "SYMBOL: Board Meeting - Financial Results", announcing a meeting that will
+    # consider results. The dash is what separates it from an actual filing:
+    # a real one reads "Board Meeting Outcome for ...", with no dash.
+    r"|^[^:]{1,20}:\s*board\s+meeting\s*[-–—]"
     r")",
     re.IGNORECASE,
 )
