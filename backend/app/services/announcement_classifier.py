@@ -79,12 +79,29 @@ _RESULT_NEGATIVE = re.compile(
     r"|paper\s+cutting"
     r"|press\s+cutting"
     r"|newspaper\s+advertisement"
+    # A clarification, cancellation or postponement is about a result; it is not
+    # one, and acting on it trades a filing that either restates something
+    # already known or says the meeting is off.
+    r"|clarification"
+    r"|cancellation|cancelled"
+    r"|withdraw"
+    r"|postpone|reschedul"
+    r"|re[\s-]?submission"
+    r"|revised"
     r"|loss\s+of\s+share\s+certificate"
     r")",
     re.IGNORECASE,
 )
 
 # A subject that only declares a dividend is not a results filing.
+# Quarterly results are unaudited; the audited ones are the year-end set, filed
+# months after the quarter they cover. The lookbehinds matter: "Un-Audited"
+# contains "audited", and a naive exclusion would reject exactly the filings
+# this is meant to keep.
+_UNAUDITED = re.compile(r"un[\s.-]?audited", re.I)
+_AUDITED_ONLY = re.compile(r"(?<!un)(?<!un[\s.-])audited(?![a-z])", re.I)
+
+
 _DIVIDEND_ONLY = re.compile(r"dividend", re.IGNORECASE)
 
 _BOARD_OUTCOME = re.compile(r"outcome[^.]{0,20}board\s+meeting", re.IGNORECASE)
@@ -170,6 +187,12 @@ def is_financial_result(title: str, description: str = "", category_name: str = 
     # Presentations, analyst meets and press releases discuss results without
     # being one.
     if any(nr in cat for nr in _NON_RESULT_SUBCATEGORIES):
+        return False, None
+
+    # Year-end audited results are a different animal from the quarterly print
+    # this pipeline trades: filed long after the period, already largely known.
+    full_text = f"{subject_text} {body}"
+    if _AUDITED_ONLY.search(full_text) and not _UNAUDITED.search(full_text):
         return False, None
 
     # Channel 2 — explicit result filing, declared in the subject/subcategory.
