@@ -98,7 +98,11 @@ _RESULT_NEGATIVE = re.compile(
 # months after the quarter they cover. The lookbehinds matter: "Un-Audited"
 # contains "audited", and a naive exclusion would reject exactly the filings
 # this is meant to keep.
-_UNAUDITED = re.compile(r"un[\s.-]?audited", re.I)
+# Filings spell it six ways: "unaudited", "un-audited", "un audited", and with
+# stray spacing around the hyphen - "Un- Audited", "Un - Audited", "Un -audited".
+# All of them mean the same thing, and reading one as "audited" would reject a
+# quarterly result for a typo.
+_UNAUDITED = re.compile(r"un[\s.\-]{0,3}audited", re.I)
 _AUDITED_ONLY = re.compile(r"(?<!un)(?<!un[\s.-])audited(?![a-z])", re.I)
 
 
