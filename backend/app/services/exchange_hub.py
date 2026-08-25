@@ -175,7 +175,11 @@ def _normalize_nse(raw: dict) -> Optional[Announcement]:
         raw.get("an_dt") or raw.get("bcastDate") or raw.get("broadcastDate")
         or raw.get("date") or raw.get("dt") or ""
     ).strip()
-    isin = str(raw.get("isin") or "").strip().upper()
+    # NSE names this field `sm_isin`, not `isin`. Reading the wrong key meant
+    # every NSE announcement arrived with an empty ISIN — the one identifier
+    # both exchanges publish, and the only way a filing can be matched to its
+    # BSE twin when the registry does not know the ticker yet.
+    isin = str(raw.get("sm_isin") or raw.get("isin") or "").strip().upper()
 
     from app.services.symbol_registry import resolve
     ident = resolve(nse_symbol=symbol, isin=isin)

@@ -211,6 +211,34 @@ class SystemSetting(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class SymbolRegistryEntry(Base):
+    """
+    One equity listing, joined across NSE and BSE on ISIN.
+
+    Lives in the database rather than only in data/symbol_registry.csv because
+    that CSV is COPY'd into the Docker image from git: a weekly rebuild written
+    to the file inside the container is silently reverted by the next
+    `docker build`, exactly the way the baked .env used to override the mounted
+    one. The database is bind-mounted, so a refresh survives a redeploy.
+
+    The CSV stays in the repo as the seed this table is filled from the first
+    time it is found empty, and as the fallback if the table cannot be read.
+
+    ISIN is the primary key because it is the only identifier both exchanges
+    agree on, and it is unique in all three upstream lists. A listing with no
+    ISIN cannot be joined to its counterpart and is not worth a row.
+    """
+    __tablename__ = "symbol_registry"
+    isin = Column(String(20), primary_key=True)
+    company_name = Column(String(250), nullable=True)
+    # "both nse/bse", "nse", or "bse"
+    exchange_listing = Column(String(20), nullable=True)
+    nse_symbol = Column(String(50), index=True, nullable=True)
+    bse_scrip_cd = Column(String(20), index=True, nullable=True)
+    bse_scrip_id = Column(String(50), index=True, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class AIAlert(Base):
     """AI-generated alerts for high-impact market events."""
     __tablename__ = "ai_alerts"

@@ -247,6 +247,29 @@ async def _intelligence_scheduler():
                 if now_ist.hour >= 8 and last_run.get("morning_digest_date") != today_str:
                     last_run["morning_digest_date"] = today_str
                     asyncio.create_task(asyncio.to_thread(_run_morning_digest))
+
+                # Sunday 17:00 — rebuild the NSE/BSE symbol registry.
+                #
+                # After the close and on a non-trading day, so a slow archive
+                # fetch cannot compete with the announcement path, and with the
+                # whole week's new listings in place before Monday's filings
+                # start. A listing missing from the registry resolves to a bare
+                # scrip code on one exchange and a ticker on the other, which
+                # share no identifier, so its first results filing raises two
+                # order prompts instead of one.
+                #
+                # Guarded by a date in system_settings rather than by `last_run`:
+                # those guards live in this process and reset on restart, which
+                # is harmless for a job that runs every day and wrong for one
+                # that runs every week. A run that fails retries the next day
+                # rather than waiting another Sunday.
+                if now_ist.weekday() == 6 and now_ist.hour >= 17:
+                    if last_run.get("symbol_registry_date") != today_str:
+                        last_run["symbol_registry_date"] = today_str
+                        asyncio.create_task(asyncio.to_thread(_run_symbol_registry_rebuild))
+                elif last_run.get("symbol_registry_retry") != today_str:
+                    last_run["symbol_registry_retry"] = today_str
+                    asyncio.create_task(asyncio.to_thread(_retry_symbol_registry_if_overdue))
             except Exception as e:
                 logger.error(f"Daily IST job error: {e}")
 
@@ -364,6 +387,77 @@ def _run_earnings_sync():
             db.close()
     except Exception as e:
         logger.error(f"Daily earnings sync error: {e}")
+
+
+# A rebuild is overdue once it is this many days old. Eight, not seven: a
+# healthy weekly run is exactly 7 days old when its successor is due, and 8 is
+# the first age that can only mean the Sunday slot was missed or failed. So a
+# Sunday that does not land is retried on Monday rather than a week later.
+_REGISTRY_MAX_AGE_DAYS = 8
+
+
+@_single_flight("symbol_registry")
+def _run_symbol_registry_rebuild(force: bool = False):
+    """
+    Sunday 17:00 IST — refresh the NSE/BSE symbol registry from both exchanges.
+
+    Never raises. A failed fetch leaves the previous registry in place and the
+    daily overdue check picks the job up again tomorrow.
+    """
+    try:
+        from app.services.registry_builder import rebuild_symbol_registry
+        db = next(get_db())
+        try:
+            summary = rebuild_symbol_registry(db, force=force)
+            if not summary.get("ok"):
+                logger.error(
+                    f"Symbol registry rebuild did not apply: {summary.get('error')}"
+                )
+            return summary
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"Symbol registry rebuild error: {e}")
+
+
+def _retry_symbol_registry_if_overdue():
+    """
+    Catch up a rebuild that never landed.
+
+    The Sunday slot is missed whenever the container is down at 17:00, and a
+    fetch that fails leaves the registry a week older than it should be. Both
+    show up here as a last-built date too far in the past, and both are fixed by
+    running the same job — so the weekly slot is the schedule, not the only
+    chance the job gets.
+    """
+    try:
+        from datetime import datetime as dt_cls, timezone as tz_cls, timedelta as td_cls
+        from app.services.registry_builder import last_built_date
+
+        db = next(get_db())
+        try:
+            last = last_built_date(db)
+        finally:
+            db.close()
+
+        ist = tz_cls(td_cls(hours=5, minutes=30))
+        today = dt_cls.now(ist).date()
+        if last:
+            try:
+                age = (today - dt_cls.strptime(last, "%Y-%m-%d").date()).days
+            except ValueError:
+                age = _REGISTRY_MAX_AGE_DAYS + 1
+            if age < _REGISTRY_MAX_AGE_DAYS:
+                return
+            logger.warning(
+                f"Symbol registry was last rebuilt on {last} ({age} days ago) — "
+                "running the overdue rebuild now."
+            )
+        else:
+            logger.info("Symbol registry has never been rebuilt — running it now.")
+        _run_symbol_registry_rebuild()
+    except Exception as e:
+        logger.error(f"Symbol registry overdue check error: {e}")
 
 
 @_single_flight("morning_digest")

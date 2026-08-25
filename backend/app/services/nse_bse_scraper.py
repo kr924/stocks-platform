@@ -136,10 +136,10 @@ def resolve_bse_symbol(scrip_cd: str, slongname: str, isin_code: str, db: Sessio
     """
     Resolve a BSE listing to its display ticker.
 
-    Delegates to the symbol registry (data/symbol_registry.csv), which maps every
-    BSE scrip code to its NSE symbol, BSE scrip id and company name. The previous
-    name-similarity matching against the Upstox dump is kept below only as a
-    fallback for listings the registry has not yet seen.
+    Delegates to the symbol registry, which maps every BSE scrip code to its NSE
+    symbol, BSE scrip id and company name, and is rebuilt weekly from both
+    exchanges. The previous name-similarity matching against the Upstox dump is
+    kept below only as a fallback for listings the registry has not yet seen.
     """
     from app.services.symbol_registry import lookup
 
