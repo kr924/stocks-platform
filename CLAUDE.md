@@ -51,6 +51,65 @@ Dedup keys are claimed under **every** identifier (ISIN, scrip code, ticker) —
 BSE and NSE expose different fields, so keying on "the best available" produces
 different keys for the same filing and the duplicate slips through.
 
+### What counts as a financial result
+
+`announcement_classifier.is_financial_result()` decides on the **subject**
+(title + BSE `SUBCATNAME`), never the body — a body mentioning "financial
+results" is far too common to be evidence. Six gates, in order, first match wins:
+
+1. **Forward-looking** → reject. `intimation`, `notice of board meeting`,
+   `prior intimation`, and NSE's calendar form `SYMBOL: Board Meeting —`.
+   Subject only: a real outcome repeats the agenda wording in its body.
+2. **Hard negatives** → reject. Clarifications, corrigenda, revisions,
+   re-submissions, cancellations, postponements, non-submission, press cuttings
+   (`news paper`, `paper cutting`), transcripts, audio, conference calls, plus
+   fundraising / allotment / appointment / resignation / buyback / ESOP.
+3. **Non-result subcategories** → reject (BSE labels these precisely).
+4. **Audited without un-audited** → reject. If either subject *or* details says
+   "audited" and neither says "un-audited", it is the year-end set.
+5. **Direct result** → accept (`direct_result`).
+6. **Board outcome** → accept if results language appears in subject *or* body
+   (`board_meeting_outcome`). The only place the body is trusted, and safe only
+   because 1–4 have already run.
+
+`"Un-Audited" contains "audited"`, so gate 4 uses lookbehinds; and the six
+spellings seen in the wild (`unaudited`, `un-audited`, `un audited`,
+`Un- Audited`, `Un - Audited`, `Un -audited`) are all read as unaudited.
+**1,648 of 3,713 genuine results state no qualifier at all**, so the rule
+excludes audited rather than requiring unaudited.
+
+### Impact news
+
+`is_impact_news()` catches good news that moves a price without carrying
+numbers: order wins, bonus/split, buybacks, acquisitions, capacity additions,
+regulatory approvals, rating upgrades, joint ventures. Routed by
+`results_router.route_impact_news()` to the same alert and order screen as a
+result, stored with `PendingResultOrder.kind` naming the event.
+
+**No Screener lookup and no earnings AI run on these** — Screener publishes
+quarterly figures and the 2-step extractor expects a results PDF. Deduped
+against the same kind on the same day, not the 30-day results window: a company
+can win several orders in a month and each is its own decision.
+
+A results filing that also mentions an acquisition is a results filing —
+`is_impact_news` returns False for anything `is_financial_result` accepts.
+
+### One prompt per company per quarter
+
+One earnings event produces the outcome, the results PDF, the newspaper
+advertisement and the presentation, all genuinely results. `_already_prompted_this_quarter`
+suppresses the second and later prompts within 30 days. It reads `market_events`,
+not the prompts — prompts are purged after 72h and cannot answer a question
+about the last month.
+
+### NSE fills in the body after the subject
+
+NSE publishes `Outcome of Board Meeting` with an empty description and fills it
+minutes later, so a filing can *become* a result after we first saw it. 94 rows
+sat in that state. `recheck_late_bodies()` re-asks the question every 2 minutes
+for the last 6 hours. Do not backfill the classification instead — that claims
+knowledge we did not have at the decision moment and inflates any backtest.
+
 ### The 09:00-15:30 window
 
 Alerts and AI analysis run only while the market is open, **09:00 to 15:30 IST**
@@ -67,6 +126,10 @@ briefly and was removed for contradicting the cutoff.
 
 ### Daily jobs (IST, guarded by last-run date)
 
+- **01:00** purge result prompts older than 72h (rows that led to an order are
+  kept — `config_id` is the only trail from a filing to a position)
+- **02:00** retire target configs whose date has passed, **never** those in
+  `bought`/`holding` — that would drop the stoploss watcher's subject
 - **06:00** earnings sync into the watchlist
 - **08:00** morning digest — HTML page + PDF + one Telegram alert. Covers a
   rolling **08:00-to-08:00 IST** window, so every filing lands in exactly one
@@ -110,6 +173,34 @@ blanked every price on the screen. `main.py::resolve_instrument_keys` indexes
 both exchange dumps — by trading symbol and by BSE scrip code — and returns NSE
 first, BSE second. Unresolvable symbols are dropped from the request and read
 "no live quote" in the UI.
+
+**Quotes have a single owner.** `upstox_feed` runs one background loop that
+refreshes every key anyone asked for, in one request (Upstox takes 500 keys), and
+all panels read its cache. Before that, four panels fetched on their own timers
+and blew the ~1000-per-30-min limit: prices vanished screen-wide with UDAPI10005,
+and the result baselines — one call each, never retried — were starved by the
+polling meant to display them. Request rate is now a property of the loop's
+interval alone, not of how many panels or tabs are open.
+
+**Only the pipe form of an instrument key is a request key.** `BSE_EQ:INE...` is
+how quotes come *back* keyed; sending it returns UDAPI1087 and voids the whole
+request, including the keys that were fine.
+
+**Never write `` into a regex through a patch script.** Twice a word boundary
+was written as a literal backspace (``), and both times the pattern silently
+matched nothing while looking correct in the terminal, in grep, and in the
+compiled pattern printed back — a backspace is invisible. Use a lookahead, or
+check `repr(pattern)`. Grep the services directory for `` after any regex edit.
+
+**A test that restates a rule tests its own spelling.** A verification script
+that re-declared the unaudited regex reported five violations that did not exist,
+because the code had moved on and the test had not. Import the live patterns.
+
+**Screener figures live on the filing row** (`screener_json`), fetched once. A
+published quarter cannot change, and fetching is paced at ~1 company/second, so
+re-reading a past day must never mean re-fetching it. The digest file is named
+for the morning it ran, which is a different set from "results announced on
+<date>" — do not use it as a lookup key.
 
 **A "success-shaped failure" is the dangerous kind.** The BSE proxy returned
 HTTP 200 "No Record Found!" for every query and starved the feed silently. Empty
@@ -179,7 +270,41 @@ with fixed hostnames would end it.
 
 **`/buy` and `/sell` in Telegram place real orders with no confirmation step.**
 
+**A stale `.env` is baked into the Docker image.** There is no `.dockerignore`,
+so `COPY backend/ ./backend/` copies `backend/.env` — Upstox secret and Telegram
+token included — into the image. Worse, `config.py` calls
+`load_dotenv(override=True)`, so that baked copy *overrides* the `--env-file`
+passed at runtime: `printenv` showed the right URL while the app served the old
+one. The deploy now bind-mounts the live file over it
+(`-v ~/stocks/backend/.env:/app/backend/.env:ro`), which papers over it. The
+real fix is a `.dockerignore`, dropping `override=True`, and clearing the dead
+tunnel hostname hardcoded as `UPSTOX_REDIRECT_URI`'s default in `config.py`.
+
+**Rotating the tunnel is one command:** `bash ops/retunnel.sh` on the VM. It
+restarts the tunnel, reads the new hostname from only the log written after the
+restart, refuses to rewire unless the URL answers 200, rewrites `.env`,
+recreates the container (`--env-file` is read at creation, so a restart keeps the
+old environment), and re-registers the Telegram webhook. The Upstox developer
+console redirect URI is left to the operator. `--current` prints the live URL and
+changes nothing.
+
 **gemcall is not version controlled.** Several fixes live only on local disk.
+
+---
+
+## Where the pipeline stands (measured 25 Aug 2026)
+
+| | |
+|---|---|
+| filings ingested, 28 Jul–25 Aug | 50,219 |
+| classified as results | 3,713 (7.4%) |
+| impact news | 927 — 430 M&A, 347 order wins, 63 expansion, 44 buyback, 28 split |
+| announced → ingested, median | 52 s |
+| filings arriving outside 09:00-15:30 | 86% |
+| AI verdicts that are NA | 88% — **both AI paths are down**, see Open items |
+
+`ops/` holds operational scripts; exports are written to the scratchpad, not the
+repo (a stray `results_announcements.csv` in the root is a leftover, safe to delete).
 
 ---
 
@@ -188,4 +313,17 @@ with fixed hostnames would end it.
 - OpenRouter API key is **empty** — the fallback cannot run, so most analyses
   return NA unless gemcall is up and logged in.
 - gemcall needs `login-google.bat` then `start-all.bat` (login first, or it
-  restarts into an unauthenticated session).
+  restarts into an unauthenticated session), and its `custom_api_url` is a quick
+  tunnel that has already died — a named tunnel would end this.
+- **Both AI paths are therefore down**, which is why 1,510 of 1,531 analyses have
+  no usable revenue+PAT. The triage in front of them works; nothing is reading
+  the numbers. An OpenRouter key is the cheap fix (~$0.0011/filing).
+- **Secrets are baked into the Docker image** — see the `.env` note above. Wants
+  a `.dockerignore` and `load_dotenv(override=False)`.
+- **The earnings calendar is NSE-heavy.** BSE has no board-meeting API we can
+  reach (every path redirects), so BSE meetings are read from the announcement
+  feed's "Board Meeting" subcategory, where the date exists only in prose and
+  parses 85% of the time. Coverage of actual filers was 99% NSE / 25% BSE before
+  this; the next results season is the real test.
+- **A named Cloudflare tunnel** would end the URL rotation for good. Needs a
+  Cloudflare account with a domain; the server side is quick once that exists.
