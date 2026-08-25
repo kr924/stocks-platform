@@ -132,6 +132,7 @@ briefly and was removed for contradicting the cutoff.
   `bought`/`holding` — that would drop the stoploss watcher's subject
 - **06:00** earnings sync into the watchlist
 - **Sun 17:00** rebuild the symbol registry from both exchanges (below)
+- **Sun 18:00** retention sweep (below)
 - **08:00** morning digest — HTML page + PDF + one Telegram alert. Covers a
   rolling **08:00-to-08:00 IST** window, so every filing lands in exactly one
   digest and the boundary falls where nobody is trading. Anything older that was
@@ -145,6 +146,55 @@ The digest's mechanical `screener_signal` refuses any comparison against a base
 under ₹1 crore. A micro-cap moving from ₹0.02 Cr profit to ₹0.06 Cr loss is
 arithmetically -400% and means nothing; it reads NA, like every other
 uncertainty in this codebase.
+
+---
+
+### Retention — two tiers, and why
+
+`services/retention.py` runs **Sunday 18:00 IST**. The platform ingests ~1,700
+announcements a day and used to keep every one: 51,000 rows and 80 MB of a
+140 MB database after a month, almost all of it raw feed JSON nobody reads
+again.
+
+| tier | days | what |
+|---|---|---|
+| trading + earnings calendar | **30** | `financial_results`, `impact_news`, `board_meeting`, `earnings`, BSE rows whose `SUBCATNAME` says Board Meeting, `result_dedup_keys`, `trade_ai_logs` |
+| raw news | **5** | everything else in `market_events`, `news_items`, `news_stories`, `ai_alerts`, `company_filings` |
+
+**The 30-day tier is a dependency, not a preference.**
+`_already_prompted_this_quarter` answers "has this company reported this season"
+from `market_events` over 30 days, *because* the prompts are purged at 72h and
+cannot answer it. Delete a `financial_results` row inside that window and the
+guard forgets the company reported, so the results PDF that follows the board
+outcome raises a second order prompt for one earnings event — the duplicate
+prompt, reintroduced from the other end.
+
+Board meetings are protected for a parallel reason: the earnings calendar reads
+the meeting date out of `raw_data` (and out of prose for BSE) to show *upcoming*
+meetings, so a meeting announced two weeks ahead would vanish from the calendar
+before it happened. For the same reason **`raw_data` is never stripped from a
+retained row** — it is the only place a BSE board-meeting date exists.
+
+A log carrying a `config_id` is kept regardless of age, the same rule
+`purge_old_pending` applies: it is the only trail from a filing to a position.
+
+Deleting frees pages for SQLite to reuse, which stops the file growing, but does
+not return space to the filesystem. `ops/cleanup_old_data.py --vacuum` does
+that, deliberately manual — VACUUM takes an exclusive lock, rewrites the whole
+database and needs free disk equal to its size. First run: **138.5 MB → 50.0 MB**,
+43,342 rows.
+
+`--dry-run` counts without deleting. Its `news_stories (orphaned)` figure is
+counted against articles that are still present, so the real sweep removes far
+more than the dry run shows.
+
+Rows within minutes of a cutoff survive a run and go in the next one. Every rule
+is defined by an age rather than a cursor, so re-running is always safe.
+
+**`ops/` is copied into the image** so these scripts can be run with
+`docker exec` against the live container — the host checkout is not what the
+container sees, and they need the installed dependencies and the mounted
+database.
 
 ---
 

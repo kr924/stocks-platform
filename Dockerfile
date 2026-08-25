@@ -26,6 +26,12 @@ RUN pip install --no-cache-dir -r backend/requirements.txt
 COPY backend/ ./backend/
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
+# Operational scripts. They are run with `docker exec` against the live
+# container, so they have to be in the image — the repo checkout on the host is
+# not what the container sees, and these need the installed dependencies and the
+# mounted database.
+COPY ops/ ./ops/
+
 WORKDIR /app/backend
 
 EXPOSE 8000

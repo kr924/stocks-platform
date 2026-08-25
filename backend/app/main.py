@@ -270,6 +270,16 @@ async def _intelligence_scheduler():
                 elif last_run.get("symbol_registry_retry") != today_str:
                     last_run["symbol_registry_retry"] = today_str
                     asyncio.create_task(asyncio.to_thread(_retry_symbol_registry_if_overdue))
+
+                # Sunday 18:00 — retention sweep. An hour behind the registry
+                # rebuild so the two never contend for the database, and on the
+                # same closed day for the same reason: it deletes tens of
+                # thousands of rows, which is not work to do while filings are
+                # arriving. Idempotent, so a restart mid-sweep costs nothing.
+                if now_ist.weekday() == 6 and now_ist.hour >= 18:
+                    if last_run.get("retention_date") != today_str:
+                        last_run["retention_date"] = today_str
+                        asyncio.create_task(asyncio.to_thread(_run_retention_sweep))
             except Exception as e:
                 logger.error(f"Daily IST job error: {e}")
 
@@ -458,6 +468,34 @@ def _retry_symbol_registry_if_overdue():
         _run_symbol_registry_rebuild()
     except Exception as e:
         logger.error(f"Symbol registry overdue check error: {e}")
+
+
+@_single_flight("retention")
+def _run_retention_sweep():
+    """
+    Sunday 18:00 IST — bound how much history the database keeps.
+
+    Raw news goes at 5 days; anything the trading path or the earnings calendar
+    reads is held for 30. See services/retention.py for why that split is a
+    dependency rather than a preference.
+
+    Frees pages for reuse but does not shrink the file — that is
+    `ops/cleanup_old_data.py --vacuum`, deliberately manual.
+    """
+    try:
+        from app.services.retention import run_retention, database_size_mb
+        db = next(get_db())
+        try:
+            before = database_size_mb(db)
+            counts = run_retention(db)
+            logger.info(
+                f"Retention sweep: {counts} (database {before} MB, "
+                f"pages freed for reuse; run --vacuum to shrink the file)"
+            )
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"Retention sweep error: {e}")
 
 
 @_single_flight("morning_digest")
