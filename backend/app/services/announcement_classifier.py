@@ -446,6 +446,13 @@ def is_impact_news(title: str, description: str = "", category_name: str = ""):
     if not subject:
         return False, None
 
+    # A results filing that also mentions an acquisition is a results filing.
+    # Enforced here rather than left to callers to remember: the two paths have
+    # different dedup, different alerts and different downstream work, and a
+    # filing arriving on both would be prompted twice.
+    if is_financial_result(title, description, category_name)[0]:
+        return False, None
+
     if _IMPACT_NOISE.search(subject):
         return False, None
     if _IMPACT_NEGATIVE.search(subject):
