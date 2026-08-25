@@ -154,6 +154,7 @@ async def _intelligence_scheduler():
         "filings": 0.0,
         "ai_analysis": 0.0,
         "scheduled_buys": 0.0,
+        "late_body_recheck": 0.0,
     }
 
     while True:
@@ -202,6 +203,11 @@ async def _intelligence_scheduler():
 
             if due("filings", "company_filings", 1800):
                 asyncio.create_task(asyncio.to_thread(_run_filings_scraper))
+
+            # NSE fills in an announcement body after publishing its subject, so
+            # a filing can become a result minutes after we first saw it.
+            if due("late_body_recheck", "late_body_recheck", 120, scaled=False):
+                asyncio.create_task(asyncio.to_thread(_run_late_body_recheck))
 
             # Scheduled buys: orders placed while the market was shut, waiting
             # for the open. Checked every 30s so one fires within half a minute
@@ -288,6 +294,20 @@ def _single_flight(name: str):
                 lock.release()
         return wrapper
     return decorator
+
+
+@_single_flight("late_body_recheck")
+def _run_late_body_recheck():
+    """Re-ask the results question for filings whose body arrived late."""
+    try:
+        from app.services.results_router import recheck_late_bodies
+        db = next(get_db())
+        try:
+            recheck_late_bodies(db)
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"Late-body recheck error: {e}")
 
 
 @_single_flight("scheduled_buys")

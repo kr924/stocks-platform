@@ -485,6 +485,25 @@ def poll_exchange_announcements(db: Session) -> Dict[str, int]:
                 if not event:
                     continue
 
+                # Good news big enough to act on takes the auto-trading path
+                # too — the alert and the order screen, but neither Screener
+                # nor the earnings AI, which have nothing to read here.
+                try:
+                    from app.services.announcement_classifier import is_impact_news
+                    impact, kind = is_impact_news(ann.title, ann.description, ann.category_name)
+                except Exception:
+                    impact, kind = False, None
+                if impact:
+                    try:
+                        from app.services.results_router import route_impact_news
+                        route_impact_news(db, ann, event, kind,
+                                          dedup_key=f"impact:{(ann.symbol or '').upper()}:{kind}:{ann.event_time:%Y-%m-%d}")
+                        _broadcast_event(event)
+                        stats["impact"] = stats.get("impact", 0) + 1
+                        continue
+                    except Exception as e:
+                        logger.error(f"Impact-news routing failed for {ann.symbol}: {e}")
+
                 # Everything that is not a result goes to the AI Intelligence
                 # news-impact pipeline.
                 try:
@@ -504,7 +523,7 @@ def poll_exchange_announcements(db: Session) -> Dict[str, int]:
     if stats["results"] or stats["general"]:
         logger.info(
             f"Exchange hub: {stats['fetched']} fetched → "
-            f"{stats['results']} results, {stats['general']} general, "
+            f"{stats['results']} results, {stats.get('impact', 0)} impact, {stats['general']} general, "
             f"{stats['result_duplicates']} cross-channel duplicates suppressed"
         )
 

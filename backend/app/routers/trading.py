@@ -758,6 +758,10 @@ def _serialize_pending(p: PendingResultOrder, ai_log: Optional[TradeAILog] = Non
         "tracking_ref": p.tracking_ref,
         "trade_date": p.trade_date,
         "deferred": bool(p.deferred),
+        # "result" or an impact kind (order_win, stock_split, ...). The panel
+        # uses it to label the row and to hide the AI section, which never runs
+        # for impact news.
+        "kind": getattr(p, "kind", "result") or "result",
         "price_at_announcement": p.price_at_announcement,
         # Lifecycle: announced -> ingested -> alerted -> AI sent -> AI received
         "announced_at": p.event_time.isoformat() if p.event_time else None,

@@ -89,6 +89,7 @@ interface PendingResult {
   trade_date: string | null;
   deferred?: boolean;
   price_at_announcement: number | null;
+  kind?: string;
   announced_at: string | null;
   ingested_at: string | null;
   alert_sent_at: string | null;
@@ -2173,6 +2174,17 @@ export function TradingDashboard() {
                         {pending.tracking_ref}
                       </span>
                     )}
+                    {pending.kind && pending.kind !== "result" && (
+                      <span title="Impact news — good news worth acting on, with no quarterly figures to analyse. No Screener lookup and no earnings AI run on these."
+                        style={{
+                          fontSize: "10px", fontWeight: 700, letterSpacing: "0.4px",
+                          color: "var(--positive)", background: "rgba(63, 191, 135, 0.14)",
+                          border: "1px solid rgba(63, 191, 135, 0.3)",
+                          padding: "2px 7px", borderRadius: "4px",
+                        }}>
+                        {pending.kind.replace(/_/g, " ").toUpperCase()}
+                      </span>
+                    )}
                     {pending.deferred && (
                       <span title="Filed after the 15:20 IST cutoff — held for the 08:00 digest, no alert or AI overnight"
                         style={{ fontSize: "10px", fontWeight: 700, color: "var(--warning)",
@@ -2336,8 +2348,10 @@ export function TradingDashboard() {
 
                   {/* One collapsed row carries the AI state, so the verdict is
                       still visible without the five-row table pushing the next
-                      order card off screen. */}
-                  <div style={{ marginTop: "10px", paddingTop: "9px", borderTop: "1px solid var(--border-subtle)" }}>
+                      order card off screen. Impact news has no AI section at
+                      all: there are no quarterly figures to extract. */}
+                  <div style={{ marginTop: "10px", paddingTop: "9px", borderTop: "1px solid var(--border-subtle)",
+                                display: pending.kind && pending.kind !== "result" ? "none" : undefined }}>
                     <button
                       onClick={() => setExpandedResults(prev => ({ ...prev, [pending.id]: !prev[pending.id] }))}
                       style={{

@@ -535,3 +535,180 @@ def run_ai_for_pending(pending_id: int, config_id=None):
         return True
     finally:
         db.close()
+
+
+def route_impact_news(db: Session, ann, event, kind: str, dedup_key: str = "") -> None:
+    """
+    Raise an order decision for good news that is not a results filing.
+
+    An order win or a bonus issue moves a price without producing a single
+    number this pipeline can read, so the two heavy steps results get are
+    skipped deliberately: no Screener lookup, because Screener publishes
+    quarterly figures and has nothing to say about a contract award, and no
+    earnings AI, because the 2-step extractor expects a results PDF and would
+    return NA on anything else.
+
+    What remains is what actually matters at this moment: the alert and the
+    order screen, both immediately.
+    """
+    symbol = (ann.symbol or "").upper()
+
+    event.category = "impact_news"
+    event.ai_provider = "auto_trading"
+    event.ai_summary = f"{kind.replace('_', ' ').title()} on {ann.exchange.upper()} — routed to Auto Trading."
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+
+    if _is_armed(db, symbol):
+        logger.info(f"📈 [IMPACT] {symbol} is ARMED — trading engine owns execution.")
+        return
+
+    existing = db.query(PendingResultOrder).filter(
+        PendingResultOrder.dedup_key == dedup_key
+    ).first() if dedup_key else None
+    if existing:
+        return
+
+    # Unlike results, impact news is not once a quarter — a company can win
+    # several orders in a month, and each is its own decision. Deduped only
+    # against the same kind on the same day, which suppresses the exchange
+    # publishing one event twice without hiding a genuinely new one.
+    today_ist = datetime.now(IST).strftime("%Y-%m-%d")
+    twin = db.query(PendingResultOrder).filter(
+        PendingResultOrder.symbol == symbol,
+        PendingResultOrder.kind == kind,
+        PendingResultOrder.trade_date == today_ist,
+    ).first()
+    if twin:
+        logger.info(f"📈 [IMPACT] {symbol} already raised '{kind}' today — not prompting twice.")
+        return
+
+    actionable = is_within_action_window()
+    pending = PendingResultOrder(
+        symbol=symbol,
+        company_name=ann.company_name or None,
+        trade_date=today_ist,
+        instrument_key=_resolve_instrument_key(symbol),
+        isin=ann.isin or None,
+        exchange=ann.exchange,
+        title=ann.title[:500],
+        description=ann.description,
+        attachment_url=ann.url,
+        event_time=ann.event_time,
+        dedup_key=dedup_key or f"impact:{symbol}:{kind}:{today_ist}",
+        tracking_ref=make_tracking_ref(symbol),
+        status="pending",
+        kind=kind,
+        deferred=not actionable,
+        # No AI runs on impact news, so the status says so rather than sitting
+        # at "pending" forever waiting for an analysis nobody queued.
+        ai_status="not_applicable",
+    )
+    try:
+        db.add(pending)
+        db.commit()
+        db.refresh(pending)
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to create impact prompt for {symbol}: {e}")
+        return
+
+    sse_manager.broadcast("pending_result_order", {
+        "id": pending.id,
+        "symbol": pending.symbol,
+        "company_name": pending.company_name,
+        "tracking_ref": pending.tracking_ref,
+        "instrument_key": pending.instrument_key,
+        "exchange": pending.exchange,
+        "title": pending.title,
+        "description": (pending.description or "")[:400],
+        "attachment_url": pending.attachment_url,
+        "time": to_iso_utc(pending.event_time),
+        "ingested_at": to_iso_utc(pending.created_at),
+        "status": pending.status,
+        "ai_status": pending.ai_status,
+        "deferred": pending.deferred,
+        "kind": kind,
+    })
+
+    if not actionable:
+        logger.info(f"🌙 [IMPACT DEFERRED] {symbol} ({kind}) arrived outside 09:00-15:30 IST.")
+        return
+
+    logger.info(f"📈 [IMPACT] {symbol} — {kind} — order prompt raised (#{pending.id}).")
+
+    ltp = get_ltp(pending.instrument_key, symbol)
+    try:
+        from app.services.telegram_notifier import send_result_order_alert
+        send_result_order_alert(
+            symbol=ann.symbol,
+            company_name=ann.company_name,
+            exchange=ann.exchange,
+            title=f"{kind.replace('_', ' ').title()} — {ann.title or ''}"[:200],
+            last_price=ltp,
+            url=ann.url,
+            pending_id=pending.id,
+            tracking_ref=pending.tracking_ref,
+            announced_at=ann.event_time,
+            ingested_at=pending.created_at,
+        )
+        pending.alert_sent_at = datetime.utcnow()
+        pending.price_at_announcement = ltp
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.debug(f"Impact alert dispatch failed for {symbol}: {e}")
+
+
+def recheck_late_bodies(db: Session, hours: int = 6) -> int:
+    """
+    Re-classify recent announcements whose description arrived after the subject.
+
+    NSE publishes "Outcome of Board Meeting" — a subject carrying no evidence
+    either way — and fills in the description afterwards. At the moment the
+    decision was made the body was empty, so the filing was not routed; minutes
+    later the body reads "has submitted to the Exchange, the financial results
+    for the quarter ended Jun 30, 2026", and the same rules now say result.
+
+    94 filings were sitting in exactly that state. Rather than backfill the
+    classification and pretend we knew, this re-asks the question while the news
+    is still fresh enough to act on, and routes properly if the answer changed.
+    """
+    from app.services.announcement_classifier import classify
+
+    since = datetime.utcnow() - timedelta(hours=hours)
+    candidates = db.query(MarketEvent).filter(
+        MarketEvent.source.in_(["nse", "bse"]),
+        MarketEvent.created_at >= since,
+        MarketEvent.category != "financial_results",
+        MarketEvent.category != "impact_news",
+        MarketEvent.description.isnot(None),
+    ).all()
+
+    routed = 0
+    for event in candidates:
+        try:
+            cls = classify(event.title or "", event.description or "", "")
+            if not cls["is_financial_result"]:
+                continue
+
+            ann = type("LateAnn", (), {
+                "symbol": event.symbol, "company_name": event.company_name,
+                "exchange": event.source, "title": event.title or "",
+                "description": event.description or "", "url": event.url,
+                "event_time": event.event_time, "isin": None,
+                "category_name": "",
+            })()
+            key = f"late:{(event.symbol or '').upper()}:{event.event_hash[:16]}"
+            route_financial_result(db, ann, event, key)
+            routed += 1
+            logger.info(
+                f"🔁 [LATE BODY] {event.symbol} became a result once its description "
+                f"arrived — '{(event.title or '')[:50]}'"
+            )
+        except Exception as e:
+            db.rollback()
+            logger.debug(f"Late-body recheck failed for {event.symbol}: {e}")
+    return routed

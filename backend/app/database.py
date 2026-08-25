@@ -405,6 +405,11 @@ class PendingResultOrder(Base):
     # one company a second, so re-fetching a past day on demand is minutes of
     # waiting for numbers that cannot have changed.
     screener_json = Column(Text, nullable=True)
+    # "result" for a quarterly filing, "impact" for good news worth acting on
+    # that carries no numbers — an order win, a bonus issue, an approval. The
+    # distinction decides whether Screener and the earnings AI are consulted at
+    # all: neither has anything to say about an order win.
+    kind = Column(String(20), default="result", nullable=True)
 
     dedup_key = Column(String(200), unique=True, index=True, nullable=False)
     # pending → ordered | dismissed | expired
@@ -483,6 +488,7 @@ def init_db():
         _safe_alter(conn, "ALTER TABLE pending_result_orders ADD COLUMN price_at_announcement FLOAT")
         _safe_alter(conn, "ALTER TABLE pending_result_orders ADD COLUMN screener_json TEXT")
         _safe_alter(conn, "ALTER TABLE trade_configs ADD COLUMN scheduled_for DATETIME")
+        _safe_alter(conn, "ALTER TABLE pending_result_orders ADD COLUMN kind VARCHAR(20) DEFAULT 'result'")
 
 
 def _safe_alter(conn, sql: str):

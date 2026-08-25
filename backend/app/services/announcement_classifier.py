@@ -377,3 +377,81 @@ def results_dedup_key(
     """The canonical key for a filing — the first of its candidates."""
     candidates = results_dedup_candidates(symbol, isin, scrip_code, pdf_filename, event_date)
     return candidates[0] if candidates else f"date::{event_date}"
+
+
+# ─── Impact news — good news that moves a price without being a result ──────
+
+# The announcement must BE the event. A press copy of an order win, or the deck
+# discussing it, repeats every keyword and moves nothing.
+_IMPACT_NOISE = re.compile(
+    r"news\s?paper|press\s+cutting|paper\s+cutting|publication|advertisement"
+    r"|transcript|audio\s+recording|investor\s+presentation|analyst"
+    # Only board-meeting intimations: companies also write "Intimation of Bonus
+    # Issue" for the event itself, and rejecting the word outright loses those.
+    r"|board\s+meeting\s+intimation|intimation\s+of\s+board|prior\s+intimation"
+    r"|notice\s+of\s+board|schedule\s+of\s+board",
+    re.I,
+)
+
+# Anything souring the same sentence disqualifies it. "Order received" and
+# "cancellation of order received" share every word that matters.
+_IMPACT_NEGATIVE = re.compile(
+    r"cancell|terminat|withdraw|revoke|downgrade|default|insolven|\bcirp\b|\bnclt\b"
+    r"|winding[\s-]?up|liquidat|penalt|fine\s+imposed|non[\s-]?submission|delay"
+    r"|resignation|lock[\s-]?out|force\s+majeure|shutdown|suspend|expir",
+    re.I,
+)
+
+# (kind, pattern) — the announcement types worth waking someone for. Ordered:
+# first match names the news.
+_IMPACT_RULES = [
+    ("order_win", re.compile(
+        r"order\s+(?:received|won|book)|receipt\s+of\s+order|award(?:ed)?[_\s]*of[_\s]*order"
+        r"|contract\s+award|bagg(?:ed|ing)|letter\s+of\s+intent|\bloi\b|work\s+order"
+        r"|purchase\s+order|new\s+order", re.I)),
+    ("stock_split", re.compile(r"stock\s+split|sub[\s-]?division\s+of\s+share|\bbonus\s+issue\b|\bbonus\s+share", re.I)),
+    ("buyback", re.compile(r"buy[\s-]?back", re.I)),
+    ("merger_acquisition", re.compile(
+        r"acquisition|acquire[ds]?|amalgamation|\bmerger\b|slump\s+sale|stake\s+purchase"
+        r"|controlling\s+interest", re.I)),
+    ("expansion", re.compile(
+        r"capacity\s+(?:addition|expansion|enhancement)|new\s+plant|commission(?:ing|ed)"
+        r"|greenfield|brownfield|expansion\s+of|new\s+facility|plant\s+inaugurat", re.I)),
+    ("regulatory_approval", re.compile(
+        r"fda\s+approval|\banda\b|usfda|regulatory\s+approval|rbi\s+approval|sebi\s+approval"
+        r"|\bcdsco\b|marketing\s+authorisation|patent\s+grant(?:ed)?", re.I)),
+    ("rating_upgrade", re.compile(r"rating\s+upgrade|upgrade[ds]?\s+(?:its|the|to)|revised\s+upward", re.I)),
+    ("joint_venture", re.compile(r"joint\s+venture|\bjv\s+agreement|strategic\s+(?:alliance|partnership)", re.I)),
+]
+
+
+def is_impact_news(title: str, description: str = "", category_name: str = ""):
+    """
+    Is this good news big enough to act on, without being a results filing?
+
+    Returns (is_impact, kind) where kind names the event — order_win,
+    stock_split, merger_acquisition and so on — or (False, None).
+
+    Judged on the subject, like everything else here, for the same reason: a
+    body mentioning an order win is usually a company listing its achievements.
+    The exception is BSE's boilerplate subject, where the subcategory carries
+    the real descriptor and is treated as part of the subject.
+
+    This is a separate question from is_financial_result and deliberately runs
+    only when that one says no. A results filing that also mentions a new order
+    is a results filing; it already has its own path, its own dedup key and its
+    own AI.
+    """
+    subject = f"{(title or '').strip()} {(category_name or '').strip()}".strip()
+    if not subject:
+        return False, None
+
+    if _IMPACT_NOISE.search(subject):
+        return False, None
+    if _IMPACT_NEGATIVE.search(subject):
+        return False, None
+
+    for kind, pattern in _IMPACT_RULES:
+        if pattern.search(subject):
+            return True, kind
+    return False, None

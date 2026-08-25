@@ -172,12 +172,18 @@ def _build_rows(db: Session, pendings: List[PendingResultOrder],
         # quarter does not change, and fetching is paced at roughly a company a
         # second — so re-reading a past day must not mean re-fetching it.
         screener = None
-        if getattr(p, "screener_json", None):
+        is_result_row = getattr(p, "kind", "result") in (None, "", "result")
+        # Impact news carries no quarterly figures, so Screener is not consulted
+        # for it. Asking would spend a paced request to be told nothing.
+        if not is_result_row:
+            screener = {"ok": False, "metrics": {}, "quarter": "", "source_url": "",
+                        "error": "not applicable - impact news, not a results filing"}
+        elif getattr(p, "screener_json", None):
             try:
                 screener = json.loads(p.screener_json)
             except Exception:
                 screener = None
-        if screener is None:
+        if screener is None and is_result_row:
             screener = fetch_latest_quarter(p.symbol, cache_only=cache_only)
             if screener.get("ok"):
                 try:
