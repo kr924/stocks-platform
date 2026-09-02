@@ -1250,9 +1250,13 @@ def extract_pending_result(pending_id: int, refresh: bool = Query(False),
 
     Independent of the AI path by design: a different source read by different
     code, so agreement between the two is evidence rather than one answer
-    repeated. Runs synchronously — the text layer is about a tenth of a second
-    and even the OCR cascade is single-digit seconds for one page, which is
-    inside what a click can wait for.
+    repeated.
+
+    Runs in the background. A text-layer read is a tenth of a second, but a
+    filing whose statement page has to be found by OCR costs about a minute —
+    measured at 64s on a live filing — and blocking a request for that is a
+    timeout in front of the user and a tied-up worker on a 2-core box. The
+    panel polls, so the result lands the way an AI verdict does.
 
     Cached on the row. A published quarter does not change, so re-reading the
     same filing spends a download and an OCR pass to get the same numbers;
@@ -1271,21 +1275,13 @@ def extract_pending_result(pending_id: int, refresh: bool = Query(False),
     if not refresh and getattr(pending, "extraction_json", None):
         return json.loads(pending.extraction_json)
 
-    from app.services.results_extractor import extract_from_filing
-    screener = None
-    if getattr(pending, "screener_json", None):
-        try:
-            screener = json.loads(pending.screener_json)
-        except Exception:
-            screener = None
-
-    result = extract_from_filing(pending.attachment_url, pending.symbol, screener=screener)
-    try:
-        pending.extraction_json = json.dumps(result, default=str)
-        db.commit()
-    except Exception:
-        db.rollback()
-    return result
+    from app.services.results_extractor import run_extraction_async
+    run_extraction_async(pending.id)
+    return {"status": "running",
+            "confidence": {"tier": "READING", "pct": None, "flags": [],
+                           "reason": "Reading the filing. A text layer is instant; "
+                                     "a scan can take up to a minute to find the "
+                                     "statement page."}}
 
 
 @router.get("/extractor/capabilities")

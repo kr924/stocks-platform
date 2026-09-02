@@ -25,14 +25,22 @@ Screener's Operating Profit is its own construct, not a P&L-derived EBITDA, so a
 gap there is not a correctness signal and is excluded from the score. Revenue,
 PBT and PAT are the anchors.
 """
+import json
 import logging
 import os
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 import requests
 
 logger = logging.getLogger("app.results_extractor")
+
+# One at a time, like the earnings AI. OCR is CPU-bound and each RapidOCR
+# worker loads its own ONNX session at 400-800 MB; two of them on a 2-core box
+# would starve the announcement path, which is the one thing here that is
+# actually time-critical.
+_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pdf-extract")
 
 # Metrics scored against Screener. EBITDA is deliberately absent — see above.
 # Revenue and PAT are the anchors the reference pipeline verifies on.
@@ -173,6 +181,66 @@ def _confidence(row: dict, comparisons: list) -> dict:
         "metrics_agreeing": len(agree),
         "metrics_compared": len(scored),
     }
+
+
+def run_extraction_async(pending_id: int) -> bool:
+    """
+    Read one filing in the background and store the result on its row.
+
+    Not synchronous, because the honest worst case is not a click's worth of
+    waiting. A text-layer read is a tenth of a second, but a filing whose
+    statement page has to be *found* by OCR costs about a minute — the engine
+    reads pages until it recognises a table. Blocking a request for that long
+    ties up a worker on a 2-core box and times out in front of the user anyway.
+
+    The panel already polls every few seconds, so the result appears the same
+    way an AI verdict does.
+    """
+    _pool.submit(_extract_job, pending_id)
+    return True
+
+
+def _extract_job(pending_id: int) -> None:
+    from app.database import SessionLocal, PendingResultOrder
+
+    db = SessionLocal()
+    try:
+        pending = db.query(PendingResultOrder).filter(
+            PendingResultOrder.id == pending_id).first()
+        if not pending:
+            return
+        screener = None
+        if getattr(pending, "screener_json", None):
+            try:
+                screener = json.loads(pending.screener_json)
+            except Exception:
+                screener = None
+        result = extract_from_filing(pending.attachment_url, pending.symbol,
+                                     screener=screener)
+        pending = db.query(PendingResultOrder).filter(
+            PendingResultOrder.id == pending_id).first()
+        if pending:
+            pending.extraction_json = json.dumps(result, default=str)
+            db.commit()
+            logger.info(f"[EXTRACT] {pending.symbol}: {result['confidence']['tier']} "
+                        f"({result['confidence']['pct']}%)")
+    except Exception as e:
+        db.rollback()
+        logger.error(f"[EXTRACT] job failed for #{pending_id}: {e}")
+        try:
+            from app.database import PendingResultOrder as _P
+            row = db.query(_P).filter(_P.id == pending_id).first()
+            if row:
+                row.extraction_json = json.dumps({
+                    "ok": False, "error": str(e)[:200],
+                    "confidence": {"tier": "NOT_READ", "pct": None, "flags": [],
+                                   "reason": f"The extractor errored: {str(e)[:120]}"},
+                })
+                db.commit()
+        except Exception:
+            db.rollback()
+    finally:
+        db.close()
 
 
 def extract_from_filing(attachment_url: str, symbol: str,

@@ -1581,6 +1581,9 @@ export function TradingDashboard() {
         return;
       }
       const data: Extraction = await res.json();
+      // The endpoint queues the read and returns immediately. Its placeholder
+      // goes on the row so the card says what is happening; the finished
+      // extraction arrives on the panel's next poll, like an AI verdict.
       setPendingResults(prev => prev.map(p =>
         p.id === pending.id ? { ...p, extraction: data } : p));
     } catch (err) {
@@ -2878,8 +2881,13 @@ export function TradingDashboard() {
                         </div>
 
                         {tab === "ocr" ? (() => {
-                          const ex = pending.extraction;
-                          const busy = !!actionLoading[`extract_${pending.id}`];
+                          const raw = pending.extraction;
+                          // "READING" is the placeholder the endpoint returns
+                          // while the job runs; it carries no figures, so the
+                          // card shows progress rather than an empty table.
+                          const reading = raw?.confidence?.tier === "READING";
+                          const ex = reading ? null : raw;
+                          const busy = !!actionLoading[`extract_${pending.id}`] || reading;
                           const LABEL: Record<string, string> = {
                             revenue: "Revenue", expenses: "Expenses",
                             other_income: "Other income", ebitda: "EBITDA",
@@ -2913,9 +2921,9 @@ export function TradingDashboard() {
                                 <div style={{ padding: "16px", borderRadius: "8px", textAlign: "center",
                                               background: "var(--surface-2)", border: "1px dashed rgba(125, 135, 153,0.3)",
                                               fontSize: "11px", color: "var(--text-muted)", lineHeight: 1.6 }}>
-                                  Reads the figures out of the filing itself, then checks each one against
-                                  Screener. Two independent sources agreeing is evidence; the model's
-                                  reading on its own is not.
+                                  {reading
+                                    ? raw?.confidence?.reason
+                                    : "Reads the figures out of the filing itself, then checks each one against Screener. Two independent sources agreeing is evidence; the model's reading on its own is not."}
                                 </div>
                               ) : (
                                 <>
