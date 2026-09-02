@@ -1129,11 +1129,22 @@ def pending_results_pdf(trade_date: Optional[str] = Query(None), db: Session = D
 
     rows = _build_rows(db, pendings, cache_only=True)
 
-    # One batched read of the shared quote cache, never a call per row: the
-    # feed has a single owner and a metered allowance, and a heavy day here is
-    # a hundred symbols. Only the pipe form is a request key — the colon form
-    # is how quotes come back, and sending it voids the whole batch.
+    # ── Prices ──
+    #
+    # Two figures, from two sources, for two different reasons.
+    #
+    # "Since result" is the move against the baseline captured from Upstox when
+    # the filing landed, so it is only ever computed from an Upstox price. A
+    # baseline from one venue against a last price from another is a move no
+    # single tape ever showed, and it is the number an order gets placed on.
+    #
+    # The day's change is public information. Upstox answers it while the
+    # market is open and the session is authorised; after the close, or with no
+    # session at all, it is a settled number any source can report — so the
+    # export falls back to the public feed rather than printing NA all down the
+    # page for a day that has already finished.
     quotes = {}
+    upstox_ok = False
     keys = sorted({(p.instrument_key or "").replace(":", "|")
                    for p in pendings if p.instrument_key})
     keys = [k for k in keys if "|" in k]
@@ -1141,10 +1152,23 @@ def pending_results_pdf(trade_date: Optional[str] = Query(None), db: Session = D
         try:
             from app.main import get_active_feed
             quotes = get_active_feed().get_quotes(keys) or {}
+            upstox_ok = bool(quotes)
         except Exception as e:
             # A PDF without live prices is still worth having; the baseline and
             # the figures do not depend on the feed being up.
-            logger.warning(f"PDF price lookup failed, prices omitted: {e}")
+            logger.warning(f"PDF Upstox lookup failed, falling back to public quotes: {e}")
+
+    from app.services.results_router import is_within_action_window
+    market_open_now = is_within_action_window()
+    use_upstox_for_day = upstox_ok and market_open_now
+
+    public = {}
+    if not use_upstox_for_day:
+        try:
+            from app.services.public_quotes import fetch_day_changes
+            public = fetch_day_changes([p.symbol for p in pendings])
+        except Exception as e:
+            logger.warning(f"PDF public quote lookup failed: {e}")
 
     # Hang the price block on each row. build_digest_pdf reads r["pending"] as
     # an object, so it takes _build_rows output rather than the serialised dicts.
@@ -1154,11 +1178,31 @@ def pending_results_pdf(trade_date: Optional[str] = Query(None), db: Session = D
             continue
         base = rp.price_at_announcement
         key = (rp.instrument_key or "").replace(":", "|")
-        ltp = (quotes.get(key) or {}).get("last_price")
+        uq = quotes.get(key) or {}
+        ltp = uq.get("last_price")
+
+        day_pct = None
+        day_src = None
+        if use_upstox_for_day and ltp:
+            prev = (uq.get("ohlc") or {}).get("close")
+            if prev:
+                day_pct = round((ltp - prev) / prev * 100, 2)
+                day_src = "Upstox"
+        if day_pct is None:
+            pq = public.get((rp.symbol or "").upper()) or {}
+            if pq.get("change_pct") is not None:
+                day_pct = pq["change_pct"]
+                day_src = "public feed"
+
+        r["is_result"] = (getattr(rp, "kind", "result") or "result") == "result"
         r["price"] = {
             "at_announcement": base,
             "last": ltp,
+            # Upstox only, deliberately — see the note above.
             "since_pct": (round((ltp - base) / base * 100, 2) if base and ltp else None),
+            "upstox_connected": upstox_ok,
+            "day_pct": day_pct,
+            "day_source": day_src,
             "paused": bool(getattr(rp, "paused", False)),
         }
 

@@ -91,34 +91,90 @@ def _styles():
     }
 
 
+def _price_lines(r: dict, st: dict) -> list:
+    """
+    The two price figures, and where each came from.
+
+    "Since result" is Upstox only: it is measured against a baseline Upstox
+    captured when the filing landed, and mixing venues would report a move no
+    single tape ever showed. With no Upstox session it is simply absent, rather
+    than recomputed from a source that cannot be compared with the baseline.
+
+    The day's change is public information, so it falls back to a public feed
+    once the market has closed or when there is no Upstox session at all. Which
+    source answered is printed, because a reader comparing this against their
+    terminal deserves to know which tape it came off.
+    """
+    price = r.get("price") or {}
+    if not (price.get("at_announcement") or price.get("last") or price.get("day_pct") is not None):
+        return []
+
+    def pct(v):
+        if v is None:
+            return '<font color="#8b95a6">NA</font>'
+        colour = "#1a7f4f" if v > 0 else "#c23934" if v < 0 else "#8b95a6"
+        return f'<font color="{colour}"><b>{v:+.2f}%</b></font>'
+
+    since = price.get("since_pct")
+    if since is None and not price.get("upstox_connected"):
+        since_txt = '<font color="#8b95a6">NA (Upstox not connected)</font>'
+    else:
+        since_txt = pct(since)
+
+    day_txt = pct(price.get("day_pct"))
+    if price.get("day_source"):
+        day_txt += f' <font color="#8b95a6" size="6">({price["day_source"]})</font>'
+
+    line = (f"<b>At filing:</b> {_num(price.get('at_announcement'))} &nbsp;·&nbsp; "
+            f"<b>Now:</b> {_num(price.get('last'))} &nbsp;·&nbsp; "
+            f"<b>Since result:</b> {since_txt} &nbsp;·&nbsp; "
+            f"<b>Day:</b> {day_txt}")
+    if price.get("paused"):
+        line += ' &nbsp;·&nbsp; <font color="#8b95a6">price updates paused</font>'
+    return [Paragraph(line, st["meta"])]
+
+
 def _company_block(r: dict, st: dict) -> list:
     """One company: header, timings, the comparison grid, then the AI narrative."""
     p = r["pending"]
     log = r.get("log")
     analysed = r.get("analysed")
     verdict = r.get("verdict") or "NA"
+    kind = (getattr(p, "kind", "result") or "result")
+    # The caller decides; falling back to the row's own kind keeps the 08:00
+    # digest, which passes no flag and carries only results, rendering as before.
+    is_result = r.get("is_result", kind == "result")
 
     flow = []
     flow.append(Paragraph(_safe(p.symbol), st["sym"]))
     if p.company_name:
         flow.append(Paragraph(_safe(p.company_name), st["co"]))
 
-    vcolour = ("#1a7f4f" if verdict.upper() in ("BUY", "BEATS ESTIMATES")
-               else "#c23934" if verdict.upper() in ("SELL", "MISSES ESTIMATES")
-               else "#8b95a6")
+    if is_result:
+        vcolour = ("#1a7f4f" if verdict.upper() in ("BUY", "BEATS ESTIMATES")
+                   else "#c23934" if verdict.upper() in ("SELL", "MISSES ESTIMATES")
+                   else "#8b95a6")
+        flow.append(Paragraph(
+            f'<b>Verdict:</b> <font color="{vcolour}"><b>{_safe(verdict)}</b></font>'
+            f'&nbsp;&nbsp;<font color="#8b95a6">{_safe(p.tracking_ref or "")}</font>',
+            st["meta"]))
+    else:
+        # No verdict line: nothing was analysed, and printing "NA" beside the
+        # word Verdict reads as a judgement rather than as an absence.
+        flow.append(Paragraph(
+            f'<b>{_safe(kind.replace("_", " ").title())}</b>'
+            f'&nbsp;&nbsp;<font color="#8b95a6">{_safe(p.tracking_ref or "")}</font>',
+            st["meta"]))
+
     flow.append(Paragraph(
-        f'<b>Verdict:</b> <font color="{vcolour}"><b>{_safe(verdict)}</b></font>'
-        f'&nbsp;&nbsp;<font color="#8b95a6">{_safe(p.tracking_ref or "")}</font>',
-        st["meta"]))
-    flow.append(Paragraph(
-        f"<b>Result announced:</b> {_ist(p.event_time)} &nbsp;·&nbsp; "
+        f"<b>{'Result announced' if is_result else 'Announced'}:</b> {_ist(p.event_time)} &nbsp;·&nbsp; "
         f"<b>Exchange:</b> {(p.exchange or '').upper()} &nbsp;·&nbsp; "
         f"<b>Window:</b> {'outside 09:00-15:30' if p.deferred else 'intraday'}",
         st["meta"]))
 
     # For a filing that arrived outside market hours this is the only signal on
     # the page — the AI never ran on it.
-    sig = r.get("screener_signal") or {}
+    sig = (r.get("screener_signal") or {}) if is_result else {}
     if sig:
         scolour = ("#1a7f4f" if sig.get("tone") == "pos"
                    else "#c23934" if sig.get("tone") == "neg" else "#8b95a6")
@@ -129,26 +185,24 @@ def _company_block(r: dict, st: dict) -> list:
     # Prices, when the caller supplied them. The 08:00 digest runs before there
     # are any, so this is absent there and present on the order-decision export,
     # where the move since the filing is the column the decision turns on.
-    price = r.get("price") or {}
-    if price.get("at_announcement") or price.get("last"):
-        since = price.get("since_pct")
-        pcolour = ("#1a7f4f" if (since or 0) > 0
-                   else "#c23934" if (since or 0) < 0 else "#8b95a6")
-        since_txt = (f'<font color="{pcolour}"><b>{since:+.2f}%</b></font>'
-                     if since is not None else '<font color="#8b95a6">NA</font>')
-        flow.append(Paragraph(
-            f"<b>At filing:</b> {_num(price.get('at_announcement'))} &nbsp;·&nbsp; "
-            f"<b>Now:</b> {_num(price.get('last'))} &nbsp;·&nbsp; "
-            f"<b>Since result:</b> {since_txt}"
-            + ("&nbsp;·&nbsp; <font color=\"#8b95a6\">price updates paused</font>"
-               if price.get("paused") else ""),
-            st["meta"]))
-    if analysed:
+    flow.extend(_price_lines(r, st))
+    if analysed and is_result:
         flow.append(Paragraph(
             f"<b>AI sent:</b> {_ist(p.ai_requested_at)} &nbsp;·&nbsp; "
             f"<b>AI received:</b> {_ist(p.ai_completed_at)}", st["meta"]))
-    flow.append(Paragraph(f"<i>{_safe((p.title or '')[:170])}</i>", st["small"]))
+    # The subject in full. Truncating it is fine beside a table of figures that
+    # says what the filing was; on a row with no table it is the only thing
+    # describing what actually happened, so it is not cut.
+    subject = _safe(p.title or "")
+    flow.append(Paragraph(f"<i>{subject if is_result else subject[:600]}</i>", st["small"]))
     flow.append(Spacer(1, 4))
+
+    # Only a quarterly filing has figures. An order win, an acquisition or a
+    # buyback has no quarter for Screener to publish and nothing for the
+    # extractor to read, so the grid below would be five rows of dashes
+    # implying we looked and found nothing — when we never asked.
+    if not is_result:
+        return flow
 
     sc = r.get("screener") or {}
     head = ["", "Our AI", f"Screener ({sc.get('quarter') or 'latest qtr'})", "Variance",
@@ -272,7 +326,12 @@ def build_digest_pdf(rows: List[dict], for_date: str, out_path: str,
         canvas.saveState()
         canvas.setFont("Helvetica", 7)
         canvas.setFillColor(_MUTED)
-        canvas.drawString(14 * mm, 8 * mm, f"Results digest — {for_date}")
+        # The heading, not a fixed string: the same builder produces the 08:00
+        # digest and the order-decision export, and a footer claiming "Results
+        # digest" on a page titled "Order decisions" is the kind of mismatch
+        # that gets a printout filed under the wrong thing.
+        canvas.drawString(14 * mm, 8 * mm, f"{heading} — {for_date}"
+                          if for_date not in heading else heading)
         canvas.drawRightString(A4[0] - 14 * mm, 8 * mm, f"Page {doc_.page}")
         canvas.restoreState()
 
