@@ -21,9 +21,15 @@ WORKDIR /app
 # PaddlePaddle) and is paid for only when Tesseract's read still carries hard
 # validation flags — which is the case that matters, since Tesseract misreads
 # ruled tables the ONNX model gets right.
+#
+# libgl1 and libglib2.0-0 are for RapidOCR: it depends on opencv, which links
+# libGL even though nothing here ever displays an image. Without them the
+# import fails at runtime with a bare "libGL.so.1: cannot open shared object
+# file" and the engine silently does not load — the pip install succeeds, so
+# the only symptom is an empty engine list.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc g++ libxml2-dev libxslt1-dev zlib1g-dev \
-    tesseract-ocr \
+    tesseract-ocr libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy backend requirements & install

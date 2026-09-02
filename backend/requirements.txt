@@ -25,3 +25,6 @@ pymupdf==1.28.2
 # entirely (39% of filings carry one). rapidocr is pure ONNX Runtime — no
 # PaddlePaddle — which is what makes it viable on the ARM VM.
 rapidocr-onnxruntime==1.4.4
+# The wrapper for the tesseract binary installed in the Dockerfile. The
+# binary alone is not enough: ocr_words loads the engine through this.
+pytesseract==0.3.13
