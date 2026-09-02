@@ -171,8 +171,19 @@ def _confidence(row: dict, comparisons: list) -> dict:
     corroborated = len(anchors) >= 1 and len(anchors_agree) == len(anchors)
 
     if status in ("NEEDS_OCR", "INVALID_PDF", "FAIL"):
+        # "No engine reached it" and "engines read it and could not recover the
+        # table" are different answers, and only the first is worth fixing by
+        # installing something. Which one applies depends on what is installed,
+        # so the message is chosen from that rather than assumed.
+        engines = (available().get("ocr_engines") or [])
+        needs_ocr = ("The filing is a scan with no text layer, and no OCR engine is "
+                     "installed to read the pixels."
+                     if not engines else
+                     f"The filing is a scan. {' and '.join(e.title() for e in engines)} "
+                     "read the pages but could not recover the figures — the column "
+                     "grid on this statement did not come back cleanly enough to trust.")
         tier, pct, why = "NOT_READ", None, {
-            "NEEDS_OCR": "The filing is a scan with no text to read and no OCR engine reached it.",
+            "NEEDS_OCR": needs_ocr,
             "INVALID_PDF": "The download is not a results filing — the exchange served a "
                            "'page has moved' notice, which saves as a valid PDF.",
         }.get(status, "The statement page could not be located in this filing.")
