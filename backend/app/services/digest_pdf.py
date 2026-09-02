@@ -88,6 +88,16 @@ def _styles():
                                spaceAfter=2, leading=11),
         "small": ParagraphStyle("sm", parent=base["Normal"], fontSize=7, textColor=_MUTED,
                                 leading=9),
+        "section": ParagraphStyle("sec", parent=base["Normal"], fontSize=11, textColor=_INK,
+                                  fontName="Helvetica-Bold", spaceBefore=6, spaceAfter=2),
+        # Table cells wrap only as Paragraphs; a plain string is clipped at the
+        # column edge, which silently truncates a subject.
+        "cell": ParagraphStyle("cl", parent=base["Normal"], fontSize=7, textColor=_INK,
+                               leading=8.5),
+        "cell_r": ParagraphStyle("cr", parent=base["Normal"], fontSize=7, textColor=_INK,
+                                 leading=8.5, alignment=2),
+        "cell_c": ParagraphStyle("cc", parent=base["Normal"], fontSize=7, textColor=_INK,
+                                 leading=8.5, alignment=1),
     }
 
 
@@ -132,6 +142,110 @@ def _price_lines(r: dict, st: dict) -> list:
     if price.get("paused"):
         line += ' &nbsp;·&nbsp; <font color="#8b95a6">price updates paused</font>'
     return [Paragraph(line, st["meta"])]
+
+
+def _pct_cell(v, st) -> Paragraph:
+    """A percentage, coloured, or a muted NA. Never a bare zero for 'unknown'."""
+    if v is None:
+        return Paragraph('<font color="#8b95a6">NA</font>', st["cell_r"])
+    colour = "#1a7f4f" if v > 0 else "#c23934" if v < 0 else "#5a6475"
+    return Paragraph(f'<font color="{colour}">{v:+.2f}%</font>', st["cell_r"])
+
+
+def _non_result_table(rows: List[dict], st: dict) -> list:
+    """
+    Every non-result prompt as one table, a row each.
+
+    These carry no quarterly figures, so the per-company block that suits a
+    results filing — verdict, Screener read, a five-row comparison grid — spends
+    most of a page saying what is absent. What there is to say about an order
+    win fits on one line: what happened, when, and what the price did. A dozen
+    of them belong in a table you can run an eye down, not a dozen headed
+    sections.
+
+    Sorted by announcement time, because on a decision sheet the order things
+    arrived in is the order they mattered in.
+    """
+    if not rows:
+        return []
+
+    ordered = sorted(rows, key=lambda r: (r["pending"].event_time or datetime.min))
+
+    head = ["Company", "Type", "Time", "Subject", "At filing", "Now", "Since", "Day"]
+    data = [[Paragraph(f'<b>{h}</b>', st["cell_r"] if h in ("At filing", "Now", "Since", "Day")
+                       else st["cell"]) for h in head]]
+
+    styles = [
+        ("BACKGROUND", (0, 0), (-1, 0), _HEAD_BG),
+        ("TEXTCOLOR", (0, 0), (-1, 0), _MUTED),
+        ("FONTSIZE", (0, 0), (-1, -1), 7),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("GRID", (0, 0), (-1, -1), 0.4, _LINE),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+    ]
+
+    sources = {}
+    for r in ordered:
+        p = r["pending"]
+        price = r.get("price") or {}
+        if price.get("day_source"):
+            sources[price["day_source"]] = sources.get(price["day_source"], 0) + 1
+
+        company = _safe(p.symbol)
+        if p.company_name:
+            company += f'<br/><font size="6" color="#5a6475">{_safe(p.company_name)}</font>'
+        exch = (p.exchange or "").upper()
+        kind = _safe((getattr(p, "kind", "") or "").replace("_", " ").title())
+
+        data.append([
+            Paragraph(f'<b>{company}</b>', st["cell"]),
+            Paragraph(f'{kind}<br/><font size="6" color="#5a6475">{exch}</font>', st["cell"]),
+            # HH:MM, not HH:MM:SS. Seconds wrap the column onto two lines for a
+            # precision nobody scans a table at; the per-company block for a
+            # results filing still prints the full timestamp.
+            Paragraph(_ist(p.event_time).split(", ")[-1][:5] if p.event_time else "-",
+                      st["cell_c"]),
+            # The subject in full, wrapped. It is the only thing on the row that
+            # says what actually happened.
+            Paragraph(_safe(p.title or ""), st["cell"]),
+            Paragraph(_num(price.get("at_announcement")), st["cell_r"]),
+            Paragraph(_num(price.get("last")), st["cell_r"]),
+            _pct_cell(price.get("since_pct"), st),
+            _pct_cell(price.get("day_pct"), st),
+        ])
+        if price.get("paused"):
+            styles.append(("TEXTCOLOR", (0, len(data) - 1), (0, len(data) - 1), _NA))
+
+    # 182mm of usable width between the margins.
+    table = Table(
+        data, repeatRows=1,
+        colWidths=[26 * mm, 17 * mm, 11 * mm, 63 * mm, 15 * mm, 15 * mm, 16 * mm, 19 * mm],
+    )
+    table.setStyle(TableStyle(styles))
+
+    out = [
+        Paragraph(f"Other announcements ({len(ordered)})", st["section"]),
+        Paragraph(
+            "Order wins, acquisitions, buybacks and the like. No quarterly figures are "
+            "published for these, so no Screener comparison or earnings analysis is run.",
+            st["small"]),
+        Spacer(1, 4),
+        table,
+    ]
+    if sources:
+        # Which tape each figure came off. Upstox answers while the session is
+        # authorised and the market is open; a public feed answers otherwise,
+        # and a reader checking these against a terminal should know which.
+        parts = ", ".join(f"{k} ({n})" for k, n in sorted(sources.items()))
+        out.append(Spacer(1, 3))
+        out.append(Paragraph(
+            f"Day change source: {parts}. "
+            "&quot;Since&quot; is measured against the price captured from Upstox when the "
+            "filing landed, so it reads NA without an Upstox session.", st["small"]))
+    return out
 
 
 def _company_block(r: dict, st: dict) -> list:
@@ -303,24 +417,43 @@ def build_digest_pdf(rows: List[dict], for_date: str, out_path: str,
         title=heading, author="Stocks Platform",
     )
 
-    analysed = sum(1 for r in rows if r.get("analysed"))
+    # Results get a section each; everything else is one table. The two are not
+    # the same document: a results filing is read one company at a time against
+    # its figures, an order win is scanned in a list.
+    results = [r for r in rows
+               if r.get("is_result", (getattr(r["pending"], "kind", "result") or "result") == "result")]
+    others = [r for r in rows if r not in results]
+
+    analysed = sum(1 for r in results if r.get("analysed"))
+    bits = []
+    if results:
+        bits.append(f"{len(results)} result{'' if len(results) == 1 else 's'} "
+                    f"({analysed} analysed intraday, "
+                    f"{len(results) - analysed} filed outside 09:00-15:30)")
+    if others:
+        bits.append(f"{len(others)} other announcement{'' if len(others) == 1 else 's'}")
+    if results:
+        bits.append("all figures Rs crore, consolidated where available")
+
     story = [
         Paragraph(heading, st["title"]),
-        Paragraph(
-            f"{len(rows)} compan{'y' if len(rows) == 1 else 'ies'} · "
-            f"{analysed} analysed intraday · {len(rows) - analysed} filed after the 15:25 cutoff "
-            f"(Screener figures only) · all values Rs crore, consolidated where available",
-            st["sub"]),
+        Paragraph(" · ".join(bits) if bits else "Nothing to report.", st["sub"]),
     ]
 
     if not rows:
         story.append(Paragraph("No results were announced.", st["body"]))
-    for i, r in enumerate(rows):
+
+    for i, r in enumerate(results):
         # Keep a company on one page where it fits, so a table never splits from
         # the symbol it belongs to.
         story.append(KeepTogether(_company_block(r, st)))
-        if (i + 1) % 3 == 0 and i + 1 < len(rows):
+        if (i + 1) % 3 == 0 and i + 1 < len(results):
             story.append(PageBreak())
+
+    if others:
+        if results:
+            story.append(PageBreak())
+        story.extend(_non_result_table(others, st))
 
     def _footer(canvas, doc_):
         canvas.saveState()
