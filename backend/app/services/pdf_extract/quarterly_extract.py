@@ -781,8 +781,19 @@ def ocr_page(doc, pidx, texts, sym, engine_name=None):
             return None
     except Exception:
         return None
+    # basis is set by the text-layer path after try_page returns; on the OCR
+    # path nothing has set it, so it is read off the page we actually used.
+    # Without this a consolidated statement reports a blank basis, and the
+    # confidence step reads a blank as "not standalone" by luck rather than
+    # because it knows.
+    basis = r.get('basis') or ''
+    if not basis:
+        try:
+            basis = basis_of(' '.join(x[4] for x in w))
+        except Exception:
+            basis = ''
     o = {'symbol': sym, 'status': 'OK', 'flags': list(r['flags']),
-         'page': pidx + 1, 'basis': r.get('basis', ''), 'unit': r['unit'],
+         'page': pidx + 1, 'basis': basis, 'unit': r['unit'],
          'engine': engine_name or 'auto'}
     g, cur, prv, lyr = r['grid'], r['cur'], r['prv'], r['lyr']
     o['quarter'] = om(g['dates'][r['latest']])

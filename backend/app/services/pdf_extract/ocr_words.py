@@ -133,28 +133,85 @@ STATEMENT_CUE = re.compile(
     r'|total\s*expens|income\s*from\s*operation', re.I)
 
 
-def find_statement_page(doc, max_pages=12, dpi=100, min_hits=2, engine_name=None):
+# A results statement is mostly numbers; the prose around it is not. Measured
+# on a scanned filing whose statement pages carried ~100 numeric tokens against
+# 8-19 on the auditor's report, the notes and the press release, this separates
+# them far more sharply than the cue words do.
+_NUMERIC_TOKEN = re.compile(r'^\(?[-+]?[\d,]*\.?\d+\)?[*#]?$')
+# Below this a page is prose that happens to quote figures, not a table.
+MIN_TABLE_NUMBERS = 30
+
+
+def _basis_of(text):
+    """Consolidated / Standalone / Unknown, from the heading."""
+    t = text.lower()
+    head = t[:1500]
+    c, s = head.count('consolidated'), head.count('standalone')
+    if c > s:
+        return 'Consolidated'
+    if s > c:
+        return 'Standalone'
+    c, s = t.count('consolidated'), t.count('standalone')
+    return 'Consolidated' if c > s else ('Standalone' if s else 'Unknown')
+
+
+_BASIS_RANK = {'Consolidated': 2, 'Unknown': 1, 'Standalone': 0}
+
+
+def find_statement_page(doc, max_pages=12, dpi=150, min_hits=2, engine_name=None):
     """Locate the results table in a PDF whose text layer cannot be scored.
 
     Image-only filings never reach page selection, because scoring reads the
-    text layer and there isn't one. This renders pages cheaply -- low DPI, and
-    stopping at the first hit -- so discovery costs a handful of pages rather
-    than the whole document.
+    text layer and there isn't one.
+
+    Three things this gets wrong if done naively, all found by measurement on a
+    scanned board-meeting bundle:
+
+    1. dpi=100 is too coarse for these scans. The real statement page scored
+       *zero* cue hits at 100 and six at 150 -- its heading simply was not
+       legible -- so discovery skipped it and settled on a prose page whose
+       larger type survived. 150 is no slower here: fewer garbled tokens to
+       post-process.
+
+    2. Stopping at the first page that clears the cue threshold picks the
+       auditor's review report or the notes, because both are written in the
+       same vocabulary as the statement they describe. Every page is scored and
+       the most table-like one wins, with the numeric count breaking a tie that
+       keywords cannot.
+
+    3. A filing carries the standalone statement and the consolidated one on
+       consecutive pages, near-identical in shape. The text-layer path already
+       prefers consolidated; this must too, or which one gets read comes down
+       to page order. Consolidated is what these figures are compared against.
     """
     if not (get_engine(engine_name) if engine_name else engine()):
         return None
+    best = None
     for i in range(min(len(doc), max_pages)):
         try:
-            txt = ' '.join(w[4] for w in
-                           words_from_page(doc[i], dpi=dpi, engine_name=engine_name))
+            toks = [w[4] for w in
+                    words_from_page(doc[i], dpi=dpi, engine_name=engine_name)]
         except Exception:
             continue
+        txt = ' '.join(toks)
         squashed = re.sub(r'\s+', '', txt)
         hits = len(set(STATEMENT_CUE.findall(txt))
                    | set(STATEMENT_CUE.findall(squashed)))
-        if hits >= min_hits:
-            return i
-    return None
+        numbers = sum(1 for t in toks if _NUMERIC_TOKEN.match(t.strip()))
+        if hits < min_hits and numbers < MIN_TABLE_NUMBERS:
+            continue
+        # OCR mangles spacing, so the basis word is looked for in both the
+        # spaced and the squashed rendering.
+        basis = _basis_of(txt)
+        if basis == 'Unknown':
+            basis = _basis_of(squashed)
+        # A dense grid of figures outranks vocabulary -- the notes page talks
+        # about the results, the statement page *is* the results -- and among
+        # real tables, consolidated outranks standalone.
+        score = (numbers >= MIN_TABLE_NUMBERS, _BASIS_RANK[basis], numbers, hits)
+        if best is None or score > best[0]:
+            best = (score, i)
+    return best[1] if best else None
 
 
 def words_from_page(page, dpi=150, min_conf=0.5, engine_name=None):
