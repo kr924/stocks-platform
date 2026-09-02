@@ -239,6 +239,45 @@ class SymbolRegistryEntry(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class ScreenerQuarter(Base):
+    """
+    One company's reported figures for one quarter, as Screener published them.
+
+    Kept because a published quarter cannot change. Screener is fetched on the
+    filing path, the digest path, the panel's background filler and the history
+    chart, all of them paced at roughly a company a second — so a figure that
+    has been read once should never need reading again.
+
+    Written insert-if-absent, never updated. If a row for this symbol and
+    quarter already exists it is what Screener said when we first asked, and a
+    later fetch that disagrees is a revision worth noticing rather than
+    silently overwriting.
+
+    Values are Rs crore, the unit Screener normalises to.
+    """
+    __tablename__ = "screener_quarters"
+    # Composite key: a quarter belongs to a company, and both halves are needed
+    # to say which figure this is.
+    symbol = Column(String(50), primary_key=True)
+    quarter = Column(String(20), primary_key=True)     # "Jun 2026"
+
+    revenue = Column(Float, nullable=True)
+    expenses = Column(Float, nullable=True)
+    ebitda = Column(Float, nullable=True)              # Screener's Operating Profit
+    other_income = Column(Float, nullable=True)
+    interest = Column(Float, nullable=True)
+    depreciation = Column(Float, nullable=True)
+    pbt = Column(Float, nullable=True)
+    pat = Column(Float, nullable=True)
+
+    source_url = Column(Text, nullable=True)
+    fetched_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    __table_args__ = (
+        Index("ix_screener_quarters_symbol", "symbol"),
+    )
+
+
 class AIAlert(Base):
     """AI-generated alerts for high-impact market events."""
     __tablename__ = "ai_alerts"

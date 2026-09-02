@@ -171,6 +171,69 @@ def _quarter_headings(html: str) -> list:
     return [_strip(c) for c in cells[1:] if _strip(c)]
 
 
+def persist_quarters(symbol: str, headings: list, metrics: dict,
+                     source_url: str = "") -> int:
+    """
+    Record each parsed quarter, skipping any already on file.
+
+    Called from the fetch itself rather than from one caller, because Screener
+    is read from four places — the 08:00 digest, the panel's background filler,
+    the history chart and an on-demand extraction — and a record kept by only
+    one of them would have holes wherever another path got there first.
+
+    Insert-only. A published quarter cannot change, so a row that already
+    exists is what Screener said when we first asked; overwriting it would lose
+    that without anyone noticing. Returns how many new quarters were stored.
+
+    Never raises: this is a side effect of answering a question the caller
+    actually asked, and it must not be able to fail that question.
+    """
+    if not headings or not metrics:
+        return 0
+    try:
+        from app.database import ScreenerQuarter, SessionLocal
+    except Exception as e:
+        logger.debug(f"Screener store unavailable: {e}")
+        return 0
+
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return 0
+
+    db = SessionLocal()
+    try:
+        have = {q for (q,) in db.query(ScreenerQuarter.quarter)
+                .filter(ScreenerQuarter.symbol == sym).all()}
+        rows = []
+        for i, quarter in enumerate(headings):
+            quarter = (quarter or "").strip()
+            if not quarter or quarter in have:
+                continue
+            values = {}
+            for key in _ROW_LABELS:
+                series = (metrics.get(key) or {}).get("series") or []
+                values[key] = series[i] if i < len(series) else None
+            # A quarter with nothing in it is a column heading Screener draws
+            # for a period the company has not reported. Storing it would make
+            # "we have this quarter" true for a row that answers nothing.
+            if all(v is None for v in values.values()):
+                continue
+            rows.append(ScreenerQuarter(symbol=sym, quarter=quarter,
+                                        source_url=source_url or None, **values))
+        if not rows:
+            return 0
+        db.bulk_save_objects(rows)
+        db.commit()
+        logger.info(f"[SCREENER] stored {len(rows)} new quarter(s) for {sym}.")
+        return len(rows)
+    except Exception as e:
+        db.rollback()
+        logger.warning(f"Could not store Screener quarters for {sym}: {e}")
+        return 0
+    finally:
+        db.close()
+
+
 def fetch_latest_quarter(symbol: str, cache_only: bool = False) -> dict:
     """
     Latest reported quarter for `symbol`, as values.
@@ -277,10 +340,59 @@ def fetch_latest_quarter(symbol: str, cache_only: bool = False) -> dict:
         })
         if out["ok"]:
             _quarter_cache[sym] = (time.monotonic(), out)
+            # Persisted here, once, on the one path every caller comes through.
+            persist_quarters(sym, headings, metrics, url)
             return out
 
     _quarter_cache[sym] = (time.monotonic(), out)
     return out
+
+
+def _history_from_store(symbol: str):
+    """
+    Rebuild (headings, metrics) from the stored quarters, or None.
+
+    Shaped exactly like the parse so the caller cannot tell which source it
+    got — the arithmetic below it is the same either way.
+
+    Ordered by the quarter's real date, not its text: "Dec 2025" sorts before
+    "Jun 2026" alphabetically and after it in time, and a chart drawn in
+    alphabetical order is wrong in a way that looks fine.
+    """
+    try:
+        from app.database import ScreenerQuarter, SessionLocal
+    except Exception:
+        return None
+
+    _MONTHS = {m: i for i, m in enumerate(
+        ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+         "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], start=1)}
+
+    def as_date(q: str):
+        bits = (q or "").split()
+        if len(bits) != 2 or bits[0] not in _MONTHS:
+            return (0, 0)
+        try:
+            return (int(bits[1]), _MONTHS[bits[0]])
+        except ValueError:
+            return (0, 0)
+
+    db = SessionLocal()
+    try:
+        rows = db.query(ScreenerQuarter).filter(
+            ScreenerQuarter.symbol == (symbol or "").strip().upper()).all()
+        if not rows:
+            return None
+        rows.sort(key=lambda r: as_date(r.quarter))
+        headings = [r.quarter for r in rows]
+        metrics = {k: {"series": [getattr(r, k, None) for r in rows]}
+                   for k in _ROW_LABELS}
+        return headings, metrics
+    except Exception as e:
+        logger.debug(f"Stored Screener history unavailable for {symbol}: {e}")
+        return None
+    finally:
+        db.close()
 
 
 def quarterly_history(symbol: str, quarters: int = 8,
@@ -302,16 +414,28 @@ def quarterly_history(symbol: str, quarters: int = 8,
     """
     data = fetch_latest_quarter(symbol, cache_only=cache_only)
     headings = data.get("quarters") or []
+    metrics = data.get("metrics") or {}
+
     if not data.get("ok") or not headings:
-        return {"ok": False, "symbol": symbol.upper(), "error": data.get("error") or "no data",
-                "source_url": data.get("source_url", ""), "points": []}
+        # Screener could not answer — rate limited, down, or the company is not
+        # on it today. Whatever was stored the last time it did answer is still
+        # true, because a published quarter does not change. Serving that beats
+        # an empty chart, and is the reason the figures are kept at all.
+        stored = _history_from_store(symbol)
+        if stored:
+            headings, metrics = stored
+            data = {"ok": True, "source_url": data.get("source_url", ""),
+                    "error": "", "from_store": True}
+        else:
+            return {"ok": False, "symbol": symbol.upper(),
+                    "error": data.get("error") or "no data",
+                    "source_url": data.get("source_url", ""), "points": []}
 
     def at(series, i):
         if not series or i < 0 or i >= len(series):
             return None
         return series[i]
 
-    metrics = data.get("metrics") or {}
     points = []
     # Newest last, so the chart reads left to right in time.
     start = max(0, len(headings) - quarters)
@@ -348,6 +472,9 @@ def quarterly_history(symbol: str, quarters: int = 8,
         "ok": bool(points),
         "symbol": symbol.upper(),
         "source_url": data.get("source_url", ""),
+        # True when Screener could not be reached and this came off the stored
+        # figures instead, so the panel can say so rather than implying it is live.
+        "from_store": bool(data.get("from_store")),
         "unit": "Rs crore",
         "metrics": [{"key": k, "label": METRIC_LABELS[k]} for k in present],
         "points": points,

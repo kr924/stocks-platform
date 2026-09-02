@@ -607,6 +607,9 @@ interface QuarterPoint {
 
 interface QuarterHistory {
   ok: boolean; symbol: string; source_url: string; unit: string;
+  // True when Screener could not be reached and these came off the figures
+  // stored the last time it could.
+  from_store?: boolean;
   metrics: { key: string; label: string }[];
   points: QuarterPoint[];
   error: string;
@@ -5085,6 +5088,13 @@ export function TradingDashboard() {
                     ? `${quarterHistory.metrics.length} lines · ${quarterHistory.points.length} quarters · value and year-on-year change`
                     : "value and year-on-year change per quarter"}
                 </span>
+                {quarterHistory?.from_store && (
+                  <span title="Screener could not be reached, so these are the figures stored the last time it answered. A published quarter does not change, so they are still correct — only a quarter reported since then would be missing."
+                        style={{ fontSize: "9px", fontWeight: 700, color: "var(--text-muted)",
+                                 background: "var(--surface-2)", padding: "2px 7px", borderRadius: "4px" }}>
+                    FROM STORED FIGURES
+                  </span>
+                )}
                 {quarterHistory?.source_url && (
                   <a href={quarterHistory.source_url} target="_blank" rel="noreferrer"
                      style={{ marginLeft: "auto", fontSize: "10px", color: "var(--text-muted)" }}>
