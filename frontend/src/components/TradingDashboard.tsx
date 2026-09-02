@@ -705,6 +705,113 @@ function MetricStrip({ points, metric, label }: {
 }
 
 
+/**
+ * Contain a render error to the card that caused it.
+ *
+ * React unmounts the whole tree when a render throws, so one bad row took the
+ * entire dashboard to a blank screen — which is what a missing component
+ * reference did here, and what any future shape mismatch in a stored payload
+ * would do again. A prompt panel reads from JSON written by a background job;
+ * that payload will not always match what this file expects.
+ *
+ * The failing card shows what went wrong. Everything around it keeps working,
+ * including the order forms, which is the part that must never disappear
+ * because of a display bug.
+ */
+class CardBoundary extends React.Component<
+  { label: string; children: React.ReactNode },
+  { message: string | null }
+> {
+  constructor(props: { label: string; children: React.ReactNode }) {
+    super(props);
+    this.state = { message: null };
+  }
+  static getDerivedStateFromError(err: unknown) {
+    return { message: err instanceof Error ? err.message : String(err) };
+  }
+  componentDidCatch(err: unknown) {
+    console.error("Card render failed:", err);
+  }
+  render() {
+    if (this.state.message === null) return this.props.children;
+    return (
+      <div style={{
+        padding: "12px 14px", borderRadius: "8px", fontSize: "11px", lineHeight: 1.55,
+        background: "rgba(240, 115, 111, 0.08)", border: "1px solid rgba(240, 115, 111, 0.3)",
+        color: "var(--text-secondary)",
+      }}>
+        <b style={{ color: "var(--negative-strong)" }}>{this.props.label} could not be displayed.</b>
+        <div style={{ marginTop: "4px", color: "var(--text-muted)" }}>{this.state.message}</div>
+        <div style={{ marginTop: "4px", color: "var(--text-faint)" }}>
+          The rest of the panel is unaffected — the filing and its order form are still above.
+        </div>
+      </div>
+    );
+  }
+}
+
+
+interface Extraction {
+  ok: boolean;
+  engine?: string; page?: number | null; basis?: string; unit?: string;
+  quarter?: string; screener_quarter?: string; covers_screener_quarter?: boolean;
+  metrics?: Record<string, {
+    current_qtr: number | null; prev_qtr: number | null; year_ago: number | null;
+    yoy_change_pct: number | null; qoq_change_pct: number | null;
+  }>;
+  comparisons?: {
+    metric: string; pdf: number | null; screener: number | null;
+    gap_pct: number | null; agrees: boolean | null; note?: string;
+  }[];
+  confidence: {
+    tier: string; pct: number | null; reason: string; clean?: boolean;
+    status?: string; flags?: string[];
+    metrics_agreeing?: number; metrics_compared?: number;
+  };
+  error?: string;
+}
+
+/**
+ * How much of the extraction to believe, as a tier and a percentage.
+ *
+ * The percentages are the accuracy measured for each tier over 1,926 filings,
+ * not a feeling: a clean read confirmed by a second source is a different claim
+ * from a flagged read nothing corroborates, and showing both as "extracted"
+ * would be the lie worth avoiding.
+ */
+function ConfidenceBadge({ c }: { c: Extraction["confidence"] }) {
+  // Defensive: this renders from a stored payload, and an older or truncated
+  // row must degrade to "unknown" rather than take the whole panel down with a
+  // ReferenceError — which is exactly what a blank screen is.
+  const tier = c?.tier || "UNKNOWN";
+  const pct = c?.pct ?? null;
+  const tone =
+    pct == null ? "na"
+      : pct >= 80 ? "good"
+      : pct >= 50 ? "warn"
+      : "bad";
+  const colour = tone === "good" ? "var(--positive)"
+    : tone === "warn" ? "var(--warning)"
+    : tone === "bad" ? "var(--negative)" : "var(--text-muted)";
+  const bg = tone === "good" ? "rgba(63, 191, 135, 0.14)"
+    : tone === "warn" ? "rgba(224, 163, 62, 0.14)"
+    : tone === "bad" ? "rgba(240, 115, 111, 0.14)" : "var(--surface-2)";
+  return (
+    <span title={c?.reason || ""} style={{
+      display: "inline-flex", alignItems: "baseline", gap: "6px",
+      fontSize: "10px", fontWeight: 700, letterSpacing: "0.3px",
+      padding: "3px 9px", borderRadius: "5px", color: colour, background: bg,
+      border: `1px solid ${colour}33`,
+    }}>
+      {tier.replace(/_/g, " ")}
+      <b style={{ fontSize: "12px", fontVariantNumeric: "tabular-nums" }}>
+        {pct == null ? "—" : `${pct}%`}
+      </b>
+    </span>
+  );
+}
+
+
 function VerdictBadge({ verdict }: { verdict?: string | null }) {
   const v = (verdict || "NA").toUpperCase();
   const isNA = v === "NA";
@@ -2792,6 +2899,7 @@ export function TradingDashboard() {
                     </button>
 
                     {isOpen && (
+                      <CardBoundary label="This analysis">
                       <div style={{ marginTop: "10px" }}>
                         {/* Two ways of getting figures out of the same filing.
                             OCR reads the PDF directly; AI asks a model. They are
@@ -2814,7 +2922,18 @@ export function TradingDashboard() {
                         </div>
 
                         {tab === "ocr" ? (() => {
-                          const raw = pending.extraction;
+                          const rawAny = pending.extraction as Extraction | null | undefined;
+                          // Shape-check what came out of the database rather
+                          // than trusting it. This expression is an inline IIFE
+                          // in the card's JSX, so React evaluates it during the
+                          // *parent's* render — before the error boundary that
+                          // wraps it ever renders. A throw here escapes the
+                          // boundary and unmounts the dashboard, which is what
+                          // a blank screen is. Components rendered inside the
+                          // boundary are protected; this is not.
+                          const raw: Extraction | null =
+                            rawAny && typeof rawAny === "object" && rawAny.confidence
+                              ? rawAny : null;
                           // "READING" is the placeholder the endpoint returns
                           // while the job runs; it carries no figures, so the
                           // card shows progress rather than an empty table.
@@ -2864,7 +2983,7 @@ export function TradingDashboard() {
                                     {ex.confidence.reason}
                                   </div>
 
-                                  {!!ex.confidence.flags?.length && (
+                                  {Array.isArray(ex.confidence.flags) && ex.confidence.flags.length > 0 && (
                                     <div style={{ display: "flex", flexWrap: "wrap", gap: "5px", marginBottom: "10px" }}>
                                       {ex.confidence.flags.map(f => (
                                         <span key={f} title="A validation check the extractor raised on this reading"
@@ -2884,7 +3003,7 @@ export function TradingDashboard() {
                                     </div>
                                   )}
 
-                                  {!!ex.comparisons?.length && (
+                                  {Array.isArray(ex.comparisons) && ex.comparisons.length > 0 && (
                                     <div style={{ overflowX: "auto" }}>
                                       <table style={{ borderCollapse: "collapse", fontSize: "11px", width: "100%", minWidth: "440px" }}>
                                         <thead>
@@ -2987,7 +3106,7 @@ export function TradingDashboard() {
                             {/* Screener's own figures for the quarter, beside
                                 ours. This is what the Results Digest showed in a
                                 second list of these same rows. */}
-                            {pending.comparison && pending.comparison.length > 0 && (
+                            {Array.isArray(pending.comparison) && pending.comparison.length > 0 && (
                               <div style={{ marginTop: "12px", paddingTop: "10px", borderTop: "1px solid var(--border-subtle)" }}>
                                 <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--info)", marginBottom: "6px", letterSpacing: "0.4px" }}>
                                   SCREENER COMPARISON
@@ -3014,6 +3133,7 @@ export function TradingDashboard() {
                           </>
                         )}
                       </div>
+                      </CardBoundary>
                     )}
                   </div>
                 </div>
@@ -4925,12 +5045,14 @@ export function TradingDashboard() {
                     ))}
                   </div>
 
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(420px, 1fr))", gap: "0 26px" }}>
-                    {quarterHistory.metrics.map(m => (
-                      <MetricStrip key={m.key} points={quarterHistory.points}
-                                   metric={m.key} label={m.label} />
-                    ))}
-                  </div>
+                  <CardBoundary label="These quarters">
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(420px, 1fr))", gap: "0 26px" }}>
+                      {quarterHistory.metrics.map(m => (
+                        <MetricStrip key={m.key} points={quarterHistory.points}
+                                     metric={m.key} label={m.label} />
+                      ))}
+                    </div>
+                  </CardBoundary>
 
                   <div style={{ fontSize: "9px", color: "var(--text-faint)", marginTop: "2px", lineHeight: 1.5 }}>
                     Figures in ₹ crore, percentage is against the same quarter a year earlier.
