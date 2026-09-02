@@ -774,6 +774,8 @@ def _serialize_pending(p: PendingResultOrder, ai_log: Optional[TradeAILog] = Non
         # for impact news.
         "kind": getattr(p, "kind", "result") or "result",
         "paused": bool(getattr(p, "paused", False)),
+        "extraction": (json.loads(p.extraction_json)
+                       if getattr(p, "extraction_json", None) else None),
         "price_at_announcement": p.price_at_announcement,
         # Lifecycle: announced -> ingested -> alerted -> AI sent -> AI received
         "announced_at": p.event_time.isoformat() if p.event_time else None,
@@ -1238,6 +1240,65 @@ def dismiss_pending_result(pending_id: int, db: Session = Depends(get_db)):
     pending.resolved_at = datetime.utcnow()
     db.commit()
     return {"status": "success", "pending": _serialize_pending(pending, None, db)}
+
+
+@router.post("/pending-results/{pending_id}/extract")
+def extract_pending_result(pending_id: int, refresh: bool = Query(False),
+                           db: Session = Depends(get_db)):
+    """
+    Read this filing's PDF and score the figures against Screener.
+
+    Independent of the AI path by design: a different source read by different
+    code, so agreement between the two is evidence rather than one answer
+    repeated. Runs synchronously — the text layer is about a tenth of a second
+    and even the OCR cascade is single-digit seconds for one page, which is
+    inside what a click can wait for.
+
+    Cached on the row. A published quarter does not change, so re-reading the
+    same filing spends a download and an OCR pass to get the same numbers;
+    `refresh=true` forces it anyway.
+    """
+    pending = db.query(PendingResultOrder).filter(PendingResultOrder.id == pending_id).first()
+    if not pending:
+        raise HTTPException(status_code=404, detail="Pending result not found")
+    if (getattr(pending, "kind", "result") or "result") != "result":
+        raise HTTPException(
+            status_code=400,
+            detail="This is impact news, not a results filing — it has no quarterly figures.")
+    if not pending.attachment_url:
+        raise HTTPException(status_code=400, detail="This filing carries no PDF to read.")
+
+    if not refresh and getattr(pending, "extraction_json", None):
+        return json.loads(pending.extraction_json)
+
+    from app.services.results_extractor import extract_from_filing
+    screener = None
+    if getattr(pending, "screener_json", None):
+        try:
+            screener = json.loads(pending.screener_json)
+        except Exception:
+            screener = None
+
+    result = extract_from_filing(pending.attachment_url, pending.symbol, screener=screener)
+    try:
+        pending.extraction_json = json.dumps(result, default=str)
+        db.commit()
+    except Exception:
+        db.rollback()
+    return result
+
+
+@router.get("/extractor/capabilities")
+def extractor_capabilities():
+    """
+    What this deployment can read, so the panel can say so rather than failing.
+
+    OCR is an optional extra: without an engine installed the text layer still
+    handles roughly two thirds of filings, and the rest report that they are
+    scans rather than pretending to have been read.
+    """
+    from app.services.results_extractor import available
+    return available()
 
 
 @router.get("/quarterly-history/{symbol}")

@@ -118,6 +118,8 @@ interface PendingResult {
   screener_signal?: { label: string; tone: string; reason: string } | null;
   all_positive?: boolean;
   comparison?: DigestCompany["comparison"] | null;
+  // The filed PDF read independently of the AI, with its confidence.
+  extraction?: Extraction | null;
 }
 
 /**
@@ -707,6 +709,62 @@ function QuarterlyBars({ points, metric }: { points: QuarterPoint[]; metric: "re
         })}
       </div>
     </div>
+  );
+}
+
+
+interface Extraction {
+  ok: boolean;
+  engine?: string; page?: number | null; basis?: string; unit?: string;
+  quarter?: string; screener_quarter?: string; covers_screener_quarter?: boolean;
+  metrics?: Record<string, {
+    current_qtr: number | null; prev_qtr: number | null; year_ago: number | null;
+    yoy_change_pct: number | null; qoq_change_pct: number | null;
+  }>;
+  comparisons?: {
+    metric: string; pdf: number | null; screener: number | null;
+    gap_pct: number | null; agrees: boolean | null; note?: string;
+  }[];
+  confidence: {
+    tier: string; pct: number | null; reason: string; clean?: boolean;
+    status?: string; flags?: string[];
+    metrics_agreeing?: number; metrics_compared?: number;
+  };
+  error?: string;
+}
+
+/**
+ * How much of the extraction to believe, as a tier and a percentage.
+ *
+ * The percentages are the accuracy measured for each tier over 1,926 filings,
+ * not a feeling: a clean read confirmed by a second source is a different claim
+ * from a flagged read nothing corroborates, and showing both as "extracted"
+ * would be the lie worth avoiding.
+ */
+function ConfidenceBadge({ c }: { c: Extraction["confidence"] }) {
+  const tone =
+    c.pct == null ? "na"
+      : c.pct >= 80 ? "good"
+      : c.pct >= 50 ? "warn"
+      : "bad";
+  const colour = tone === "good" ? "var(--positive)"
+    : tone === "warn" ? "var(--warning)"
+    : tone === "bad" ? "var(--negative)" : "var(--text-muted)";
+  const bg = tone === "good" ? "rgba(63, 191, 135, 0.14)"
+    : tone === "warn" ? "rgba(224, 163, 62, 0.14)"
+    : tone === "bad" ? "rgba(240, 115, 111, 0.14)" : "var(--surface-2)";
+  return (
+    <span title={c.reason} style={{
+      display: "inline-flex", alignItems: "baseline", gap: "6px",
+      fontSize: "10px", fontWeight: 700, letterSpacing: "0.3px",
+      padding: "3px 9px", borderRadius: "5px", color: colour, background: bg,
+      border: `1px solid ${colour}33`,
+    }}>
+      {c.tier.replace(/_/g, " ")}
+      <b style={{ fontSize: "12px", fontVariantNumeric: "tabular-nums" }}>
+        {c.pct == null ? "—" : `${c.pct}%`}
+      </b>
+    </span>
   );
 }
 
@@ -1501,6 +1559,34 @@ export function TradingDashboard() {
       console.error("Error pausing result:", err);
     } finally {
       setActionLoading(prev => ({ ...prev, [`pause_${id}`]: false }));
+    }
+  };
+
+  /**
+   * Read the filing's own PDF and score it against Screener.
+   *
+   * Deliberately a separate action from the AI: this is a second opinion from a
+   * different source, and running it automatically alongside every analysis
+   * would spend a download and an OCR pass on filings nobody is looking at.
+   */
+  const handleExtract = async (pending: PendingResult, refresh = false) => {
+    setActionLoading(prev => ({ ...prev, [`extract_${pending.id}`]: true }));
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/trading/pending-results/${pending.id}/extract${refresh ? "?refresh=true" : ""}`,
+        { method: "POST" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.detail || "Could not read the filing.");
+        return;
+      }
+      const data: Extraction = await res.json();
+      setPendingResults(prev => prev.map(p =>
+        p.id === pending.id ? { ...p, extraction: data } : p));
+    } catch (err) {
+      console.error("Extraction failed:", err);
+    } finally {
+      setActionLoading(prev => ({ ...prev, [`extract_${pending.id}`]: false }));
     }
   };
 
@@ -2791,19 +2877,118 @@ export function TradingDashboard() {
                           ))}
                         </div>
 
-                        {tab === "ocr" ? (
-                          <div style={{
-                            padding: "16px", borderRadius: "8px", textAlign: "center",
-                            background: "var(--surface-2)", border: "1px dashed rgba(125, 135, 153,0.3)",
-                            fontSize: "11px", color: "var(--text-muted)", lineHeight: 1.6,
-                          }}>
-                            <b style={{ color: "var(--text-secondary)" }}>OCR extraction is not built yet.</b>
-                            <div style={{ marginTop: "4px" }}>
-                              It will read the figures out of the filing PDF directly, so a
-                              number can be checked against the model's reading of the same page.
+                        {tab === "ocr" ? (() => {
+                          const ex = pending.extraction;
+                          const busy = !!actionLoading[`extract_${pending.id}`];
+                          const LABEL: Record<string, string> = {
+                            revenue: "Revenue", expenses: "Expenses",
+                            other_income: "Other income", ebitda: "EBITDA",
+                            pbt: "PBT", pat: "Profit after tax",
+                          };
+                          return (
+                            <div>
+                              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "10px", marginBottom: "10px" }}>
+                                <button onClick={() => handleExtract(pending, !!ex)} disabled={busy}
+                                  title="Read the filing's PDF and check the figures against Screener"
+                                  style={{
+                                    display: "inline-flex", alignItems: "center", gap: "5px",
+                                    padding: "5px 12px", borderRadius: "6px",
+                                    background: "var(--ai-bg)", border: "1px solid rgba(164, 138, 224,0.45)",
+                                    color: "var(--ai)", fontSize: "11px", fontWeight: 700,
+                                    cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.6 : 1,
+                                  }}>
+                                  <RefreshCw size={11} className={busy ? "spin" : undefined} />
+                                  {busy ? "Reading the filing…" : ex ? "Read again" : "Read the filing"}
+                                </button>
+                                {ex && <ConfidenceBadge c={ex.confidence} />}
+                                {ex?.engine && (
+                                  <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>
+                                    via {ex.engine}{ex.page ? ` · page ${ex.page}` : ""}
+                                    {ex.basis ? ` · ${ex.basis}` : ""}{ex.unit ? ` · ${ex.unit}` : ""}
+                                  </span>
+                                )}
+                              </div>
+
+                              {!ex ? (
+                                <div style={{ padding: "16px", borderRadius: "8px", textAlign: "center",
+                                              background: "var(--surface-2)", border: "1px dashed rgba(125, 135, 153,0.3)",
+                                              fontSize: "11px", color: "var(--text-muted)", lineHeight: 1.6 }}>
+                                  Reads the figures out of the filing itself, then checks each one against
+                                  Screener. Two independent sources agreeing is evidence; the model's
+                                  reading on its own is not.
+                                </div>
+                              ) : (
+                                <>
+                                  <div style={{ fontSize: "11px", color: "var(--text-secondary)", lineHeight: 1.55, marginBottom: "10px" }}>
+                                    {ex.confidence.reason}
+                                  </div>
+
+                                  {!!ex.confidence.flags?.length && (
+                                    <div style={{ display: "flex", flexWrap: "wrap", gap: "5px", marginBottom: "10px" }}>
+                                      {ex.confidence.flags.map(f => (
+                                        <span key={f} title="A validation check the extractor raised on this reading"
+                                          style={{ fontSize: "9px", fontFamily: "ui-monospace, Menlo, monospace",
+                                                   color: "var(--warning)", background: "var(--warning-bg)",
+                                                   padding: "2px 6px", borderRadius: "4px" }}>
+                                          {f}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
+
+                                  {ex.quarter && !ex.covers_screener_quarter && ex.screener_quarter && (
+                                    <div style={{ fontSize: "10px", color: "var(--warning)", marginBottom: "8px" }}>
+                                      The filing covers {ex.quarter}; Screener's latest is {ex.screener_quarter}.
+                                      The two describe different periods, so the gaps below are not errors.
+                                    </div>
+                                  )}
+
+                                  {!!ex.comparisons?.length && (
+                                    <div style={{ overflowX: "auto" }}>
+                                      <table style={{ borderCollapse: "collapse", fontSize: "11px", width: "100%", minWidth: "440px" }}>
+                                        <thead>
+                                          <tr>
+                                            {["", `From the filing${ex.quarter ? ` (${ex.quarter})` : ""}`, "Screener", "Gap", ""].map((h, i) => (
+                                              <th key={i} style={{ textAlign: i === 0 || i === 4 ? "left" : "right",
+                                                                   padding: "4px 8px", color: "var(--text-muted)", fontWeight: 600,
+                                                                   fontSize: "10px", borderBottom: "1px solid var(--border-subtle)",
+                                                                   whiteSpace: "nowrap" }}>{h}</th>
+                                            ))}
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {ex.comparisons.map(c => (
+                                            <tr key={c.metric}>
+                                              <td style={{ padding: "4px 8px", fontWeight: 600, color: "var(--text-primary)", whiteSpace: "nowrap" }}>
+                                                {LABEL[c.metric] || c.metric}
+                                              </td>
+                                              <td style={{ padding: "4px 8px", textAlign: "right", whiteSpace: "nowrap",
+                                                           color: c.pdf == null ? "var(--text-faint)" : "var(--text-primary)" }}>
+                                                {c.pdf == null ? "—" : c.pdf.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                                              </td>
+                                              <td style={{ padding: "4px 8px", textAlign: "right", whiteSpace: "nowrap",
+                                                           color: c.screener == null ? "var(--text-faint)" : "var(--text-secondary)" }}>
+                                                {c.screener == null ? "—" : c.screener.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                                              </td>
+                                              <td style={{ padding: "4px 8px", textAlign: "right", whiteSpace: "nowrap",
+                                                           color: c.agrees === true ? "var(--positive)"
+                                                             : c.agrees === false ? "var(--negative)" : "var(--text-faint)" }}>
+                                                {c.gap_pct == null ? "—" : `${c.gap_pct > 0 ? "+" : ""}${c.gap_pct.toFixed(2)}%`}
+                                              </td>
+                                              <td style={{ padding: "4px 8px", fontSize: "9px", color: "var(--text-faint)", lineHeight: 1.4 }}>
+                                                {c.note || (c.agrees === true ? "agrees" : c.agrees === false ? "differs" : "")}
+                                              </td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  )}
+                                </>
+                              )}
                             </div>
-                          </div>
-                        ) : (
+                          );
+                        })() : (
                           <>
                             {/* Model choice applies to this run only; it does not
                                 change the configured default for future filings. */}

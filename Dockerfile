@@ -13,9 +13,17 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies for lxml and PyPDF2
+# Install system dependencies for lxml and PyPDF2.
+#
+# tesseract-ocr is the fast first stage of the results-extraction cascade: a
+# rendered page reads in ~1.2s against RapidOCR's ~6.9s, and it keeps
+# inter-word spacing. RapidOCR arrives via pip (pure ONNX Runtime, no
+# PaddlePaddle) and is paid for only when Tesseract's read still carries hard
+# validation flags — which is the case that matters, since Tesseract misreads
+# ruled tables the ONNX model gets right.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc g++ libxml2-dev libxslt1-dev zlib1g-dev \
+    tesseract-ocr \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy backend requirements & install

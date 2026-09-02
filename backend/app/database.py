@@ -444,6 +444,11 @@ class PendingResultOrder(Base):
     # distinction decides whether Screener and the earnings AI are consulted at
     # all: neither has anything to say about an order win.
     kind = Column(String(20), default="result", nullable=True)
+    # The filed PDF read independently of the AI, with its confidence. Kept on
+    # the row because a published quarter cannot change: re-reading a filing
+    # costs a download and up to seven seconds of OCR per page, and would
+    # return the same numbers.
+    extraction_json = Column(Text, nullable=True)
 
     dedup_key = Column(String(200), unique=True, index=True, nullable=False)
     # pending → ordered | dismissed | expired
@@ -522,6 +527,7 @@ def init_db():
         _safe_alter(conn, "ALTER TABLE pending_result_orders ADD COLUMN price_at_announcement FLOAT")
         _safe_alter(conn, "ALTER TABLE pending_result_orders ADD COLUMN screener_json TEXT")
         _safe_alter(conn, "ALTER TABLE pending_result_orders ADD COLUMN paused BOOLEAN DEFAULT 0")
+        _safe_alter(conn, "ALTER TABLE pending_result_orders ADD COLUMN extraction_json TEXT")
         _safe_alter(conn, "ALTER TABLE trade_configs ADD COLUMN scheduled_for DATETIME")
         _safe_alter(conn, "ALTER TABLE pending_result_orders ADD COLUMN kind VARCHAR(20) DEFAULT 'result'")
 

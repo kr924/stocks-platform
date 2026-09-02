@@ -16,3 +16,12 @@ python-dateutil==2.9.0.post0
 brotli==1.1.0
 # Digest PDF generation (pure Python — no system libs needed in the slim image)
 reportlab==4.2.2
+
+# Quarterly-results extraction from filed PDFs. PyMuPDF gives word bounding
+# boxes, which is what recovers the column grid — Indian P&L tables are
+# right-aligned, so numbers cluster by right edge. Wheels exist for aarch64.
+pymupdf==1.28.2
+# OCR fallback for filings whose text layer is a stale OCR pass or absent
+# entirely (39% of filings carry one). rapidocr is pure ONNX Runtime — no
+# PaddlePaddle — which is what makes it viable on the ARM VM.
+rapidocr-onnxruntime==1.4.4
