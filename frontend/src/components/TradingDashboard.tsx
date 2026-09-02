@@ -597,6 +597,120 @@ function ScreenerComparison({ rows, quarter, analysed }: {
 }
 
 
+interface QuarterPoint {
+  quarter: string;
+  year_ago_quarter: string | null;
+  revenue: number | null;
+  revenue_year_ago: number | null;
+  revenue_yoy_pct: number | null;
+  pat: number | null;
+  pat_year_ago: number | null;
+  pat_yoy_pct: number | null;
+}
+
+/**
+ * Reported quarters, each bar paired against the same quarter a year earlier.
+ *
+ * Paired rather than drawn as a plain run because most Indian businesses are
+ * seasonal: a December quarter below the September before it says nothing, a
+ * December quarter below *last* December says a great deal. Reading growth off
+ * adjacent bars of a seasonal series is the mistake this pairing prevents.
+ *
+ * Drawn as plain SVG. A chart library for two grouped series would be more
+ * bytes than the whole panel, and the axis rules here are simple enough that
+ * the arithmetic is clearer than a configuration object.
+ */
+function QuarterlyBars({ points, metric }: { points: QuarterPoint[]; metric: "revenue" | "pat" }) {
+  const cur = (p: QuarterPoint) => (metric === "revenue" ? p.revenue : p.pat);
+  const ago = (p: QuarterPoint) => (metric === "revenue" ? p.revenue_year_ago : p.pat_year_ago);
+  const yoy = (p: QuarterPoint) => (metric === "revenue" ? p.revenue_yoy_pct : p.pat_yoy_pct);
+
+  const values = points.flatMap(p => [cur(p), ago(p)]).filter((v): v is number => v != null);
+  if (!values.length) return null;
+
+  // PAT goes negative; revenue does not. A zero line only appears when the
+  // data crosses it, so a profitable run is not squashed into the top half.
+  const hi = Math.max(...values, 0);
+  const lo = Math.min(...values, 0);
+  const span = hi - lo || 1;
+
+  const H = 150, PAD_T = 14, PAD_B = 26;
+  const plot = H - PAD_T - PAD_B;
+  const y = (v: number) => PAD_T + ((hi - v) / span) * plot;
+  const zeroY = y(0);
+
+  const slot = 100 / points.length;
+  const barW = slot * 0.3;
+
+  const fmt = (v: number | null) => {
+    if (v == null) return "—";
+    const a = Math.abs(v);
+    if (a >= 100000) return `${(v / 100000).toFixed(2)}L`;
+    if (a >= 1000) return `${(v / 1000).toFixed(1)}k`;
+    return v.toFixed(a < 10 ? 2 : 0);
+  };
+
+  return (
+    <div>
+      <svg viewBox={`0 0 100 ${H}`} preserveAspectRatio="none"
+           style={{ width: "100%", height: `${H}px`, display: "block", overflow: "visible" }}>
+        {/* Zero line, drawn only when the series actually crosses it. */}
+        {lo < 0 && (
+          <line x1="0" x2="100" y1={zeroY} y2={zeroY}
+                stroke="var(--text-faint)" strokeWidth="0.4" vectorEffect="non-scaling-stroke" />
+        )}
+        {points.map((p, i) => {
+          const x0 = i * slot;
+          const c = cur(p), a = ago(p);
+          const bars = [
+            { v: a, x: x0 + slot / 2 - barW - slot * 0.03, fill: "var(--text-faint)", op: 0.45 },
+            { v: c, x: x0 + slot / 2 + slot * 0.03,
+              fill: (yoy(p) ?? 0) >= 0 ? "var(--positive)" : "var(--negative)", op: 0.95 },
+          ];
+          return (
+            <g key={p.quarter}>
+              {bars.map((b, bi) => b.v == null ? null : (
+                <rect key={bi} x={b.x} width={barW}
+                      y={Math.min(y(b.v), zeroY)}
+                      height={Math.max(Math.abs(y(b.v) - zeroY), 0.5)}
+                      fill={b.fill} opacity={b.op} rx="0.4">
+                  <title>
+                    {`${bi === 0 ? p.year_ago_quarter || "year earlier" : p.quarter}: ${fmt(b.v)} Cr`}
+                  </title>
+                </rect>
+              ))}
+            </g>
+          );
+        })}
+      </svg>
+
+      {/* Labels sit outside the SVG: preserveAspectRatio="none" stretches the
+          viewBox horizontally, which would distort any text drawn inside it. */}
+      <div style={{ display: "flex", marginTop: "2px" }}>
+        {points.map(p => {
+          const v = yoy(p);
+          return (
+            <div key={p.quarter} style={{ flex: 1, textAlign: "center", minWidth: 0 }}>
+              <div style={{ fontSize: "9px", color: "var(--text-muted)", whiteSpace: "nowrap",
+                            overflow: "hidden", textOverflow: "ellipsis" }}>
+                {p.quarter}
+              </div>
+              <div style={{
+                fontSize: "9px", fontWeight: 700, fontVariantNumeric: "tabular-nums",
+                color: v == null ? "var(--text-faint)"
+                  : v > 0 ? "var(--positive)" : v < 0 ? "var(--negative)" : "var(--text-muted)",
+              }}>
+                {v == null ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(0)}%`}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+
 function VerdictBadge({ verdict }: { verdict?: string | null }) {
   const v = (verdict || "NA").toUpperCase();
   const isNA = v === "NA";
@@ -1080,9 +1194,29 @@ export function TradingDashboard() {
    * reading "chart data unavailable" — which says the stock has no data, when
    * really we asked about a stock that does not exist.
    */
+  const [quarterHistory, setQuarterHistory] = useState<{
+    ok: boolean; symbol: string; source_url: string; unit: string;
+    points: QuarterPoint[]; error: string;
+  } | null>(null);
+  const [quarterLoading, setQuarterLoading] = useState(false);
+
+  const fetchQuarterHistory = async (symbol: string) => {
+    setQuarterLoading(true);
+    setQuarterHistory(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/trading/quarterly-history/${encodeURIComponent(symbol)}?quarters=8`);
+      setQuarterHistory(res.ok ? await res.json() : null);
+    } catch {
+      setQuarterHistory(null);
+    } finally {
+      setQuarterLoading(false);
+    }
+  };
+
   const openEarningsChart = async (symbol: string, instrumentKey?: string) => {
     setChartSymbol(symbol);
     setChartPeriod("1D");
+    fetchQuarterHistory(symbol);
 
     const looksReal = instrumentKey && /\|[A-Z]{2}[A-Z0-9]{9}[0-9]$/.test(instrumentKey);
     let key = looksReal ? instrumentKey! : "";
@@ -4620,6 +4754,61 @@ export function TradingDashboard() {
                   : `${chartSymbol} does not appear in Upstox's NSE or BSE instrument list, so there is no price history to chart.`}
               </div>
             )}
+
+            {/* Reported quarters, under the price. The price says what the
+                market thinks; this says what the company actually filed, and
+                the two are worth reading together on a results decision. */}
+            <div style={{ marginTop: "18px", paddingTop: "16px", borderTop: "1px solid var(--border-subtle)" }}>
+              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: "10px", marginBottom: "10px" }}>
+                <h4 style={{ margin: 0, fontSize: "13px", fontWeight: 700, color: "var(--text-primary)" }}>
+                  Reported quarters
+                </h4>
+                <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>
+                  each quarter against the same quarter a year earlier · ₹ crore
+                </span>
+                {quarterHistory?.source_url && (
+                  <a href={quarterHistory.source_url} target="_blank" rel="noreferrer"
+                     style={{ marginLeft: "auto", fontSize: "10px", color: "var(--text-muted)" }}>
+                    screener.in
+                  </a>
+                )}
+              </div>
+
+              {quarterLoading ? (
+                <div style={{ padding: "26px", textAlign: "center", fontSize: "11px", color: "var(--text-muted)" }}>
+                  Loading reported quarters…
+                </div>
+              ) : quarterHistory?.ok && quarterHistory.points.length > 0 ? (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "22px" }}>
+                  {([["revenue", "Revenue"], ["pat", "Profit after tax"]] as const).map(([key, label]) => (
+                    <div key={key}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "6px" }}>
+                        <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--text-secondary)" }}>{label}</span>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: "10px", fontSize: "9px", color: "var(--text-faint)" }}>
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                            <span style={{ width: "8px", height: "8px", borderRadius: "2px", background: "var(--text-faint)", opacity: 0.45 }} />
+                            year earlier
+                          </span>
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                            <span style={{ width: "8px", height: "8px", borderRadius: "2px", background: "var(--positive)" }} />
+                            this quarter
+                          </span>
+                        </span>
+                      </div>
+                      <QuarterlyBars points={quarterHistory.points} metric={key} />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ padding: "20px", textAlign: "center", fontSize: "11px", color: "var(--text-faint)" }}>
+                  {/* Screener not holding a company is a different answer from a
+                      request that failed, and only one is worth retrying. */}
+                  {quarterHistory?.error
+                    ? `No reported quarters for ${chartSymbol} — ${quarterHistory.error}.`
+                    : `No reported quarters found for ${chartSymbol}.`}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

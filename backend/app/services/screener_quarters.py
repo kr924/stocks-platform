@@ -235,6 +235,10 @@ def fetch_latest_quarter(symbol: str, cache_only: bool = False) -> dict:
             # disagree, which is the point of showing both.
             prev_qtr = series[-2] if len(series) >= 2 else None
             metrics[key] = {
+                # Every quarter screener publishes, oldest first, aligned with
+                # `quarters`. Already parsed to answer the YoY question below —
+                # keeping it costs nothing and is what the history chart draws.
+                "series": series,
                 "current_qtr": current,
                 "last_year_same_qtr": year_ago,
                 "yoy_change_pct": pct(current, year_ago),
@@ -247,6 +251,8 @@ def fetch_latest_quarter(symbol: str, cache_only: bool = False) -> dict:
             "source_url": url,
             "quarter": headings[-1] if headings else "",
             "prev_quarter": headings[-2] if len(headings) >= 2 else "",
+            # Column headings for the series above, same order.
+            "quarters": headings,
             "metrics": metrics,
             "error": "" if metrics else out["error"],
         })
@@ -256,6 +262,67 @@ def fetch_latest_quarter(symbol: str, cache_only: bool = False) -> dict:
 
     _quarter_cache[sym] = (time.monotonic(), out)
     return out
+
+
+def quarterly_history(symbol: str, quarters: int = 8,
+                      cache_only: bool = False) -> dict:
+    """
+    The last `quarters` reported quarters, each paired with the same quarter a
+    year earlier.
+
+    Paired rather than plotted as a plain run of bars because most Indian
+    businesses are seasonal: a December quarter below the September before it
+    says nothing, while a December quarter below *last* December says a great
+    deal. Reading growth off adjacent bars of a seasonal series is the error
+    this pairing exists to prevent.
+
+    Screener is the source, not the filings. It carries every quarter already
+    normalised to Rs crore, so year-on-year is read off two columns rather than
+    parsed out of two different PDFs — which removes the largest source of error
+    in doing this from filings.
+    """
+    data = fetch_latest_quarter(symbol, cache_only=cache_only)
+    headings = data.get("quarters") or []
+    if not data.get("ok") or not headings:
+        return {"ok": False, "symbol": symbol.upper(), "error": data.get("error") or "no data",
+                "source_url": data.get("source_url", ""), "points": []}
+
+    def at(series, i):
+        if not series or i < 0 or i >= len(series):
+            return None
+        return series[i]
+
+    metrics = data.get("metrics") or {}
+    points = []
+    # Newest last, so the chart reads left to right in time.
+    start = max(0, len(headings) - quarters)
+    for i in range(start, len(headings)):
+        point = {"quarter": headings[i]}
+        # Four columns back is the same quarter a year earlier. Absent for the
+        # oldest quarters screener holds, which is why the value can be null and
+        # the chart must draw a gap rather than a zero.
+        yoy_i = i - 4
+        point["year_ago_quarter"] = headings[yoy_i] if yoy_i >= start - 4 and yoy_i >= 0 else None
+        for key in ("revenue", "pat"):
+            series = (metrics.get(key) or {}).get("series") or []
+            cur = at(series, i)
+            prev_year = at(series, yoy_i) if yoy_i >= 0 else None
+            point[key] = cur
+            point[key + "_year_ago"] = prev_year
+            point[key + "_yoy_pct"] = (
+                round((cur - prev_year) / abs(prev_year) * 100, 2)
+                if cur is not None and prev_year not in (None, 0) else None
+            )
+        points.append(point)
+
+    return {
+        "ok": bool(points),
+        "symbol": symbol.upper(),
+        "source_url": data.get("source_url", ""),
+        "unit": "Rs crore",
+        "points": points,
+        "error": "",
+    }
 
 
 # Below this (₹ crore) a year-on-year percentage stops meaning anything: a

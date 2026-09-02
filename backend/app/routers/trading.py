@@ -1240,6 +1240,22 @@ def dismiss_pending_result(pending_id: int, db: Session = Depends(get_db)):
     return {"status": "success", "pending": _serialize_pending(pending, None, db)}
 
 
+@router.get("/quarterly-history/{symbol}")
+def get_quarterly_history(symbol: str, quarters: int = Query(8, ge=4, le=20)):
+    """
+    Reported quarters for one symbol, each paired with the same quarter a year
+    earlier — what the history chart under the price chart draws.
+
+    Screener is the source rather than the filings: it carries every quarter
+    already normalised to Rs crore, so year-on-year comes off two adjacent
+    columns instead of two separately parsed PDFs. Served from the same
+    six-hour cache the digest uses, so opening a chart does not spend a paced
+    Screener request.
+    """
+    from app.services.screener_quarters import quarterly_history
+    return quarterly_history(symbol, quarters=quarters)
+
+
 # ─── Morning results digest ─────────────────────────────────────────────────
 
 @router.get("/digest/{for_date}")
