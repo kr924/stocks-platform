@@ -18,6 +18,12 @@ node_modules/
 *.sqlite
 market_tracker.db
 backend/market_tracker.db
+# WAL sidecars: SQLite writes these beside the database whenever the app
+# is running, and they are as much production state as the file itself.
+market_tracker.db-wal
+market_tracker.db-shm
+backend/market_tracker.db-wal
+backend/market_tracker.db-shm
 __pycache__/
 *.pyc
 

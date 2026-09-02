@@ -181,7 +181,7 @@ def _send_result_alert(ann, event, pending_id=None, instrument_key: str = "", pe
 
 
 def _run_earnings_ai(symbol: str, title: str, attachment_url: str, description: str,
-                     config_id, pending_id):
+                     config_id, pending_id, model_override: str = None):
     """Background worker: run the existing 2-step earnings analysis."""
     from app.database import SessionLocal
 
@@ -205,6 +205,7 @@ def _run_earnings_ai(symbol: str, title: str, attachment_url: str, description: 
             pdf_text=description,
             config_id=config_id,
             tracking_ref=tracking_ref,
+            model_override=model_override,
         )
 
         if pending_id:
@@ -512,8 +513,15 @@ def expire_stale_pending(db: Session) -> int:
         return 0
 
 
-def run_ai_for_pending(pending_id: int, config_id=None):
-    """Public hook so the API can (re)trigger analysis for a pending result."""
+def run_ai_for_pending(pending_id: int, config_id=None, model_override: str = None):
+    """
+    Public hook so the API can (re)trigger analysis for a pending result.
+
+    `model_override` names an OpenRouter model for this run only. Re-analysis is
+    refused for impact news: the 2-step extractor expects a results PDF and an
+    order win has no quarterly figures in it, so the run would burn a premium
+    call to return NA.
+    """
     from app.database import SessionLocal
 
     db = SessionLocal()
@@ -523,6 +531,12 @@ def run_ai_for_pending(pending_id: int, config_id=None):
         ).first()
         if not pending:
             return False
+        if (getattr(pending, "kind", "result") or "result") != "result":
+            logger.info(
+                f"[EARNINGS AI] {pending.symbol} is impact news ({pending.kind}) — "
+                "no earnings analysis to run."
+            )
+            return False
         _ai_pool.submit(
             _run_earnings_ai,
             pending.symbol,
@@ -531,6 +545,7 @@ def run_ai_for_pending(pending_id: int, config_id=None):
             pending.description,
             config_id,
             pending.id,
+            model_override,
         )
         return True
     finally:

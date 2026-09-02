@@ -126,6 +126,23 @@ def _company_block(r: dict, st: dict) -> list:
             f'<b>Screener read:</b> <font color="{scolour}"><b>{_safe(sig.get("label", "NA"))}</b></font>'
             f'&nbsp;&nbsp;<font color="#8b95a6">{_safe(sig.get("reason", ""))}</font>',
             st["meta"]))
+    # Prices, when the caller supplied them. The 08:00 digest runs before there
+    # are any, so this is absent there and present on the order-decision export,
+    # where the move since the filing is the column the decision turns on.
+    price = r.get("price") or {}
+    if price.get("at_announcement") or price.get("last"):
+        since = price.get("since_pct")
+        pcolour = ("#1a7f4f" if (since or 0) > 0
+                   else "#c23934" if (since or 0) < 0 else "#8b95a6")
+        since_txt = (f'<font color="{pcolour}"><b>{since:+.2f}%</b></font>'
+                     if since is not None else '<font color="#8b95a6">NA</font>')
+        flow.append(Paragraph(
+            f"<b>At filing:</b> {_num(price.get('at_announcement'))} &nbsp;·&nbsp; "
+            f"<b>Now:</b> {_num(price.get('last'))} &nbsp;·&nbsp; "
+            f"<b>Since result:</b> {since_txt}"
+            + ("&nbsp;·&nbsp; <font color=\"#8b95a6\">price updates paused</font>"
+               if price.get("paused") else ""),
+            st["meta"]))
     if analysed:
         flow.append(Paragraph(
             f"<b>AI sent:</b> {_ist(p.ai_requested_at)} &nbsp;·&nbsp; "
@@ -211,21 +228,30 @@ def _company_block(r: dict, st: dict) -> list:
     return flow
 
 
-def build_digest_pdf(rows: List[dict], for_date: str, out_path: str) -> str:
-    """Write the digest PDF and return its path."""
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+def build_digest_pdf(rows: List[dict], for_date: str, out_path: str,
+                     title: str = "") -> str:
+    """
+    Write the digest PDF and return its path.
+
+    `title` names the export. The same builder serves the 08:00 digest and the
+    order-decision panel, and the two must not both claim to be "results
+    announced" — the panel's export is a decision sheet that also carries
+    prices, which the morning run cannot have.
+    """
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     st = _styles()
+    heading = title or f"Results announced {for_date}"
 
     doc = SimpleDocTemplate(
         out_path, pagesize=A4,
         leftMargin=14 * mm, rightMargin=14 * mm,
         topMargin=14 * mm, bottomMargin=14 * mm,
-        title=f"Results digest {for_date}", author="Stocks Platform",
+        title=heading, author="Stocks Platform",
     )
 
     analysed = sum(1 for r in rows if r.get("analysed"))
     story = [
-        Paragraph(f"Results announced {for_date}", st["title"]),
+        Paragraph(heading, st["title"]),
         Paragraph(
             f"{len(rows)} compan{'y' if len(rows) == 1 else 'ies'} · "
             f"{analysed} analysed intraday · {len(rows) - analysed} filed after the 15:25 cutoff "

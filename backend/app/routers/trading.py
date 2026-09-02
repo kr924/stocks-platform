@@ -79,6 +79,17 @@ class DirectBuyRequest(BaseModel):
     broker: str = "upstox"
 
 
+class ReanalyseRequest(BaseModel):
+    # An OpenRouter model id for this run only; blank uses the configured
+    # default. Free text on purpose — OpenRouter adds models faster than a
+    # hardcoded list can follow, and a wrong id fails loudly on one filing
+    # rather than silently changing every future one.
+    model: Optional[str] = None
+    # "ai" today. "ocr" is accepted and rejected with a clear message rather
+    # than 404ing, so the UI can offer the tab before the engine exists.
+    flow: Optional[str] = "ai"
+
+
 class PendingResultOrderRequest(BaseModel):
     """Order details supplied from the results order screen."""
     quantity: int = 1
@@ -762,6 +773,7 @@ def _serialize_pending(p: PendingResultOrder, ai_log: Optional[TradeAILog] = Non
         # uses it to label the row and to hide the AI section, which never runs
         # for impact news.
         "kind": getattr(p, "kind", "result") or "result",
+        "paused": bool(getattr(p, "paused", False)),
         "price_at_announcement": p.price_at_announcement,
         # Lifecycle: announced -> ingested -> alerted -> AI sent -> AI received
         "announced_at": p.event_time.isoformat() if p.event_time else None,
@@ -783,7 +795,55 @@ def _serialize_pending(p: PendingResultOrder, ai_log: Optional[TradeAILog] = Non
         "created_at": p.created_at.isoformat() if p.created_at else None,
         "resolved_at": p.resolved_at.isoformat() if p.resolved_at else None,
         "ai_analysis": _serialize_ai_log(ai_log) if ai_log else None,
+        # Screener's published figures for the quarter, filled in by
+        # _attach_screener. Absent on impact news, which has no quarter.
+        "screener": None,
+        "screener_signal": None,
+        "all_positive": False,
+        "comparison": None,
     }
+
+
+def _attach_screener(db: Session, pendings: list, serialized: list) -> int:
+    """
+    Fold the digest's Screener comparison onto the prompt rows, in place.
+
+    The panel and the digest were reading the same PendingResultOrder rows and
+    rendering them twice, once with the order form and once with the figures.
+    This is the same builder the digest uses, so the two cannot drift: one
+    comparison shape, one set of signals.
+
+    cache_only, always. Screener is paced at roughly a company a second, and a
+    heavy day is minutes of walking it — far longer than a panel can wait, and
+    waiting is what made the digest report a full day as empty. Whatever is
+    already on the row is returned now and the rest is fetched behind the
+    request. Returns how many rows are still missing figures.
+    """
+    from app.services.morning_digest import _build_rows, serialize_digest_rows
+
+    result_rows = [p for p in pendings
+                   if (getattr(p, "kind", "result") or "result") == "result"]
+    if not result_rows:
+        return 0
+    try:
+        rows = _build_rows(db, result_rows, cache_only=True)
+        by_ref = {c["tracking_ref"]: c for c in serialize_digest_rows(rows) if c.get("tracking_ref")}
+    except Exception as e:
+        logger.warning(f"Screener attach failed: {e}")
+        return 0
+
+    missing = 0
+    for item in serialized:
+        c = by_ref.get(item.get("tracking_ref"))
+        if not c:
+            continue
+        item["screener"] = c.get("screener")
+        item["screener_signal"] = c.get("screener_signal")
+        item["all_positive"] = c.get("all_positive")
+        item["comparison"] = c.get("comparison")
+        if not (c.get("screener") or {}).get("ok"):
+            missing += 1
+    return missing
 
 
 @router.get("/pending-results")
@@ -836,9 +896,19 @@ def list_pending_results(
         for log in db.query(TradeAILog).filter(TradeAILog.id.in_(log_ids)).all():
             logs[log.id] = log
 
+    serialized = [_serialize_pending(p, logs.get(p.ai_log_id), db) for p in pendings]
+
+    # Screener figures, so the panel carries what the digest used to show
+    # separately. Anything not yet on the rows is fetched behind the request.
+    missing = _attach_screener(db, pendings, serialized)
+    if missing:
+        _start_digest_build(day if day != "all" else datetime.now(ist).strftime("%Y-%m-%d"))
+
     return {
-        "pending": [_serialize_pending(p, logs.get(p.ai_log_id), db) for p in pendings],
+        "pending": serialized,
         "total": len(pendings),
+        "building": bool(missing),
+        "pending_screener": missing,
     }
 
 
@@ -963,6 +1033,139 @@ def place_pending_result_order(
         "config": _serialize_config(config),
         "order": _serialize_order(order),
     }
+
+
+@router.post("/pending-results/{pending_id}/pause")
+def pause_pending_result(pending_id: int, db: Session = Depends(get_db)):
+    """
+    Stop (or resume) refreshing this row's live quote, without hiding the row.
+
+    Dismissing is destructive in the only sense that matters on this panel: the
+    card disappears, so quietening a price meant losing sight of the filing.
+    Pausing leaves it listed with the last price it had, and the panel skips it
+    when collecting symbols to quote — which is also what keeps a long results
+    day inside the Upstox request budget.
+    """
+    pending = db.query(PendingResultOrder).filter(PendingResultOrder.id == pending_id).first()
+    if not pending:
+        raise HTTPException(status_code=404, detail="Pending result not found")
+
+    pending.paused = not bool(getattr(pending, "paused", False))
+    db.commit()
+    return {"status": "success", "paused": bool(pending.paused),
+            "pending": _serialize_pending(pending, None, db)}
+
+
+@router.post("/pending-results/{pending_id}/reanalyse")
+def reanalyse_pending_result(pending_id: int, body: ReanalyseRequest,
+                             db: Session = Depends(get_db)):
+    """
+    Run the earnings AI over this filing again, optionally with another model.
+
+    The verdict is not cleared first. A re-run that fails or returns NA would
+    otherwise destroy the verdict that was already there, which is worse than
+    the stale one it replaced.
+    """
+    pending = db.query(PendingResultOrder).filter(PendingResultOrder.id == pending_id).first()
+    if not pending:
+        raise HTTPException(status_code=404, detail="Pending result not found")
+
+    flow = (body.flow or "ai").strip().lower()
+    if flow == "ocr":
+        raise HTTPException(
+            status_code=501,
+            detail="OCR extraction is not implemented yet — use the AI flow.",
+        )
+    if flow != "ai":
+        raise HTTPException(status_code=400, detail=f"Unknown flow '{flow}'")
+
+    if (getattr(pending, "kind", "result") or "result") != "result":
+        raise HTTPException(
+            status_code=400,
+            detail=("This is impact news, not a results filing — there are no "
+                    "quarterly figures to extract."),
+        )
+
+    from app.services.results_router import run_ai_for_pending
+    started = run_ai_for_pending(pending.id, config_id=pending.config_id,
+                                 model_override=(body.model or "").strip() or None)
+    if not started:
+        raise HTTPException(status_code=409, detail="Could not queue the analysis")
+
+    pending.ai_status = "running"
+    pending.ai_requested_at = datetime.utcnow()
+    db.commit()
+    return {"status": "success", "model": (body.model or "").strip() or "configured default",
+            "pending": _serialize_pending(pending, None, db)}
+
+
+@router.get("/pending-results/pdf")
+def pending_results_pdf(trade_date: Optional[str] = Query(None), db: Session = Depends(get_db)):
+    """
+    The order-decision panel as a PDF, including how each stock has moved.
+
+    The digest PDF is built from the same rows but knows nothing about prices —
+    it is written at 08:00, before there are any. This one carries the baseline
+    captured when the filing landed and the move since, which is the column the
+    decision actually turns on.
+    """
+    import os
+    import tempfile
+    from datetime import timedelta, timezone as _tz
+    from fastapi.responses import FileResponse
+    from app.services.morning_digest import _build_rows
+    from app.services.digest_pdf import build_digest_pdf
+
+    ist = _tz(timedelta(hours=5, minutes=30))
+    day = trade_date or datetime.now(ist).strftime("%Y-%m-%d")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+        raise HTTPException(status_code=400, detail="Date must be YYYY-MM-DD")
+
+    pendings = (db.query(PendingResultOrder)
+                .filter(PendingResultOrder.trade_date == day)
+                .order_by(PendingResultOrder.event_time.asc()).all())
+    if not pendings:
+        raise HTTPException(status_code=404, detail=f"No order prompts on {day}")
+
+    rows = _build_rows(db, pendings, cache_only=True)
+
+    # One batched read of the shared quote cache, never a call per row: the
+    # feed has a single owner and a metered allowance, and a heavy day here is
+    # a hundred symbols. Only the pipe form is a request key — the colon form
+    # is how quotes come back, and sending it voids the whole batch.
+    quotes = {}
+    keys = sorted({(p.instrument_key or "").replace(":", "|")
+                   for p in pendings if p.instrument_key})
+    keys = [k for k in keys if "|" in k]
+    if keys:
+        try:
+            from app.main import get_active_feed
+            quotes = get_active_feed().get_quotes(keys) or {}
+        except Exception as e:
+            # A PDF without live prices is still worth having; the baseline and
+            # the figures do not depend on the feed being up.
+            logger.warning(f"PDF price lookup failed, prices omitted: {e}")
+
+    # Hang the price block on each row. build_digest_pdf reads r["pending"] as
+    # an object, so it takes _build_rows output rather than the serialised dicts.
+    for r in rows:
+        rp = r.get("pending")
+        if rp is None:
+            continue
+        base = rp.price_at_announcement
+        key = (rp.instrument_key or "").replace(":", "|")
+        ltp = (quotes.get(key) or {}).get("last_price")
+        r["price"] = {
+            "at_announcement": base,
+            "last": ltp,
+            "since_pct": (round((ltp - base) / base * 100, 2) if base and ltp else None),
+            "paused": bool(getattr(rp, "paused", False)),
+        }
+
+    out = os.path.join(tempfile.gettempdir(), f"order_decisions_{day}.pdf")
+    build_digest_pdf(rows, day, out, title=f"Order decisions {day}")
+    return FileResponse(out, media_type="application/pdf",
+                        filename=f"order-decisions-{day}.pdf")
 
 
 @router.post("/pending-results/{pending_id}/dismiss")

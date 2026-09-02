@@ -427,6 +427,12 @@ class PendingResultOrder(Base):
     # Arrived after the intraday cutoff, so alerts and AI are held for the
     # next morning digest rather than firing overnight.
     deferred = Column(Boolean, default=False, index=True)
+    # Stop refreshing this row's live quote without hiding the row. Dismissing
+    # used to be the only way to quieten a card, which also removed it from the
+    # panel — so the only way to stop a price flickering was to lose sight of
+    # the filing entirely. Paused rows stay listed, keep the last price they
+    # had, and are skipped when the panel collects symbols to quote.
+    paused = Column(Boolean, default=False, index=True)
     digest_sent_at = Column(DateTime, nullable=True)
     # Screener's figures for this filing, fetched once and kept. The digest and
     # the panel both read them from here: fetching is rate limited to roughly
@@ -515,6 +521,7 @@ def init_db():
         _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN validation_json TEXT")
         _safe_alter(conn, "ALTER TABLE pending_result_orders ADD COLUMN price_at_announcement FLOAT")
         _safe_alter(conn, "ALTER TABLE pending_result_orders ADD COLUMN screener_json TEXT")
+        _safe_alter(conn, "ALTER TABLE pending_result_orders ADD COLUMN paused BOOLEAN DEFAULT 0")
         _safe_alter(conn, "ALTER TABLE trade_configs ADD COLUMN scheduled_for DATETIME")
         _safe_alter(conn, "ALTER TABLE pending_result_orders ADD COLUMN kind VARCHAR(20) DEFAULT 'result'")
 

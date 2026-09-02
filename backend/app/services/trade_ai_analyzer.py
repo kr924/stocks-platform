@@ -585,6 +585,7 @@ def analyze_earnings_disclosure_2step(
     pdf_text: str = "",
     config_id: Optional[int] = None,
     tracking_ref: Optional[str] = None,
+    model_override: Optional[str] = None,
 ) -> Optional[dict]:
     """
     Two-Step AI Analysis Pipeline:
@@ -628,7 +629,8 @@ def analyze_earnings_disclosure_2step(
 
     try:
         return _do_analyze_earnings_disclosure_2step(
-            symbol, title, attachment_url, pdf_text, config_id, tracking_ref
+            symbol, title, attachment_url, pdf_text, config_id, tracking_ref,
+            model_override,
         )
     finally:
         with _in_progress_lock:
@@ -642,6 +644,7 @@ def _do_analyze_earnings_disclosure_2step(
     pdf_text: str = "",
     config_id: Optional[int] = None,
     tracking_ref: Optional[str] = None,
+    model_override: Optional[str] = None,
 ) -> Optional[dict]:
     import base64
     import requests
@@ -657,6 +660,12 @@ def _do_analyze_earnings_disclosure_2step(
     custom_url = auto_ai_cfg.get("custom_api_url", "http://localhost:3000/api/generate").strip()
     openrouter_key = auto_ai_cfg.get("premium_openrouter_api_key", "").strip() or os.getenv("OPENROUTER_PREMIUM_API_KEY", "").strip() or os.getenv("OPENROUTER_API_KEY", "").strip()
     openrouter_model = auto_ai_cfg.get("premium_openrouter_model", "google/gemini-2.5-flash-lite").strip()
+    # A re-analysis can name its own model without disturbing the configured
+    # default: the operator is asking "what would a stronger model make of this
+    # filing", not changing what every future filing is analysed with.
+    if model_override and model_override.strip():
+        openrouter_model = model_override.strip()
+        logger.info(f"[AUTO AI] {symbol}: model overridden for this run -> {openrouter_model}")
 
     company_name = ""
     try:
