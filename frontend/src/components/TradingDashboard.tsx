@@ -602,169 +602,105 @@ function ScreenerComparison({ rows, quarter, analysed }: {
 interface QuarterPoint {
   quarter: string;
   year_ago_quarter: string | null;
-  revenue: number | null;
-  revenue_year_ago: number | null;
-  revenue_yoy_pct: number | null;
-  pat: number | null;
-  pat_year_ago: number | null;
-  pat_yoy_pct: number | null;
+  [metric: string]: string | number | null;
+}
+
+interface QuarterHistory {
+  ok: boolean; symbol: string; source_url: string; unit: string;
+  metrics: { key: string; label: string }[];
+  points: QuarterPoint[];
+  error: string;
+}
+
+/** Compact ₹ crore, so eight of them fit on one line without wrapping. */
+function crore(v: number | null): string {
+  if (v == null) return "—";
+  const a = Math.abs(v);
+  if (a >= 100000) return `${(v / 1000).toFixed(0)}k`;
+  if (a >= 1000) return v.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  if (a >= 10) return v.toFixed(0);
+  return v.toFixed(2);
 }
 
 /**
- * Reported quarters, each bar paired against the same quarter a year earlier.
+ * One metric across the reported quarters: a bar per quarter, the figure under
+ * it, and the year-on-year change under that.
  *
- * Paired rather than drawn as a plain run because most Indian businesses are
- * seasonal: a December quarter below the September before it says nothing, a
- * December quarter below *last* December says a great deal. Reading growth off
- * adjacent bars of a seasonal series is the mistake this pairing prevents.
+ * The year-earlier bar is gone. It doubled the ink to say something the
+ * percentage already says, and with eight metrics on screen the comparison that
+ * matters is down a column — how this quarter's revenue, margin and profit move
+ * together — not between two bars of one metric.
  *
- * Drawn as plain SVG. A chart library for two grouped series would be more
- * bytes than the whole panel, and the axis rules here are simple enough that
- * the arithmetic is clearer than a configuration object.
+ * Bars are scaled per metric, never across metrics: interest and revenue differ
+ * by three orders of magnitude, so a shared scale would flatten every line
+ * except the top one into nothing.
  */
-function QuarterlyBars({ points, metric }: { points: QuarterPoint[]; metric: "revenue" | "pat" }) {
-  const cur = (p: QuarterPoint) => (metric === "revenue" ? p.revenue : p.pat);
-  const ago = (p: QuarterPoint) => (metric === "revenue" ? p.revenue_year_ago : p.pat_year_ago);
-  const yoy = (p: QuarterPoint) => (metric === "revenue" ? p.revenue_yoy_pct : p.pat_yoy_pct);
+function MetricStrip({ points, metric, label }: {
+  points: QuarterPoint[]; metric: string; label: string;
+}) {
+  const val = (p: QuarterPoint) => p[metric] as number | null;
+  const pct = (p: QuarterPoint) => p[`${metric}_yoy_pct`] as number | null;
 
-  const values = points.flatMap(p => [cur(p), ago(p)]).filter((v): v is number => v != null);
+  const values = points.map(val).filter((v): v is number => v != null);
   if (!values.length) return null;
 
-  // PAT goes negative; revenue does not. A zero line only appears when the
-  // data crosses it, so a profitable run is not squashed into the top half.
+  // Expenses, interest and depreciation rising is not good news, so the bars
+  // for those are neutral: only the lines where up is genuinely better carry
+  // the green/red reading.
+  const directional = !["expenses", "interest", "depreciation"].includes(metric);
+
   const hi = Math.max(...values, 0);
   const lo = Math.min(...values, 0);
   const span = hi - lo || 1;
-
-  const H = 150, PAD_T = 14, PAD_B = 26;
-  const plot = H - PAD_T - PAD_B;
-  const y = (v: number) => PAD_T + ((hi - v) / span) * plot;
-  const zeroY = y(0);
-
-  const slot = 100 / points.length;
-  const barW = slot * 0.3;
-
-  const fmt = (v: number | null) => {
-    if (v == null) return "—";
-    const a = Math.abs(v);
-    if (a >= 100000) return `${(v / 100000).toFixed(2)}L`;
-    if (a >= 1000) return `${(v / 1000).toFixed(1)}k`;
-    return v.toFixed(a < 10 ? 2 : 0);
-  };
+  const H = 44;
+  const zero = ((hi - 0) / span) * H;
 
   return (
-    <div>
-      <svg viewBox={`0 0 100 ${H}`} preserveAspectRatio="none"
-           style={{ width: "100%", height: `${H}px`, display: "block", overflow: "visible" }}>
-        {/* Zero line, drawn only when the series actually crosses it. */}
-        {lo < 0 && (
-          <line x1="0" x2="100" y1={zeroY} y2={zeroY}
-                stroke="var(--text-faint)" strokeWidth="0.4" vectorEffect="non-scaling-stroke" />
-        )}
-        {points.map((p, i) => {
-          const x0 = i * slot;
-          const c = cur(p), a = ago(p);
-          const bars = [
-            { v: a, x: x0 + slot / 2 - barW - slot * 0.03, fill: "var(--text-faint)", op: 0.45 },
-            { v: c, x: x0 + slot / 2 + slot * 0.03,
-              fill: (yoy(p) ?? 0) >= 0 ? "var(--positive)" : "var(--negative)", op: 0.95 },
-          ];
-          return (
-            <g key={p.quarter}>
-              {bars.map((b, bi) => b.v == null ? null : (
-                <rect key={bi} x={b.x} width={barW}
-                      y={Math.min(y(b.v), zeroY)}
-                      height={Math.max(Math.abs(y(b.v) - zeroY), 0.5)}
-                      fill={b.fill} opacity={b.op} rx="0.4">
-                  <title>
-                    {`${bi === 0 ? p.year_ago_quarter || "year earlier" : p.quarter}: ${fmt(b.v)} Cr`}
-                  </title>
-                </rect>
-              ))}
-            </g>
-          );
-        })}
-      </svg>
-
-      {/* Labels sit outside the SVG: preserveAspectRatio="none" stretches the
-          viewBox horizontally, which would distort any text drawn inside it. */}
-      <div style={{ display: "flex", marginTop: "2px" }}>
+    <div style={{ marginBottom: "14px" }}>
+      <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--text-secondary)",
+                    letterSpacing: "0.3px", marginBottom: "4px" }}>
+        {label}
+      </div>
+      <div style={{ display: "flex", gap: "3px" }}>
         {points.map(p => {
-          const v = yoy(p);
+          const v = val(p), c = pct(p);
+          const colour = !directional ? "var(--text-muted)"
+            : c == null ? "var(--text-faint)"
+            : c > 0 ? "var(--positive)" : c < 0 ? "var(--negative)" : "var(--text-muted)";
+          const h = v == null ? 0 : Math.max(Math.abs(((hi - v) / span) * H - zero), 1.5);
+          const top = v == null ? zero : Math.min(((hi - v) / span) * H, zero);
           return (
-            <div key={p.quarter} style={{ flex: 1, textAlign: "center", minWidth: 0 }}>
-              <div style={{ fontSize: "9px", color: "var(--text-muted)", whiteSpace: "nowrap",
-                            overflow: "hidden", textOverflow: "ellipsis" }}>
-                {p.quarter}
+            <div key={p.quarter} style={{ flex: 1, minWidth: 0, textAlign: "center" }}
+                 title={`${p.quarter}: ${v == null ? "not reported" : v.toLocaleString()} ₹ Cr`}>
+              <div style={{ height: `${H}px`, position: "relative" }}>
+                <div style={{
+                  position: "absolute", left: "18%", right: "18%",
+                  top: `${top}px`, height: `${h}px`,
+                  background: colour, opacity: v == null ? 0.25 : 0.85, borderRadius: "1.5px",
+                }} />
+                {/* Zero line, drawn only where the series actually crosses it. */}
+                {lo < 0 && (
+                  <div style={{ position: "absolute", left: 0, right: 0, top: `${zero}px`,
+                                borderTop: "1px solid var(--text-faint)", opacity: 0.5 }} />
+                )}
               </div>
-              <div style={{
-                fontSize: "9px", fontWeight: 700, fontVariantNumeric: "tabular-nums",
-                color: v == null ? "var(--text-faint)"
-                  : v > 0 ? "var(--positive)" : v < 0 ? "var(--negative)" : "var(--text-muted)",
-              }}>
-                {v == null ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(0)}%`}
+              <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--text-primary)",
+                            fontVariantNumeric: "tabular-nums", marginTop: "3px",
+                            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {crore(v)}
+              </div>
+              <div style={{ fontSize: "9px", fontWeight: 700, fontVariantNumeric: "tabular-nums",
+                            whiteSpace: "nowrap",
+                            color: c == null ? "var(--text-faint)"
+                              : !directional ? "var(--text-muted)"
+                              : c > 0 ? "var(--positive)" : c < 0 ? "var(--negative)" : "var(--text-muted)" }}>
+                {c == null ? "—" : `${c > 0 ? "+" : ""}${c.toFixed(0)}%`}
               </div>
             </div>
           );
         })}
       </div>
     </div>
-  );
-}
-
-
-interface Extraction {
-  ok: boolean;
-  engine?: string; page?: number | null; basis?: string; unit?: string;
-  quarter?: string; screener_quarter?: string; covers_screener_quarter?: boolean;
-  metrics?: Record<string, {
-    current_qtr: number | null; prev_qtr: number | null; year_ago: number | null;
-    yoy_change_pct: number | null; qoq_change_pct: number | null;
-  }>;
-  comparisons?: {
-    metric: string; pdf: number | null; screener: number | null;
-    gap_pct: number | null; agrees: boolean | null; note?: string;
-  }[];
-  confidence: {
-    tier: string; pct: number | null; reason: string; clean?: boolean;
-    status?: string; flags?: string[];
-    metrics_agreeing?: number; metrics_compared?: number;
-  };
-  error?: string;
-}
-
-/**
- * How much of the extraction to believe, as a tier and a percentage.
- *
- * The percentages are the accuracy measured for each tier over 1,926 filings,
- * not a feeling: a clean read confirmed by a second source is a different claim
- * from a flagged read nothing corroborates, and showing both as "extracted"
- * would be the lie worth avoiding.
- */
-function ConfidenceBadge({ c }: { c: Extraction["confidence"] }) {
-  const tone =
-    c.pct == null ? "na"
-      : c.pct >= 80 ? "good"
-      : c.pct >= 50 ? "warn"
-      : "bad";
-  const colour = tone === "good" ? "var(--positive)"
-    : tone === "warn" ? "var(--warning)"
-    : tone === "bad" ? "var(--negative)" : "var(--text-muted)";
-  const bg = tone === "good" ? "rgba(63, 191, 135, 0.14)"
-    : tone === "warn" ? "rgba(224, 163, 62, 0.14)"
-    : tone === "bad" ? "rgba(240, 115, 111, 0.14)" : "var(--surface-2)";
-  return (
-    <span title={c.reason} style={{
-      display: "inline-flex", alignItems: "baseline", gap: "6px",
-      fontSize: "10px", fontWeight: 700, letterSpacing: "0.3px",
-      padding: "3px 9px", borderRadius: "5px", color: colour, background: bg,
-      border: `1px solid ${colour}33`,
-    }}>
-      {c.tier.replace(/_/g, " ")}
-      <b style={{ fontSize: "12px", fontVariantNumeric: "tabular-nums" }}>
-        {c.pct == null ? "—" : `${c.pct}%`}
-      </b>
-    </span>
   );
 }
 
@@ -1252,10 +1188,7 @@ export function TradingDashboard() {
    * reading "chart data unavailable" — which says the stock has no data, when
    * really we asked about a stock that does not exist.
    */
-  const [quarterHistory, setQuarterHistory] = useState<{
-    ok: boolean; symbol: string; source_url: string; unit: string;
-    points: QuarterPoint[]; error: string;
-  } | null>(null);
+  const [quarterHistory, setQuarterHistory] = useState<QuarterHistory | null>(null);
   const [quarterLoading, setQuarterLoading] = useState(false);
 
   const fetchQuarterHistory = async (symbol: string) => {
@@ -4957,7 +4890,9 @@ export function TradingDashboard() {
                   Reported quarters
                 </h4>
                 <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>
-                  each quarter against the same quarter a year earlier · ₹ crore
+                  {quarterHistory?.ok
+                    ? `${quarterHistory.metrics.length} lines · ${quarterHistory.points.length} quarters · value and year-on-year change`
+                    : "value and year-on-year change per quarter"}
                 </span>
                 {quarterHistory?.source_url && (
                   <a href={quarterHistory.source_url} target="_blank" rel="noreferrer"
@@ -4972,25 +4907,36 @@ export function TradingDashboard() {
                   Loading reported quarters…
                 </div>
               ) : quarterHistory?.ok && quarterHistory.points.length > 0 ? (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "22px" }}>
-                  {([["revenue", "Revenue"], ["pat", "Profit after tax"]] as const).map(([key, label]) => (
-                    <div key={key}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "6px" }}>
-                        <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--text-secondary)" }}>{label}</span>
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: "10px", fontSize: "9px", color: "var(--text-faint)" }}>
-                          <span style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
-                            <span style={{ width: "8px", height: "8px", borderRadius: "2px", background: "var(--text-faint)", opacity: 0.45 }} />
-                            year earlier
-                          </span>
-                          <span style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
-                            <span style={{ width: "8px", height: "8px", borderRadius: "2px", background: "var(--positive)" }} />
-                            this quarter
-                          </span>
-                        </span>
+                <div>
+                  {/* Quarter headings once, at the top: every strip below shares
+                      these columns, and repeating them eight times would be
+                      most of the ink on the panel. */}
+                  <div style={{ display: "flex", gap: "3px", marginBottom: "6px",
+                                position: "sticky", top: 0, zIndex: 1,
+                                background: "var(--surface-1)", paddingBottom: "3px" }}>
+                    {quarterHistory.points.map(pt => (
+                      <div key={pt.quarter} style={{
+                        flex: 1, minWidth: 0, textAlign: "center", fontSize: "10px",
+                        fontWeight: 700, color: "var(--text-muted)", whiteSpace: "nowrap",
+                        overflow: "hidden", textOverflow: "ellipsis",
+                      }}>
+                        {pt.quarter}
                       </div>
-                      <QuarterlyBars points={quarterHistory.points} metric={key} />
-                    </div>
-                  ))}
+                    ))}
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(420px, 1fr))", gap: "0 26px" }}>
+                    {quarterHistory.metrics.map(m => (
+                      <MetricStrip key={m.key} points={quarterHistory.points}
+                                   metric={m.key} label={m.label} />
+                    ))}
+                  </div>
+
+                  <div style={{ fontSize: "9px", color: "var(--text-faint)", marginTop: "2px", lineHeight: 1.5 }}>
+                    Figures in ₹ crore, percentage is against the same quarter a year earlier.
+                    Expenses, interest and depreciation are drawn neutral — rising is not good news there.
+                    A percentage off a negative or zero base is left blank rather than reported.
+                  </div>
                 </div>
               ) : (
                 <div style={{ padding: "20px", textAlign: "center", fontSize: "11px", color: "var(--text-faint)" }}>

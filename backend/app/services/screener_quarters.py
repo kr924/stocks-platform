@@ -93,9 +93,28 @@ _HEADERS = {
 _ROW_LABELS = {
     "revenue": ("sales", "revenue"),
     "expenses": ("expenses",),
-    "other_income": ("other income",),
-    "pat": ("net profit",),
     "ebitda": ("operating profit",),
+    "other_income": ("other income",),
+    "interest": ("interest",),
+    "depreciation": ("depreciation",),
+    "pbt": ("profit before tax",),
+    "pat": ("net profit",),
+}
+
+# Statement order, for anything drawing the whole chain. Revenue at the top and
+# what is left at the bottom, so a chart of them reads down the P&L.
+METRIC_ORDER = ("revenue", "expenses", "ebitda", "other_income",
+                "interest", "depreciation", "pbt", "pat")
+
+METRIC_LABELS = {
+    "revenue": "Revenue",
+    "expenses": "Expenses",
+    "ebitda": "Operating profit",
+    "other_income": "Other income",
+    "interest": "Interest",
+    "depreciation": "Depreciation",
+    "pbt": "Profit before tax",
+    "pat": "Profit after tax",
 }
 
 _TAG = re.compile(r"<[^>]+>")
@@ -303,23 +322,34 @@ def quarterly_history(symbol: str, quarters: int = 8,
         # the chart must draw a gap rather than a zero.
         yoy_i = i - 4
         point["year_ago_quarter"] = headings[yoy_i] if yoy_i >= start - 4 and yoy_i >= 0 else None
-        for key in ("revenue", "pat"):
+        for key in METRIC_ORDER:
             series = (metrics.get(key) or {}).get("series") or []
             cur = at(series, i)
             prev_year = at(series, yoy_i) if yoy_i >= 0 else None
             point[key] = cur
             point[key + "_year_ago"] = prev_year
+            # Left blank off a negative or zero base on purpose: a swing out of
+            # a loss has no meaningful percentage, and printing one invites the
+            # reader to compare it with a real growth rate.
             point[key + "_yoy_pct"] = (
                 round((cur - prev_year) / abs(prev_year) * 100, 2)
-                if cur is not None and prev_year not in (None, 0) else None
+                if cur is not None and prev_year not in (None, 0) and prev_year > 0
+                else None
             )
         points.append(point)
+
+    # Only the metrics this company actually reports. Banks have no meaningful
+    # operating profit and NBFCs report interest income rather than turnover, so
+    # a fixed list of eight would draw empty strips for a third of the market.
+    present = [k for k in METRIC_ORDER
+               if any(p.get(k) is not None for p in points)]
 
     return {
         "ok": bool(points),
         "symbol": symbol.upper(),
         "source_url": data.get("source_url", ""),
         "unit": "Rs crore",
+        "metrics": [{"key": k, "label": METRIC_LABELS[k]} for k in present],
         "points": points,
         "error": "",
     }
