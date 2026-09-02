@@ -660,8 +660,8 @@ function MetricStrip({ points, metric, label }: {
   const hasNegative = lo < 0;
 
   return (
-    <div style={{ marginBottom: "20px" }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginBottom: "6px" }}>
+    <div style={{ marginBottom: "12px" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginBottom: "4px" }}>
         <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--text-primary)",
                        letterSpacing: "0.2px" }}>{label}</span>
         <span style={{ fontSize: "9px", color: "var(--text-faint)" }}>
@@ -706,18 +706,27 @@ function MetricStrip({ points, metric, label }: {
                 )}
               </div>
 
-              <div style={{ textAlign: "center", marginTop: "5px" }}>
+              <div style={{ textAlign: "center", marginTop: "4px" }}>
                 <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--text-primary)",
                               fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap",
-                              overflow: "hidden", textOverflow: "ellipsis" }}>
+                              overflow: "hidden", textOverflow: "ellipsis", lineHeight: 1.25 }}>
                   {crore(v)}
                 </div>
                 <div style={{ fontSize: "9px", fontWeight: 700, fontVariantNumeric: "tabular-nums",
-                              whiteSpace: "nowrap",
+                              whiteSpace: "nowrap", lineHeight: 1.25,
                               color: c == null ? "var(--text-faint)"
                                 : !directional ? "var(--text-muted)"
                                 : c > 0 ? "var(--positive)" : c < 0 ? "var(--negative)" : "var(--text-muted)" }}>
                   {c == null ? "—" : `${c > 0 ? "+" : ""}${c.toFixed(0)}%`}
+                </div>
+                {/* The quarter sits under its own bar rather than in a shared
+                    row above the grid. With the strips laid out in two columns
+                    that row spanned the full width and lined up with neither
+                    column's bars, which read as a scale it was not. */}
+                <div style={{ fontSize: "9px", color: "var(--text-muted)", whiteSpace: "nowrap",
+                              overflow: "hidden", textOverflow: "ellipsis", lineHeight: 1.3,
+                              marginTop: "1px" }}>
+                  {p.quarter}
                 </div>
               </div>
             </div>
@@ -5109,23 +5118,9 @@ export function TradingDashboard() {
                 </div>
               ) : quarterHistory?.ok && quarterHistory.points.length > 0 ? (
                 <div>
-                  {/* Quarter headings once, at the top: every strip below shares
-                      these columns, and repeating them eight times would be
-                      most of the ink on the panel. */}
-                  <div style={{ display: "flex", gap: "3px", marginBottom: "6px",
-                                position: "sticky", top: 0, zIndex: 1,
-                                background: "var(--surface-1)", paddingBottom: "3px" }}>
-                    {quarterHistory.points.map(pt => (
-                      <div key={pt.quarter} style={{
-                        flex: 1, minWidth: 0, textAlign: "center", fontSize: "10px",
-                        fontWeight: 700, color: "var(--text-muted)", whiteSpace: "nowrap",
-                        overflow: "hidden", textOverflow: "ellipsis",
-                      }}>
-                        {pt.quarter}
-                      </div>
-                    ))}
-                  </div>
-
+                  {/* No shared heading row. Each strip labels its own columns,
+                      because these sit in two columns and one row of headings
+                      spanning the full width aligned with neither. */}
                   <CardBoundary label="These quarters">
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(420px, 1fr))", gap: "0 26px" }}>
                       {quarterHistory.metrics.map(m => (
