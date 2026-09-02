@@ -119,6 +119,14 @@ def _price_lines(r: dict, st: dict) -> list:
     if not (price.get("at_announcement") or price.get("last") or price.get("day_pct") is not None):
         return []
 
+    # A past day carries the baseline that was captured then and nothing live.
+    # Saying so beats printing dashes that read as a feed outage.
+    if price.get("historical"):
+        return [Paragraph(
+            f"<b>At filing:</b> {_num(price.get('at_announcement'))} &nbsp;·&nbsp; "
+            f'<font color="#8b95a6">live prices are shown for the current day only</font>',
+            st["meta"])]
+
     def pct(v):
         if v is None:
             return '<font color="#8b95a6">NA</font>'
@@ -235,7 +243,17 @@ def _non_result_table(rows: List[dict], st: dict) -> list:
         Spacer(1, 4),
         table,
     ]
-    if sources:
+    historical = any((r.get("price") or {}).get("historical") for r in ordered)
+    if historical:
+        # Every price source reports the price *now*. Against a baseline from a
+        # past day that is not a move anyone made, so the columns are left empty
+        # and the reason is stated rather than left to look like an outage.
+        out.append(Spacer(1, 3))
+        out.append(Paragraph(
+            "Now, Since and Day are blank because this is a past day — live prices are "
+            "shown for the current day only. &quot;At filing&quot; is the price captured "
+            "when each filing landed.", st["small"]))
+    elif sources:
         # Which tape each figure came off. Upstox answers while the session is
         # authorised and the market is open; a public feed answers otherwise,
         # and a reader checking these against a terminal should know which.

@@ -806,6 +806,14 @@ export function TradingDashboard() {
   // today: a past day's prices are whatever they are now, which says nothing
   // about the decision that was in front of you then, and spends metered
   // requests to say it.
+  // Prompts are kept for 30 days now that this panel is the only place they can
+  // be read back, so the picker reaches as far as the retention does.
+  const PANEL_RETENTION_DAYS = 30;
+  const oldestStr = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - PANEL_RETENTION_DAYS);
+    return d.toISOString().slice(0, 10);
+  }, []);
   const [resultsDate, setResultsDate] = useState<string>(todayStr);
   const resultsDateRef = useRef<string>(todayStr);
   const isToday = resultsDate === todayStr;
@@ -1117,9 +1125,17 @@ export function TradingDashboard() {
   // scoped to today, so this keeps typing instant.
   // Live rows before the category filter, so each tab can show its own count
   // and an empty tab is visibly empty rather than missing.
-  const livePendingResults = useMemo(
-    () => pendingResults.filter(p => p.status === "pending" || p.status === "ordered"),
-    [pendingResults]);
+  const livePendingResults = useMemo(() => {
+    // Today shows what can still be acted on. A past day is history, and its
+    // rows were all marked 'expired' at the daily reset — filtering those out
+    // is what made every earlier date look empty. Dismissed rows stay hidden
+    // either way: dismissing is the one status that means "I do not want to
+    // see this".
+    if (resultsDate === todayStr) {
+      return pendingResults.filter(p => p.status === "pending" || p.status === "ordered");
+    }
+    return pendingResults.filter(p => p.status !== "dismissed");
+  }, [pendingResults, resultsDate, todayStr]);
 
   const categoryCounts = useMemo(() => {
     const counts: Record<PromptCategory, number> = { results: 0, order: 0, merger: 0, other: 0 };
@@ -1128,8 +1144,8 @@ export function TradingDashboard() {
   }, [livePendingResults]);
 
   const visiblePendingResults = useMemo(() => {
-    // Dismissed and expired rows stay out; an ordered one stays in, because the
-    // position it opened still needs somewhere to be sold from.
+    // Which statuses survive is decided in livePendingResults, and depends on
+    // whether the day being shown is today. This only narrows to the open tab.
     const live = livePendingResults.filter(p => categoryOf(p) === pendingCategory);
     const q = pendingSearch.trim().toLowerCase();
     if (!q) return live;
@@ -1331,10 +1347,10 @@ export function TradingDashboard() {
   /**
    * Suspend or resume live pricing for one row.
    *
-   * Deliberately not the same thing as dismissing. Dismissing removes the card,
-   * so the only way to stop a price flickering used to be to lose sight of the
-   * filing; pausing leaves the row exactly where it is with the last price it
-   * had, and takes its symbol out of the quote batch.
+   * The row stays exactly where it is with the last price it had; only its
+   * symbol leaves the quote batch. That batch is where the metered Upstox
+   * allowance is spent, so pausing the rows you are not watching is what keeps
+   * prices flowing on the ones you are.
    */
   const handleTogglePause = async (id: number) => {
     setActionLoading(prev => ({ ...prev, [`pause_${id}`]: true }));
@@ -1382,18 +1398,6 @@ export function TradingDashboard() {
       console.error("Error re-analysing:", err);
     } finally {
       setActionLoading(prev => ({ ...prev, [`reanalyse_${pending.id}`]: false }));
-    }
-  };
-
-  const handleDismissResult = async (id: number) => {
-    setActionLoading(prev => ({ ...prev, [`result_${id}`]: true }));
-    try {
-      await fetch(`${API_BASE}/api/trading/pending-results/${id}/dismiss`, { method: "POST" });
-      await fetchData();
-    } catch (err) {
-      console.error("Error dismissing result:", err);
-    } finally {
-      setActionLoading(prev => ({ ...prev, [`result_${id}`]: false }));
     }
   };
 
@@ -2165,8 +2169,9 @@ export function TradingDashboard() {
                 type="date"
                 value={resultsDate}
                 max={todayStr}
+                min={oldestStr}
                 onChange={e => setResultsDate(e.target.value || todayStr)}
-                title="Trade date to show. Only today carries live prices; earlier days are kept for three days."
+                title="Trade date to show. Only today carries live prices; earlier days are kept for 30 days."
                 style={{
                   padding: "6px 10px", fontSize: "12px",
                   background: "rgba(10, 13, 18,0.8)",
@@ -2555,11 +2560,12 @@ export function TradingDashboard() {
                       );
                     })()}
 
-                    {/* Pause stops this row's price being refreshed and leaves
-                        everything else alone. Dismiss still removes the card,
-                        kept as the quieter action because on a hundred-card day
-                        there has to be a way to clear one you have decided
-                        against. */}
+                    {/* The only per-card action besides ordering. Dismiss used
+                        to sit beside it and removed the card outright, which
+                        was the wrong shape for a panel that is now the record
+                        of the last 30 days — it is still reachable from the
+                        Telegram alert's inline buttons, where hiding a prompt
+                        you have decided against is what you actually want. */}
                     <button onClick={() => handleTogglePause(pending.id)}
                       disabled={!!actionLoading[`pause_${pending.id}`]}
                       title={pending.paused
@@ -2575,15 +2581,7 @@ export function TradingDashboard() {
                       }}>
                       {pending.paused ? "Resume prices" : "Pause prices"}
                     </button>
-                    <button onClick={() => handleDismissResult(pending.id)} disabled={busy}
-                      title="Remove this card from the panel"
-                      style={{
-                        padding: "8px 10px", background: "transparent", border: "none",
-                        color: "var(--text-faint)", fontSize: "11px", fontWeight: 600,
-                        textDecoration: "underline", cursor: busy ? "not-allowed" : "pointer"
-                      }}>
-                      Dismiss
-                    </button>
+
                   </div>
 
                   {/* One collapsed row carries the AI state, so the verdict is

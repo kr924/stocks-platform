@@ -409,6 +409,7 @@ def serialize_digest_rows(rows: List[dict]) -> List[dict]:
             "verdict": r["verdict"],
             "screener_signal": r.get("screener_signal"),
             "all_positive": bool(r.get("all_positive")),
+            "price": r.get("price"),
             "title": p.title,
             "attachment_url": p.attachment_url,
             "screener": {
@@ -428,6 +429,56 @@ def serialize_digest_rows(rows: List[dict]) -> List[dict]:
     return out
 
 
+def attach_prices(rows: List[dict]) -> int:
+    """
+    Hang the move since each result onto its row, before anything is rendered.
+
+    The 08:00 run covers filings from the previous session, so the last traded
+    price is that session's close — a settled number, and exactly the one worth
+    knowing before the market reopens: this is what the print did to the stock
+    while you were asleep.
+
+    Upstox only. The baseline was captured from Upstox when the filing landed,
+    and a close from another venue against it reports a move no single tape ever
+    showed. With no session the digest goes out without prices, as it always
+    did — Screener's figures are the point of it and do not depend on the feed.
+
+    Returns how many rows were priced.
+    """
+    keys = sorted({(r["pending"].instrument_key or "").replace(":", "|")
+                   for r in rows if r["pending"].instrument_key})
+    keys = [k for k in keys if "|" in k]
+    if not keys:
+        return 0
+
+    try:
+        from app.main import get_active_feed
+        quotes = get_active_feed().get_quotes(keys) or {}
+    except Exception as e:
+        logger.warning(f"[DIGEST] price lookup unavailable, sending without prices: {e}")
+        return 0
+
+    priced = 0
+    for r in rows:
+        p = r["pending"]
+        base = p.price_at_announcement
+        q = quotes.get((p.instrument_key or "").replace(":", "|")) or {}
+        last = q.get("last_price")
+        prev = (q.get("ohlc") or {}).get("close")
+        r["price"] = {
+            "at_announcement": base,
+            "last": last,
+            "since_pct": (round((last - base) / base * 100, 2) if base and last else None),
+            "day_pct": (round((last - prev) / prev * 100, 2) if last and prev else None),
+            "day_source": "Upstox" if last else None,
+            "upstox_connected": bool(quotes),
+        }
+        if r["price"]["since_pct"] is not None:
+            priced += 1
+    logger.info(f"[DIGEST] priced {priced}/{len(rows)} rows from Upstox.")
+    return priced
+
+
 def build_and_publish(db: Session, for_date: Optional[str] = None) -> dict:
     """
     Build the digest page and return {path, url_path, count, date}.
@@ -439,6 +490,9 @@ def build_and_publish(db: Session, for_date: Optional[str] = None) -> dict:
 
     pendings = collect_deferred(db)
     rows = _build_rows(db, pendings)
+    # Before rendering, so the page, the PDF and the Telegram summary all carry
+    # the same figures rather than three views of one morning disagreeing.
+    attach_prices(rows)
 
     os.makedirs(_DIGEST_DIR, exist_ok=True)
     filename = f"digest_{for_date}.html"
@@ -519,8 +573,13 @@ def send_digest_alert(result: dict, public_base_url: str = "") -> bool:
         if any(c["match"] is False for c in r["comparison"]):
             flag = " ⚠"
         mark = "" if r.get("analysed") else " ·"
+        # The move since the print, at the previous close. Absent rather than
+        # zero when there is no baseline or no Upstox session — a 0.00% that
+        # actually means "unknown" is the one number nobody should act on.
+        since = ((r.get("price") or {}).get("since_pct"))
+        move = f"  {since:+.2f}%" if since is not None else ""
         lines.append(
-            f"• <b>{_esc(p.symbol)}</b> — {_esc(r['verdict'])}{flag}{mark}  "
+            f"• <b>{_esc(p.symbol)}</b> — {_esc(r['verdict'])}{flag}{mark}{move}  "
             f"<code>{_esc(p.tracking_ref or '')}</code>"
         )
     if len(rows) > 25:

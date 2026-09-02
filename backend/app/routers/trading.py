@@ -849,7 +849,7 @@ def _attach_screener(db: Session, pendings: list, serialized: list) -> int:
 @router.get("/pending-results")
 def list_pending_results(
     status: Optional[str] = Query("pending"),
-    hours: int = Query(24, ge=1, le=168),
+    hours: int = Query(24, ge=1, le=24 * 40),
     search: Optional[str] = Query(None),
     trade_date: Optional[str] = Query(None, description="YYYY-MM-DD; defaults to today IST"),
     db: Session = Depends(get_db),
@@ -863,7 +863,9 @@ def list_pending_results(
     """
     from datetime import timedelta, timezone as _tz
 
-    # Retire anything left from an earlier session before listing.
+    # Retire anything left from an earlier session before listing. Expiring is
+    # about not acting on a stale print, not about hiding it — the rows stay
+    # readable for the 30 days they are kept.
     try:
         from app.services.results_router import expire_stale_pending
         expire_stale_pending(db)
@@ -873,12 +875,17 @@ def list_pending_results(
     ist = _tz(timedelta(hours=5, minutes=30))
     day = trade_date or datetime.now(ist).strftime("%Y-%m-%d")
 
-    since = datetime.utcnow() - timedelta(hours=hours)
-    q = db.query(PendingResultOrder).filter(PendingResultOrder.created_at >= since)
+    q = db.query(PendingResultOrder)
+    if day != "all":
+        # The date IS the filter. Also applying a rolling `hours` window meant
+        # asking for a day two weeks back returned whatever slice of it happened
+        # to fall inside the last 24 hours — which for any past day is nothing,
+        # so the picker looked broken rather than empty.
+        q = q.filter(PendingResultOrder.trade_date == day)
+    else:
+        q = q.filter(PendingResultOrder.created_at >= datetime.utcnow() - timedelta(hours=hours))
     if status and status != "all":
         q = q.filter(PendingResultOrder.status == status)
-    if day != "all":
-        q = q.filter(PendingResultOrder.trade_date == day)
     if search:
         pattern = f"%{search.strip()}%"
         q = q.filter(or_(
@@ -1143,12 +1150,19 @@ def pending_results_pdf(trade_date: Optional[str] = Query(None), db: Session = D
     # session at all, it is a settled number any source can report — so the
     # export falls back to the public feed rather than printing NA all down the
     # page for a day that has already finished.
+    # Only today is priced. Every price source available here — Upstox, the
+    # public feed — reports the price *now*, and "now" against a baseline
+    # captured three weeks ago is not a move anyone made: it is today's quote
+    # subtracted from an old number. Browsing a past day shows the baseline that
+    # was captured then and nothing else, which is the honest answer.
+    is_today = day == datetime.now(ist).strftime("%Y-%m-%d")
+
     quotes = {}
     upstox_ok = False
     keys = sorted({(p.instrument_key or "").replace(":", "|")
                    for p in pendings if p.instrument_key})
     keys = [k for k in keys if "|" in k]
-    if keys:
+    if is_today and keys:
         try:
             from app.main import get_active_feed
             quotes = get_active_feed().get_quotes(keys) or {}
@@ -1163,7 +1177,7 @@ def pending_results_pdf(trade_date: Optional[str] = Query(None), db: Session = D
     use_upstox_for_day = upstox_ok and market_open_now
 
     public = {}
-    if not use_upstox_for_day:
+    if is_today and not use_upstox_for_day:
         try:
             from app.services.public_quotes import fetch_day_changes
             public = fetch_day_changes([p.symbol for p in pendings])
@@ -1203,6 +1217,7 @@ def pending_results_pdf(trade_date: Optional[str] = Query(None), db: Session = D
             "upstox_connected": upstox_ok,
             "day_pct": day_pct,
             "day_source": day_src,
+            "historical": not is_today,
             "paused": bool(getattr(rp, "paused", False)),
         }
 

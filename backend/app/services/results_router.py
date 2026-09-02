@@ -413,7 +413,15 @@ def _already_prompted_this_quarter(db: Session, symbol: str, current_event_id=No
     return q.first() is not None
 
 
-def purge_old_pending(db: Session, hours: int = 72) -> int:
+# The panel is the only place these filings can be read back now that the
+# Results Digest has been folded into it, so its history is the platform's
+# history. 30 days matches the results season the quarter guard already reasons
+# over, and the retention sweep already keeps market_events and trade_ai_logs
+# for the same window — one number, so the three cannot drift apart.
+PENDING_RETENTION_DAYS = 30
+
+
+def purge_old_pending(db: Session, hours: int = PENDING_RETENTION_DAYS * 24) -> int:
     """
     Delete result prompts older than `hours`, so the table does not grow without
     bound on a platform that ingests a few hundred filings a day.
@@ -424,7 +432,7 @@ def purge_old_pending(db: Session, hours: int = 72) -> int:
 
     Note this is retention, not the panel filter — the panel already shows one
     trade date at a time. What this bounds is how far back the date picker can
-    reach, which is three days.
+    reach, which is 30 days.
     """
     cutoff = datetime.utcnow() - timedelta(hours=hours)
     try:

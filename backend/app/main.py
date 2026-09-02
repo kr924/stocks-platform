@@ -359,12 +359,14 @@ def _run_scheduled_buys():
 
 @_single_flight("pending_purge")
 def _run_pending_purge():
-    """01:00 IST — bound how long result prompts are kept."""
+    """01:00 IST — bound how long result prompts are kept (30 days)."""
     try:
         from app.services.results_router import purge_old_pending
         db = next(get_db())
         try:
-            purge_old_pending(db, hours=72)
+            # Default is the 30-day retention constant; passing nothing keeps
+            # this in step with the panel's date picker and the retention sweep.
+            purge_old_pending(db)
         finally:
             db.close()
     except Exception as e:
