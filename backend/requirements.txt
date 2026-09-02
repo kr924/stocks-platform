@@ -28,3 +28,9 @@ rapidocr-onnxruntime==1.4.4
 # The wrapper for the tesseract binary installed in the Dockerfile. The
 # binary alone is not enough: ocr_words loads the engine through this.
 pytesseract==0.3.13
+# pytesseract returns its word boxes as a DataFrame, so ocr_words cannot
+# read the tesseract engine at all without pandas. The import failure is
+# swallowed per page, so the only symptom was every scanned filing
+# reporting 'no OCR engine reached it' while both engines showed as
+# loaded — with the slow engine silently carrying the whole cascade.
+pandas==2.2.3

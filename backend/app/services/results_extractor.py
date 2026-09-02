@@ -65,9 +65,30 @@ class ExtractionUnavailable(RuntimeError):
     """The extractor's dependencies are not installed in this image."""
 
 
+# What each engine needs beyond its own package to actually return words.
+# ocr_words imports these lazily, inside the per-page call, where the failure is
+# caught and the page skipped — so an engine can load, report itself available,
+# and then produce nothing on every page it is given.
+_ENGINE_DEPS = {
+    "tesseract": ("pytesseract", "pandas", "PIL"),
+    "rapidocr": ("rapidocr_onnxruntime",),
+}
+
+
 def available() -> dict:
-    """What this deployment can actually do, for the UI to say so honestly."""
-    out = {"text_layer": False, "ocr_engines": [], "error": ""}
+    """
+    What this deployment can actually do, for the UI to say so honestly.
+
+    An engine counts as available only when the modules its word-extraction
+    path imports are all present. Loading is not enough: pytesseract returns its
+    boxes as a DataFrame, so without pandas the engine loads cleanly and then
+    fails on every page — and because that failure is swallowed per page, the
+    only visible symptom was scanned filings reporting "no OCR engine reached
+    it" while the capability list showed two engines ready.
+    """
+    import importlib
+
+    out = {"text_layer": False, "ocr_engines": [], "degraded": [], "error": ""}
     try:
         import fitz  # noqa: F401
         out["text_layer"] = True
@@ -76,9 +97,20 @@ def available() -> dict:
         return out
     try:
         from app.services.pdf_extract import ocr_words
-        out["ocr_engines"] = list(ocr_words.available())
+        loaded = list(ocr_words.available())
     except Exception as e:
         logger.debug(f"OCR engines unavailable: {e}")
+        return out
+
+    for name in loaded:
+        missing = [m for m in _ENGINE_DEPS.get(name, ())
+                   if not importlib.util.find_spec(m)]
+        if missing:
+            out["degraded"].append({"engine": name, "missing": missing})
+            logger.warning(
+                f"OCR engine '{name}' loads but cannot read a page: missing {missing}")
+        else:
+            out["ocr_engines"].append(name)
     return out
 
 

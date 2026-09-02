@@ -644,57 +644,78 @@ function MetricStrip({ points, metric, label }: {
   const values = points.map(val).filter((v): v is number => v != null);
   if (!values.length) return null;
 
-  // Expenses, interest and depreciation rising is not good news, so the bars
-  // for those are neutral: only the lines where up is genuinely better carry
-  // the green/red reading.
+  // Expenses, interest and depreciation rising is not good news, so those are
+  // drawn neutral: only the lines where up is genuinely better carry a reading.
   const directional = !["expenses", "interest", "depreciation"].includes(metric);
 
   const hi = Math.max(...values, 0);
   const lo = Math.min(...values, 0);
   const span = hi - lo || 1;
-  const H = 44;
-  const zero = ((hi - 0) / span) * H;
+  const H = 78;                     // tall enough that a 20% difference reads
+  const MIN_BAR = 2;                // a reported figure always leaves a mark
+  const zeroY = ((hi - 0) / span) * H;
+  const hasNegative = lo < 0;
 
   return (
-    <div style={{ marginBottom: "14px" }}>
-      <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--text-secondary)",
-                    letterSpacing: "0.3px", marginBottom: "4px" }}>
-        {label}
+    <div style={{ marginBottom: "20px" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginBottom: "6px" }}>
+        <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--text-primary)",
+                       letterSpacing: "0.2px" }}>{label}</span>
+        <span style={{ fontSize: "9px", color: "var(--text-faint)" }}>
+          peak {crore(hi)}{hasNegative ? ` · low ${crore(lo)}` : ""}
+        </span>
       </div>
-      <div style={{ display: "flex", gap: "3px" }}>
+
+      <div style={{ display: "flex", gap: "5px", position: "relative" }}>
+        {/* The axis runs the width of the strip, so bars are read against one
+            line rather than each cell having its own. */}
+        <div style={{
+          position: "absolute", left: 0, right: 0, top: `${zeroY}px`,
+          borderTop: `1px ${hasNegative ? "solid" : "dashed"} var(--border-default)`,
+          opacity: hasNegative ? 0.9 : 0.45, pointerEvents: "none",
+        }} />
+
         {points.map(p => {
           const v = val(p), c = pct(p);
           const colour = !directional ? "var(--text-muted)"
             : c == null ? "var(--text-faint)"
             : c > 0 ? "var(--positive)" : c < 0 ? "var(--negative)" : "var(--text-muted)";
-          const h = v == null ? 0 : Math.max(Math.abs(((hi - v) / span) * H - zero), 1.5);
-          const top = v == null ? zero : Math.min(((hi - v) / span) * H, zero);
+          const y = v == null ? zeroY : ((hi - v) / span) * H;
+          const h = v == null ? 0 : Math.max(Math.abs(y - zeroY), MIN_BAR);
+          const top = v == null ? zeroY : (v >= 0 ? Math.min(y, zeroY - MIN_BAR) : zeroY);
+
           return (
-            <div key={p.quarter} style={{ flex: 1, minWidth: 0, textAlign: "center" }}
-                 title={`${p.quarter}: ${v == null ? "not reported" : v.toLocaleString()} ₹ Cr`}>
+            <div key={p.quarter} style={{ flex: 1, minWidth: 0 }}
+                 title={`${p.quarter} · ${label}: ${v == null ? "not reported" : v.toLocaleString()} ₹ Cr`}>
               <div style={{ height: `${H}px`, position: "relative" }}>
-                <div style={{
-                  position: "absolute", left: "18%", right: "18%",
-                  top: `${top}px`, height: `${h}px`,
-                  background: colour, opacity: v == null ? 0.25 : 0.85, borderRadius: "1.5px",
-                }} />
-                {/* Zero line, drawn only where the series actually crosses it. */}
-                {lo < 0 && (
-                  <div style={{ position: "absolute", left: 0, right: 0, top: `${zero}px`,
-                                borderTop: "1px solid var(--text-faint)", opacity: 0.5 }} />
+                {v == null ? (
+                  <div style={{ position: "absolute", left: 0, right: 0, top: `${zeroY - 6}px`,
+                                textAlign: "center", fontSize: "9px", color: "var(--text-faint)" }}>
+                    ·
+                  </div>
+                ) : (
+                  <div style={{
+                    position: "absolute", left: "22%", right: "22%",
+                    top: `${top}px`, height: `${h}px`,
+                    background: colour, opacity: 0.9,
+                    borderRadius: v >= 0 ? "2px 2px 0 0" : "0 0 2px 2px",
+                  }} />
                 )}
               </div>
-              <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--text-primary)",
-                            fontVariantNumeric: "tabular-nums", marginTop: "3px",
-                            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                {crore(v)}
-              </div>
-              <div style={{ fontSize: "9px", fontWeight: 700, fontVariantNumeric: "tabular-nums",
-                            whiteSpace: "nowrap",
-                            color: c == null ? "var(--text-faint)"
-                              : !directional ? "var(--text-muted)"
-                              : c > 0 ? "var(--positive)" : c < 0 ? "var(--negative)" : "var(--text-muted)" }}>
-                {c == null ? "—" : `${c > 0 ? "+" : ""}${c.toFixed(0)}%`}
+
+              <div style={{ textAlign: "center", marginTop: "5px" }}>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--text-primary)",
+                              fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap",
+                              overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {crore(v)}
+                </div>
+                <div style={{ fontSize: "9px", fontWeight: 700, fontVariantNumeric: "tabular-nums",
+                              whiteSpace: "nowrap",
+                              color: c == null ? "var(--text-faint)"
+                                : !directional ? "var(--text-muted)"
+                                : c > 0 ? "var(--positive)" : c < 0 ? "var(--negative)" : "var(--text-muted)" }}>
+                  {c == null ? "—" : `${c > 0 ? "+" : ""}${c.toFixed(0)}%`}
+                </div>
               </div>
             </div>
           );
@@ -709,14 +730,13 @@ function MetricStrip({ points, metric, label }: {
  * Contain a render error to the card that caused it.
  *
  * React unmounts the whole tree when a render throws, so one bad row took the
- * entire dashboard to a blank screen — which is what a missing component
- * reference did here, and what any future shape mismatch in a stored payload
- * would do again. A prompt panel reads from JSON written by a background job;
- * that payload will not always match what this file expects.
+ * entire dashboard to a blank screen. This catches throws inside components
+ * rendered beneath it — MetricStrip and ConfidenceBadge among them.
  *
- * The failing card shows what went wrong. Everything around it keeps working,
- * including the order forms, which is the part that must never disappear
- * because of a display bug.
+ * It does NOT cover an inline IIFE written directly in a card's JSX: React
+ * evaluates element children as arguments during the *parent's* render, before
+ * this component renders at all. Those expressions validate their own input
+ * instead.
  */
 class CardBoundary extends React.Component<
   { label: string; children: React.ReactNode },
@@ -874,6 +894,15 @@ export function TradingDashboard() {
   const [resultTab, setResultTab] = useState<Record<number, "ai" | "ocr">>({});
   const [reanalyseModel, setReanalyseModel] = useState<Record<number, string>>({});
   const [customModel, setCustomModel] = useState<Record<number, string>>({});
+  // Rows whose filing is being read, and the moment each started.
+  //
+  // Held here rather than on the row, because the row is replaced wholesale
+  // every few seconds by the poll — the placeholder the endpoint returns was
+  // being wiped on the next tick, so the button fell back to "Read the filing"
+  // seconds after being pressed and the read looked like it had not started.
+  // Cleared when the finished extraction actually arrives.
+  const [extracting, setExtracting] = useState<Record<number, number>>({});
+  const [nowTick, setNowTick] = useState(Date.now());
   const [aiLogSearch, setAiLogSearch] = useState("");
   const [aiLogDateFrom, setAiLogDateFrom] = useState("");
   const [aiLogDateTo, setAiLogDateTo] = useState("");
@@ -1298,6 +1327,28 @@ export function TradingDashboard() {
   const [quarterHistory, setQuarterHistory] = useState<QuarterHistory | null>(null);
   const [quarterLoading, setQuarterLoading] = useState(false);
 
+  useEffect(() => {
+    if (!Object.keys(extracting).length) return;
+    const t = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [extracting]);
+
+  // The read is finished the moment the row carries a real extraction.
+  useEffect(() => {
+    setExtracting(prev => {
+      const next = { ...prev };
+      let changed = false;
+      for (const p of pendingResults) {
+        const tier = p.extraction?.confidence?.tier;
+        if (next[p.id] && tier && tier !== "READING") {
+          delete next[p.id];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [pendingResults]);
+
   const fetchQuarterHistory = async (symbol: string) => {
     setQuarterLoading(true);
     setQuarterHistory(null);
@@ -1611,6 +1662,7 @@ export function TradingDashboard() {
    */
   const handleExtract = async (pending: PendingResult, refresh = false) => {
     setActionLoading(prev => ({ ...prev, [`extract_${pending.id}`]: true }));
+    setExtracting(prev => ({ ...prev, [pending.id]: Date.now() }));
     try {
       const res = await fetch(
         `${API_BASE}/api/trading/pending-results/${pending.id}/extract${refresh ? "?refresh=true" : ""}`,
@@ -1618,6 +1670,9 @@ export function TradingDashboard() {
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         alert(err.detail || "Could not read the filing.");
+        setExtracting(prev => {
+          const next = { ...prev }; delete next[pending.id]; return next;
+        });
         return;
       }
       const data: Extraction = await res.json();
@@ -2937,9 +2992,16 @@ export function TradingDashboard() {
                           // "READING" is the placeholder the endpoint returns
                           // while the job runs; it carries no figures, so the
                           // card shows progress rather than an empty table.
-                          const reading = raw?.confidence?.tier === "READING";
+                          const startedAt = extracting[pending.id];
+                          // In progress until the finished extraction lands. The
+                          // endpoint's own READING placeholder is not enough on
+                          // its own: the poll replaces the row every few seconds
+                          // and would wipe it.
+                          const reading = !!startedAt || raw?.confidence?.tier === "READING";
                           const ex = reading ? null : raw;
                           const busy = !!actionLoading[`extract_${pending.id}`] || reading;
+                          const elapsed = startedAt
+                            ? Math.max(0, Math.round((nowTick - startedAt) / 1000)) : 0;
                           const LABEL: Record<string, string> = {
                             revenue: "Revenue", expenses: "Expenses",
                             other_income: "Other income", ebitda: "EBITDA",
@@ -2958,7 +3020,9 @@ export function TradingDashboard() {
                                     cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.6 : 1,
                                   }}>
                                   <RefreshCw size={11} className={busy ? "spin" : undefined} />
-                                  {busy ? "Reading the filing…" : ex ? "Read again" : "Read the filing"}
+                                  {reading
+                                    ? `Reading the filing… ${elapsed}s`
+                                    : ex ? "Read again" : "Read the filing"}
                                 </button>
                                 {ex && <ConfidenceBadge c={ex.confidence} />}
                                 {ex?.engine && (
@@ -2973,9 +3037,16 @@ export function TradingDashboard() {
                                 <div style={{ padding: "16px", borderRadius: "8px", textAlign: "center",
                                               background: "var(--surface-2)", border: "1px dashed rgba(125, 135, 153,0.3)",
                                               fontSize: "11px", color: "var(--text-muted)", lineHeight: 1.6 }}>
-                                  {reading
-                                    ? raw?.confidence?.reason
-                                    : "Reads the figures out of the filing itself, then checks each one against Screener. Two independent sources agreeing is evidence; the model's reading on its own is not."}
+                                  {reading ? (
+                                    <>
+                                      <b style={{ color: "var(--text-secondary)" }}>Reading the filing…</b>
+                                      <div style={{ marginTop: "4px" }}>
+                                        The text layer answers in under a second. A scanned filing has to
+                                        have its statement page found by OCR, which takes up to a minute —
+                                        this stays put and fills in when it finishes.
+                                      </div>
+                                    </>
+                                  ) : "Reads the figures out of the filing itself, then checks each one against Screener. Two independent sources agreeing is evidence; the model's reading on its own is not."}
                                 </div>
                               ) : (
                                 <>
