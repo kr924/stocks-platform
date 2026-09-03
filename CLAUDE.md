@@ -126,8 +126,10 @@ briefly and was removed for contradicting the cutoff.
 
 ### Daily jobs (IST, guarded by last-run date)
 
-- **01:00** purge result prompts older than 72h (rows that led to an order are
-  kept — `config_id` is the only trail from a filing to a position)
+- **01:00** purge result prompts older than **30 days** (rows that led to an
+  order are kept — `config_id` is the only trail from a filing to a position).
+  It was 72h while the Results Digest was the record; the panel is the record
+  now, so its history is the platform's history — `PENDING_RETENTION_DAYS`
 - **02:00** retire target configs whose date has passed, **never** those in
   `bought`/`holding` — that would drop the stoploss watcher's subject
 - **06:00** earnings sync into the watchlist
@@ -195,6 +197,168 @@ is defined by an age rather than a cursor, so re-running is always safe.
 `docker exec` against the live container — the host checkout is not what the
 container sees, and they need the installed dependencies and the mounted
 database.
+
+---
+
+## Order Decisions — one panel, not two
+
+The Results Digest is gone from the dashboard. It queried the same
+`PendingResultOrder` rows the panel does, for the same day, and rendered them a
+second time — one copy with the order form, one with the figures. Screener's
+comparison, the any-date picker and the PDF export moved onto the panel. The
+08:00 HTML page, its PDF and the Telegram alert are untouched and still served
+by `/api/trading/digest/<date>`.
+
+Prompts are split into **Results / Orders / Mergers / Other**. The fourth tab is
+not a dumping ground: `merger_acquisition` and `order_win` are two of seven
+kinds the classifier emits, and buyback, expansion, regulatory approval and
+joint venture would otherwise have nowhere to appear. Counts are of the whole
+day, so an empty tab reads as empty rather than missing.
+
+**Only results carry an analysis section.** Impact news has no quarter in it, so
+there is nothing for Screener to publish and nothing for the extractor to read.
+Enforced server-side too — `_attach_screener` skips non-results and
+`/reanalyse` refuses them with a reason.
+
+**Pause, not dismiss.** Pausing stops a row being quoted and leaves it in place
+with its last price; its symbol leaves the quote batch, which is where the
+metered Upstox allowance is spent. Dismiss removed the card outright, the wrong
+shape for a 30-day record, and now lives only on the Telegram alert's inline
+buttons where hiding a prompt you have decided against is the point.
+
+Two things had to be fixed before a 30-day window meant anything, and both had
+been broken silently:
+
+- The listing applied a rolling `hours` window **and** a trade date. For any
+  past day those barely intersect — one date returned 33 of its 46 rows and the
+  day before returned none — so the picker looked like it was showing empty
+  days rather than failing. A specific date is now the whole filter.
+- Every row from an earlier day is marked `expired` at the daily reset, which
+  the panel filtered out along with dismissed ones. Today shows what can still
+  be acted on; a past day shows its history, minus anything dismissed.
+
+---
+
+## Reading figures out of the filed PDF
+
+`services/pdf_extract/` is the pipeline worked out separately and documented in
+its own `PIPELINE.html`, vendored as-is bar one relative import so a fix made
+there drops back in. `services/results_extractor.py` wraps it.
+
+**Screener is the spine, the PDF is the check.** Screener carries every quarter
+already normalised, so the platform's figures come from there; the filing is
+read independently and agreement between two sources that share no code is
+evidence. One source repeated is not. That is why it is a separate button
+rather than something that runs with the AI.
+
+The cascade, each stage only when the one before fails validation:
+
+| | | |
+|---|---|---|
+| PDF text layer | PyMuPDF word coordinates | ~0.1 s, ~65% of files |
+| Tesseract | rendered at 150 DPI | ~1.2 s/page |
+| RapidOCR | rendered at 150 DPI | ~6.9 s/page, better on ruled tables |
+
+Deliberately **not** a vision-language model: on financial data a VLM emits a
+plausible wrong number with full confidence and no way to detect it. This needs
+words with bounding boxes, which OCR gives deterministically.
+
+**Confidence is derived, never invented.** It comes from the extractor's own
+validation checks (EBITDA derived two ways must agree, total income must equal
+revenue plus other income, PAT cannot exceed PBT, the unit must be stated) and
+from whether each figure matches Screener. The percentages are the accuracy
+measured over 1,926 filings: a clean read a second source confirms was right
+~94% of the time, a flagged read ~67%. Only about a quarter of filings yield a
+clean read at all, and that ceiling is input quality, not the parser.
+
+Two rules that stop it lying: **EBITDA is shown but never scored** — Screener's
+Operating Profit is its own construct, not a P&L-derived EBITDA — and a filing
+covering a different quarter from Screener's latest says so, because then the
+gaps are not errors.
+
+**It runs in the background**, on a single-worker pool like the earnings AI.
+Measured on live filings: 6 s, 20 s, and 64 s. RapidOCR loads a 400-800 MB ONNX
+session per worker, so a second would starve the announcement poller on 2 cores
+rather than halve the wait.
+
+### Things that cost a day to find here
+
+- **pytesseract returns a DataFrame**, so without `pandas` the engine loads,
+  reports itself available, and fails on every page — the failure is swallowed
+  per page. The only symptom was scanned filings reporting "no OCR engine
+  reached it" while the capability list showed two engines ready. `available()`
+  now checks that each engine's imports actually resolve.
+- **RapidOCR needs `libgl1`** at runtime (opencv links libGL even headless).
+  pip installs cleanly, then cannot import.
+- **Page discovery at dpi=100 is too coarse** for scans. On one filing the real
+  statement page scored *zero* cue hits at 100 and six at 150, so discovery
+  settled on the auditor's report instead. 150 is also not slower.
+- **The first page over the keyword threshold is the wrong page.** The
+  auditor's report and the notes are written in the same vocabulary as the
+  statement they describe. Pages are scored and the most table-like wins: the
+  statement page carried ~100 numeric tokens against 8-19 on every prose page.
+- **A filing carries standalone and consolidated on consecutive pages.** The
+  text-layer path scores consolidated +30; OCR discovery had no basis awareness
+  at all, so which one got read came down to page order.
+
+---
+
+## Prices — which figure comes from where
+
+| figure | source |
+|---|---|
+| Since result | live price against `price_at_announcement`, an Upstox baseline |
+| Day change (panel) | computed server-side from Upstox `ohlc.close` |
+| Day change (PDF, market shut) | public feed (Yahoo), tape named on the row |
+| Past day | `daily_prices`, the close recorded for that date |
+
+**Live quotes are fetched for the current day only.** Every source reports the
+price *now*, and now against a baseline from an earlier day is not a move
+anyone made.
+
+**Deferred filings capture a baseline too.** They did not, and 86% of filings
+arrive outside 09:00-15:30 — on one day all 46 rows had no baseline at all,
+which also left the digest's "since result" with nothing to subtract from.
+Deferring is about not alerting and not spending an AI call; it was never about
+refusing to record what the stock was worth.
+
+**`daily_prices` exists because tomorrow cannot answer for today.** Once a day
+has closed the only description of it is what was captured while it was open.
+Written insert-if-absent on (symbol, date) with the tape named.
+
+**Fetch prices** on the panel recovers what is still recoverable: on today a
+live quote, which also fills missing baselines; on a finished day that day's
+actual close from Upstox daily candles. It never backfills `at result` for a
+past day — a price from a different moment in that field would look exactly
+like data. Asking for a single day with `from_date == to_date` routes to the
+intraday endpoint and fails with UDAPI1076; a *range* ending on the day works.
+
+`services/screener_quarters.py` also stores every quarter it parses, so the
+history chart survives Screener being unreachable.
+
+---
+
+## The index board
+
+`services/index_board.py` — 4 headline indices, 14 sectoral, 5 MCX commodities,
+with nine period filters from 5d to 5y computed from one daily candle series
+per instrument, held six hours.
+
+- **There is no instrument called "GOLD" on MCX** — several hundred contracts
+  with expiries. The front-month future is resolved from the exchange dump each
+  day. A hardcoded key works right up to expiry then quotes a dead contract
+  without erroring, which reads as a quiet market.
+- **A futures contract has no history before it listed**, so a five-year
+  request returns its own first candle. The board reports the span actually
+  covered and flags the tile: a real number under the wrong label is worse than
+  no number.
+- **One bad key voids the whole batch** (UDAPI1087), so a rejected batch retries
+  key by key. Midcap 100, Smallcap 100, Consumer Durables, Oil and Gas and
+  Healthcare all accept as keys but answer without a price; they are left out
+  rather than shipped as permanently empty tiles.
+- The strip used to substitute `default_price × 0.995` when a quote came back
+  empty, which is why every index read exactly **+0.50%** before Upstox was
+  connected. A tile with no quote now reads as having no quote.
 
 ---
 
@@ -294,6 +458,20 @@ interval alone, not of how many panels or tabs are open.
 how quotes come *back* keyed; sending it returns UDAPI1087 and voids the whole
 request, including the keys that were fine.
 
+**`vite build` does not type-check.** It strips types and bundles, so a missing
+component reference builds clean and throws `ReferenceError` at render — which
+unmounts the React tree and leaves a blank screen. Twice a block replacement
+bounded by two symbols swallowed a component defined between them and shipped.
+Run `npx tsc --noEmit -p tsconfig.app.json` and grep for TS2304/TS2552; the file
+carries pre-existing errors, so grep those codes rather than expecting silence.
+
+**An error boundary does not cover an inline IIFE in JSX.** React evaluates
+element children as arguments during the *parent's* render, before the boundary
+component renders at all. A `{(() => {...})()}` block inside a card therefore
+escapes the boundary wrapping it and takes the whole dashboard down. Those
+expressions validate their own input instead — and `Array.isArray` beats a
+truthy `.length`, because a string has a length too.
+
 **Never write `` into a regex through a patch script.** Twice a word boundary
 was written as a literal backspace (``), and both times the pattern silently
 matched nothing while looking correct in the terminal, in grep, and in the
@@ -354,13 +532,22 @@ the answer. It scores candidates and keeps the richest.
 
 | | |
 |---|---|
-| Announced → ingested, median | **36.6 s** |
-| Our controllable share | ~1.1 s |
-| NSE / BSE round trip | 72 ms / 13 ms |
+| Announced → ingested, median | **35.7 s** BSE / **40.0 s** NSE (n=7,751, 3 days) |
+| p10 — the observed floor | 11.5 s / 15.2 s |
+| Exchange publication lag, measured directly | **23.4 – 34.8 s** |
+| Our fetch round trip | 0.01 – 0.14 s |
 
-The ~36 s is the **exchange's own publication lag** and cannot be compressed.
-Sub-second is not reachable by polling; 10 ms would need co-located direct
-exchange feeds, which carry trades, not filing PDFs.
+The exchange lag was measured rather than inferred: polling the same endpoints
+at the same cadence and recording when each filing **first appears** on the API
+against the timestamp the exchange stamps on it. Even the fastest was 23.4 s,
+before our poll interval or processing contributed anything.
+
+So the filing does not exist anywhere we can reach until roughly half a minute
+after its own timestamp. Squeezing our side to zero takes the median from ~40 s
+to ~38 s. Sub-5 s is not reachable by polling, and milliseconds would need a
+co-located exchange feed — those carry trades, not filing PDFs. The only real
+route to single-digit seconds is a commercial dissemination feed, which is a
+data subscription rather than a code change.
 
 Poll interval stays at 2s. Halving it buys ~1.4% of total latency while doubling
 the request rate against NSE, which blocks aggressive pollers.
@@ -411,6 +598,15 @@ changes nothing.
 | filings arriving outside 09:00-15:30 | 86% |
 | AI verdicts that are NA | 88% — **both AI paths are down**, see Open items |
 
+Added since (3 Sep 2026), all deployed and verified on the VM: the Order
+Decisions panel with the digest folded in, 30-day prompt retention, PDF
+extraction with a measured confidence tier, the quarterly history chart under
+the price chart, the index/commodity board with nine period filters,
+`daily_prices` and the Fetch prices backfill, and stored Screener quarters.
+The extractor works — a clean text-layer filing verifies against Screener at
+95% in about a second — but coverage is the ~26% the reference pipeline
+measured, not the parser's fault.
+
 `ops/` holds operational scripts; exports are written to the scratchpad, not the
 repo (a stray `results_announcements.csv` in the root is a leftover, safe to delete).
 
@@ -435,3 +631,17 @@ repo (a stray `results_announcements.csv` in the root is a leftover, safe to del
   this; the next results season is the real test.
 - **A named Cloudflare tunnel** would end the URL rotation for good. Needs a
   Cloudflare account with a domain; the server side is quick once that exists.
+- **Rotated scans still defeat the extractor.** The cascade now finds the right
+  page and prefers the consolidated statement, but RapidOCR splits numbers in
+  dense ruled tables (PBT read as 58.67 where the page says 1,447.36) and two
+  of four column headers fail to date, so the quarter resolves wrongly. Every
+  one of those is flagged and the confidence lands at 40%, so nothing false is
+  presented — but number-fragment merging and date-header parsing on rotated
+  scans is the next real piece of work if OCR coverage matters.
+- **`price_at_announcement` is unrecoverable for rows before 3 Sep 2026.** The
+  price at the instant those filings landed was never recorded. Fetch prices
+  recovers each day's close, so "day change" fills in; "since result" stays
+  blank for them for good.
+- **Five index tiles are missing** — Midcap 100, Smallcap 100, Consumer
+  Durables, Oil and Gas, Healthcare. Upstox accepts the keys and returns no
+  price; possibly a data-subscription difference, not yet chased.
