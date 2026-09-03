@@ -143,17 +143,28 @@ def backfill(db, trade_date: str) -> dict:
         return {"ok": False, "checked": len(rows), "baselines_filled": 0,
                 "days_stored": 0, "message": f"Could not save: {e}"}
 
+    # Report the state, not just the delta. "Nothing new to fetch" on a day
+    # that already has 42 closes on file reads as a failure, which is the
+    # opposite of what happened.
+    on_file = (db.query(DailyPrice)
+               .filter(DailyPrice.trade_date == trade_date).count())
+    total = len({(r.symbol or "").upper() for r in rows if r.symbol})
+
     if is_today:
-        msg = (f"Filled {baselines} baseline(s) and stored {stored} price(s)."
-               if (baselines or stored) else "Everything on this day already had a price.")
+        if baselines or stored:
+            msg = f"Filled {baselines} baseline(s) and recorded {stored} price(s)."
+        else:
+            msg = "Everything on this day already had a price."
     else:
-        msg = (f"Stored {stored} closing price(s) for {trade_date}."
-               if stored else "Nothing new to fetch for this day.")
-        if stored or failed:
-            msg += (" The price at the moment each filing landed cannot be recovered — "
-                    "it was never recorded, so 'since result' stays blank.")
+        msg = (f"Recorded {stored} closing price(s)."
+               if stored else "Nothing further to fetch.")
+        msg += f" {on_file} of {total} companies on {trade_date} now have a close on file."
+        if on_file:
+            msg += (" The price at the moment each filing landed was never recorded and "
+                    "cannot be recovered, so 'since result' stays blank for this day.")
     if failed:
-        msg += f" {failed} symbol(s) had no price available."
+        msg += (f" {failed} symbol(s) have no price available — they do not resolve "
+                "to a listing on either exchange.")
 
     logger.info(f"[BACKFILL] {trade_date}: {baselines} baselines, {stored} days, {failed} failed.")
     return {"ok": True, "checked": len(rows), "baselines_filled": baselines,

@@ -341,6 +341,16 @@ function ResultQuoteStrip({ p, quote, signal, flash, live }: {
 
   const num = { fontSize: "13px", fontWeight: 700, fontVariantNumeric: "tabular-nums" as const };
 
+  // A finished day has no live quote but may have its close on file. Showing
+  // that in the same cells a live quote fills — rather than as a footnote
+  // beneath four empty ones — is the difference between "we have this day" and
+  // "this day is blank". It is marked CLOSE so it cannot be read as live.
+  const stored = p.stored_price;
+  const usingClose = !hasQuote && stored?.last != null;
+  const shownPrice = hasQuote ? ltp : (stored?.last ?? 0);
+  const shownChange = hasQuote ? dayChange : (stored?.change_pct ?? undefined);
+  const shownPrevClose = hasQuote ? prevClose : (stored?.prev_close ?? 0);
+
   return (
     <div style={{
       display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap",
@@ -352,7 +362,16 @@ function ResultQuoteStrip({ p, quote, signal, flash, live }: {
         color: flash === "up" ? "var(--positive-strong)" : flash === "down" ? "var(--negative-strong)" : "var(--text-primary)",
         transition: "color 0.3s",
       }}>
-        {rupees(ltp)}
+        {rupees(shownPrice)}
+        {usingClose && (
+          <span title={`Closing price recorded for this day, from ${stored?.source || "the price feed"}`}
+                style={{ marginLeft: "6px", fontSize: "9px", fontWeight: 700,
+                         letterSpacing: "0.4px", color: "var(--text-muted)",
+                         background: "var(--surface-2)", padding: "2px 6px",
+                         borderRadius: "4px", verticalAlign: "middle" }}>
+            CLOSE
+          </span>
+        )}
       </span>
 
       <QuoteCell label="SINCE RESULT" title="Move since the result was announced — what is left of the reaction">
@@ -361,12 +380,12 @@ function ResultQuoteStrip({ p, quote, signal, flash, live }: {
         </span>
       </QuoteCell>
 
-      <QuoteCell label="CHANGE">
-        <span style={{ ...num, color: pctTone(dayChange) }}>{pctText(dayChange)}</span>
+      <QuoteCell label={usingClose ? "DAY CHANGE" : "CHANGE"}>
+        <span style={{ ...num, color: pctTone(shownChange) }}>{pctText(shownChange)}</span>
       </QuoteCell>
 
       <QuoteCell label="PREV CLOSE">
-        <span style={{ ...num, fontWeight: 600, color: "var(--text-secondary)" }}>{rupees(prevClose)}</span>
+        <span style={{ ...num, fontWeight: 600, color: "var(--text-secondary)" }}>{rupees(shownPrevClose)}</span>
       </QuoteCell>
 
       <QuoteCell label="DAY HIGH">
@@ -426,21 +445,7 @@ function ResultQuoteStrip({ p, quote, signal, flash, live }: {
         </span>
       )}
 
-      {!hasQuote && p.stored_price?.last != null && (
-        <span title={`Recorded close for this day, from ${p.stored_price.source || "the price feed"}`}
-          style={{ fontSize: "10px", color: "var(--text-muted)", whiteSpace: "nowrap" }}>
-          close {rupees(p.stored_price.last)}
-          {p.stored_price.change_pct != null && (
-            <b style={{ marginLeft: "5px",
-                        color: p.stored_price.change_pct > 0 ? "var(--positive)"
-                          : p.stored_price.change_pct < 0 ? "var(--negative)" : "var(--text-muted)" }}>
-              {p.stored_price.change_pct > 0 ? "+" : ""}{p.stored_price.change_pct.toFixed(2)}%
-            </b>
-          )}
-        </span>
-      )}
-
-      {!hasQuote && p.stored_price?.last == null && (
+      {!hasQuote && stored?.last == null && (
         <span title={live === false
           ? "Live prices are fetched for the current day only. Every source reports the price now, and now against a baseline from an earlier day is not a move anyone made."
           : "No listing matched this symbol on either exchange, so there is no live quote to show"}
