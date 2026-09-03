@@ -1312,13 +1312,14 @@ export default function App() {
           : `${row.name}: previous close ${money(row.prev_close)} → ${money(row.last_price)}`}
         style={{
           display: "flex", flexDirection: "column", gap: "1px",
-          padding: "6px 10px", borderRadius: "8px", minWidth: "132px",
+          padding: "4px 8px", borderRadius: "6px", minWidth: "96px",
           backgroundColor: "rgba(22, 27, 36, 0.5)",
           border: `1px solid ${row.group === "commodity" ? "rgba(224, 163, 62, 0.18)" : "rgba(255,255,255,0.03)"}`,
         }}>
         <span style={{
-          fontSize: "9px", fontWeight: 700, letterSpacing: "0.5px",
-          textTransform: "uppercase",
+          fontSize: "8px", fontWeight: 700, letterSpacing: "0.4px",
+          textTransform: "uppercase", whiteSpace: "nowrap",
+          overflow: "hidden", textOverflow: "ellipsis",
           color: row.group === "commodity" ? "var(--warning)" : "var(--text-faint)",
         }}>
           {row.name}
@@ -1329,19 +1330,22 @@ export default function App() {
         </span>
 
         <div style={{ display: "flex", alignItems: "baseline", gap: "6px" }}>
-          <span style={{ fontSize: "13px", fontWeight: 700, color: "var(--text-primary)",
+          <span style={{ fontSize: "12px", fontWeight: 700, color: "var(--text-primary)",
                          fontVariantNumeric: "tabular-nums" }}>
             {money(row.last_price)}
           </span>
-          <span style={{ fontSize: "10px", fontWeight: 700, color: tone,
+          <span style={{ fontSize: "9px", fontWeight: 700, color: tone,
                          fontVariantNumeric: "tabular-nums" }}>
             {pct == null ? "—" : `${pct > 0 ? "+" : ""}${pct.toFixed(2)}%`}
           </span>
         </div>
 
-        {/* Where it came from, so the percentage has a visible starting point. */}
-        <span style={{ fontSize: "9px", color: "var(--text-faint)", fontVariantNumeric: "tabular-nums" }}>
-          {money(row.prev_close)} <span style={{ opacity: 0.7 }}>→</span> {money(row.last_price)}
+        {/* The move in points. The starting price it is measured from is in
+            the tooltip rather than on the tile: printing both ends spent a
+            whole line restating a number already shown. */}
+        <span style={{ fontSize: "9px", fontWeight: 600, color: tone,
+                       fontVariantNumeric: "tabular-nums" }}>
+          {row.change == null ? "—" : `${row.change > 0 ? "+" : ""}${money(row.change)}`}
         </span>
       </div>
     );
@@ -1461,7 +1465,7 @@ export default function App() {
 
       {/* Index, sector and commodity board */}
       <div style={{
-        padding: "8px 24px 10px",
+        padding: "6px 24px 8px",
         backgroundColor: "rgba(22, 27, 36, 0.4)",
         borderBottom: "1px solid rgba(255, 255, 255, 0.05)",
         flexShrink: 0
@@ -1493,8 +1497,8 @@ export default function App() {
 
         <div style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(132px, 1fr))",
-          gap: "8px",
+          gridTemplateColumns: "repeat(auto-fit, minmax(96px, 1fr))",
+          gap: "5px",
         }}>
           {board.length === 0
             ? <span style={{ fontSize: "10px", color: "var(--text-faint)", padding: "6px 10px" }}>
