@@ -1220,6 +1220,20 @@ def pending_results_pdf(trade_date: Optional[str] = Query(None), db: Session = D
     market_open_now = is_within_action_window()
     use_upstox_for_day = upstox_ok and market_open_now
 
+    # A finished day cannot be quoted, but its close may be recorded. Reading
+    # it here is what stops the export printing "prices are shown for the
+    # current day only" over figures that are on file.
+    closes = {}
+    if not is_today:
+        try:
+            from app.database import DailyPrice
+            syms = {p.symbol.upper() for p in pendings if p.symbol}
+            if syms:
+                closes = {d.symbol: d for d in db.query(DailyPrice).filter(
+                    DailyPrice.trade_date == day, DailyPrice.symbol.in_(syms)).all()}
+        except Exception as e:
+            logger.debug(f"Stored closes unavailable for {day}: {e}")
+
     public = {}
     if is_today and not use_upstox_for_day:
         try:
@@ -1251,6 +1265,26 @@ def pending_results_pdf(trade_date: Optional[str] = Query(None), db: Session = D
             if pq.get("change_pct") is not None:
                 day_pct = pq["change_pct"]
                 day_src = "public feed"
+
+        # On a finished day the recorded close stands in for the live quote.
+        # "Since result" still cannot be computed — its baseline was never
+        # captured for these rows — so it stays absent rather than being
+        # measured from a price taken hours later.
+        stored = closes.get((rp.symbol or "").upper()) if closes else None
+        if stored is not None:
+            r["is_result"] = (getattr(rp, "kind", "result") or "result") == "result"
+            r["price"] = {
+                "at_announcement": base,
+                "last": stored.last_price,
+                "since_pct": (round((stored.last_price - base) / base * 100, 2)
+                              if base and stored.last_price else None),
+                "upstox_connected": upstox_ok,
+                "day_pct": stored.change_pct,
+                "day_source": f"{stored.source or 'recorded'} close",
+                "is_close": True,
+                "paused": bool(getattr(rp, "paused", False)),
+            }
+            continue
 
         r["is_result"] = (getattr(rp, "kind", "result") or "result") == "result"
         r["price"] = {

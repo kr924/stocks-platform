@@ -119,12 +119,14 @@ def _price_lines(r: dict, st: dict) -> list:
     if not (price.get("at_announcement") or price.get("last") or price.get("day_pct") is not None):
         return []
 
-    # A past day carries the baseline that was captured then and nothing live.
-    # Saying so beats printing dashes that read as a feed outage.
-    if price.get("historical"):
+    # A past day with nothing recorded carries only the baseline. Saying so
+    # beats printing dashes that read as a feed outage. A day whose close *is*
+    # on file falls through and renders it like any other price.
+    if price.get("historical") and not price.get("is_close"):
         return [Paragraph(
             f"<b>At filing:</b> {_num(price.get('at_announcement'))} &nbsp;·&nbsp; "
-            f'<font color="#8b95a6">live prices are shown for the current day only</font>',
+            f'<font color="#8b95a6">no price recorded for this day — '
+            f'use Fetch prices on the panel</font>',
             st["meta"])]
 
     def pct(v):
@@ -149,8 +151,11 @@ def _price_lines(r: dict, st: dict) -> list:
     if price.get("day_source"):
         day_txt += f' <font color="#8b95a6" size="6">({price["day_source"]})</font>'
 
+    # "Now" is only now on the current day; on a finished one it is that day's
+    # close, and calling it Now would misdate the figure.
+    now_label = "Close" if price.get("is_close") else "Now"
     line = (f"<b>At filing:</b> {_num(price.get('at_announcement'))} &nbsp;·&nbsp; "
-            f"<b>Now:</b> {_num(price.get('last'))} &nbsp;·&nbsp; "
+            f"<b>{now_label}:</b> {_num(price.get('last'))} &nbsp;·&nbsp; "
             f"<b>Since result:</b> {since_txt} &nbsp;·&nbsp; "
             f"<b>Day:</b> {day_txt}")
     if price.get("paused"):
@@ -185,7 +190,11 @@ def _non_result_table(rows: List[dict], st: dict) -> list:
 
     ordered = sorted(rows, key=lambda r: (r["pending"].event_time or datetime.min))
 
-    head = ["Company", "Type", "Time", "Subject", "At filing", "Now", "Since", "Day"]
+    # On a finished day that column holds the day's close, not a live price,
+    # and heading it "Now" would misdate every figure under it.
+    closed_day = any((r.get("price") or {}).get("is_close") for r in ordered)
+    head = ["Company", "Type", "Time", "Subject", "At filing",
+            "Close" if closed_day else "Now", "Since", "Day"]
     data = [[Paragraph(f'<b>{h}</b>', st["cell_r"] if h in ("At filing", "Now", "Since", "Day")
                        else st["cell"]) for h in head]]
 
@@ -249,16 +258,24 @@ def _non_result_table(rows: List[dict], st: dict) -> list:
         Spacer(1, 4),
         table,
     ]
-    historical = any((r.get("price") or {}).get("historical") for r in ordered)
-    if historical:
-        # Every price source reports the price *now*. Against a baseline from a
-        # past day that is not a move anyone made, so the columns are left empty
-        # and the reason is stated rather than left to look like an outage.
+    unpriced = sum(1 for r in ordered
+                   if (r.get("price") or {}).get("historical")
+                   and not (r.get("price") or {}).get("is_close"))
+    if unpriced:
+        # Only the rows with nothing recorded are blank. Saying the whole table
+        # is would contradict the figures printed directly above.
         out.append(Spacer(1, 3))
         out.append(Paragraph(
-            "Now, Since and Day are blank because this is a past day — live prices are "
-            "shown for the current day only. &quot;At filing&quot; is the price captured "
-            "when each filing landed.", st["small"]))
+            f"{unpriced} row(s) show no price: none was recorded for that day, and a "
+            "live quote would be today's, not this day's. Use Fetch prices on the panel "
+            "to recover the close where one is still available.", st["small"]))
+    if closed_day:
+        out.append(Spacer(1, 3))
+        out.append(Paragraph(
+            "Close is the recorded closing price for this day, and Day the move against "
+            "the session before it. &quot;Since&quot; needs the price at the moment each "
+            "filing landed, which was not recorded for these rows and cannot be "
+            "recovered.", st["small"]))
     elif sources:
         # Which tape each figure came off. Upstox answers while the session is
         # authorised and the market is open; a public feed answers otherwise,

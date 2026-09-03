@@ -1512,7 +1512,10 @@ export function TradingDashboard() {
       const base = p.price_at_announcement;
       const ltp = quote?.last_price;
       const since = ltp && base ? ((ltp - base) / base) * 100 : null;
-      const day = quote?.change ?? null;
+      // On a finished day there is no quote, but its close may be on file.
+      // Without this the whole strip reads "—" on any past date while the
+      // cards below it show real figures.
+      const day = quote?.change ?? p.stored_price?.change_pct ?? null;
 
       if (!buckets.has(hour)) buckets.set(hour, { hour, items: [] });
       buckets.get(hour)!.items.push({ symbol: p.symbol, since, day });
@@ -1521,9 +1524,12 @@ export function TradingDashboard() {
       .map(b => ({
         ...b,
         // Biggest movers first: the reason to look at an hour is what moved in it.
-        items: b.items.sort((a, z) => Math.abs(z.since ?? -1) - Math.abs(a.since ?? -1)),
-        up: b.items.filter(i => (i.since ?? 0) > 0).length,
-        down: b.items.filter(i => (i.since ?? 0) < 0).length,
+        // Biggest mover first on whichever figure the day actually has: since
+        // the result while it is live, the day's change once it has closed.
+        items: b.items.sort((a, z) =>
+          Math.abs(z.since ?? z.day ?? -1) - Math.abs(a.since ?? a.day ?? -1)),
+        up: b.items.filter(i => (i.since ?? i.day ?? 0) > 0).length,
+        down: b.items.filter(i => (i.since ?? i.day ?? 0) < 0).length,
       }))
       .sort((a, z) => z.hour.localeCompare(a.hour));
   }, [visiblePendingResults, marketQuotesMap]);
