@@ -302,11 +302,15 @@ const rupees = (v: number | null | undefined) =>
  * whether there is still a trade here: by the time a result reaches this panel
  * the market has often already repriced, and the day's change does not show it.
  */
-function ResultQuoteStrip({ p, quote, signal, flash }: {
+function ResultQuoteStrip({ p, quote, signal, flash, live }: {
   p: PendingResult;
   quote: any;
   signal: { recommendation: string; confidence: string; tone: "up" | "down" | "neutral"; explanation: string };
   flash?: "up" | "down";
+  // False when an earlier date is being read. Quotes are only fetched for the
+  // current day, so an empty strip then is the rule working, not a lookup that
+  // failed — and the two must not read the same.
+  live?: boolean;
 }) {
   const ltp: number = quote?.last_price || 0;
   const base = p.price_at_announcement;
@@ -417,9 +421,11 @@ function ResultQuoteStrip({ p, quote, signal, flash }: {
       )}
 
       {!hasQuote && (
-        <span title="No listing matched this symbol on either exchange, so there is no live quote to show"
+        <span title={live === false
+          ? "Live prices are fetched for the current day only. Every source reports the price now, and now against a baseline from an earlier day is not a move anyone made."
+          : "No listing matched this symbol on either exchange, so there is no live quote to show"}
           style={{ fontSize: "10px", color: "var(--text-faint)", whiteSpace: "nowrap" }}>
-          no live quote
+          {live === false ? "past date — prices not fetched" : "no live quote"}
         </span>
       )}
     </div>
@@ -2782,6 +2788,7 @@ export function TradingDashboard() {
                       quote={quote}
                       signal={get2MinSignal(pending.symbol, quote)}
                       flash={priceFlash[pending.symbol.toUpperCase()]}
+                      live={isToday}
                     />
                     <LifecycleStrip p={pending} />
                   </div>

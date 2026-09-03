@@ -150,6 +150,29 @@ def get_ltp(instrument_key: str, symbol: str = "") -> Optional[float]:
     return None
 
 
+def _capture_baseline(db: Session, pending, symbol: str) -> None:
+    """
+    Record what the stock was worth when this filing landed.
+
+    Captured once and never recomputed: it is the denominator of every "move
+    since the result" figure on the panel, in the PDF and in the morning
+    digest, and a miss leaves those blank for the life of the row.
+
+    Quiet on failure. A filing with no price is still a filing worth showing,
+    and the quote feed being rate limited must not stop the prompt being
+    raised.
+    """
+    try:
+        ltp = get_ltp(pending.instrument_key, symbol)
+        if ltp is None:
+            return
+        pending.price_at_announcement = ltp
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.debug(f"No baseline captured for {symbol}: {e}")
+
+
 def _send_result_alert(ann, event, pending_id=None, instrument_key: str = "", pending=None,
                        last_price=None):
     """
@@ -337,8 +360,20 @@ def route_financial_result(db: Session, ann, event, dedup_key: str):
     })
 
     if not actionable:
+        # The price is still captured. Deferring is about not alerting and not
+        # spending an AI call on a filing there is no session left to trade —
+        # it was never about refusing to record what the stock was worth when
+        # the filing landed. Outside market hours that is the last traded
+        # price, which is exactly the baseline the 08:00 digest measures the
+        # overnight move against.
+        #
+        # Without this the baseline is null for every filing outside the
+        # window, which is 86% of them: a whole trading day could show no
+        # prices at all, and "since result" in the digest had nothing to
+        # subtract from.
+        _capture_baseline(db, pending, symbol)
         logger.info(
-            f"🌙 [RESULT DEFERRED] {symbol} ({pending.tracking_ref}) arrived after the "
+            f"🌙 [RESULT DEFERRED] {symbol} ({pending.tracking_ref}) arrived "
             f"outside the 09:00-15:30 IST window — no alert or AI now; held for the 08:00 digest."
         )
         return
@@ -657,6 +692,7 @@ def route_impact_news(db: Session, ann, event, kind: str, dedup_key: str = "") -
     })
 
     if not actionable:
+        _capture_baseline(db, pending, symbol)
         logger.info(f"🌙 [IMPACT DEFERRED] {symbol} ({kind}) arrived outside 09:00-15:30 IST.")
         return
 
