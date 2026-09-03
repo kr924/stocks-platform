@@ -1459,17 +1459,22 @@ export default function App() {
         </div>
       </header>
 
-      {/* Top Indices Grid Panel */}
+      {/* Index, sector and commodity board */}
       <div style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(115px, 1fr))",
-        gap: "8px",
-        padding: "10px 24px",
+        padding: "8px 24px 10px",
         backgroundColor: "rgba(22, 27, 36, 0.4)",
         borderBottom: "1px solid rgba(255, 255, 255, 0.05)",
         flexShrink: 0
       }}>
-        <div style={{ display: "flex", gap: "3px", alignItems: "center", marginRight: "4px" }}>
+        {/* The period selector gets its own row. Inside the tile grid it
+            occupied a single 115px cell and clipped after three buttons. */}
+        <div style={{ display: "flex", gap: "3px", alignItems: "center",
+                      flexWrap: "wrap", marginBottom: "8px" }}>
+          <span style={{ fontSize: "9px", fontWeight: 700, letterSpacing: "0.5px",
+                         color: "var(--text-faint)", textTransform: "uppercase",
+                         marginRight: "4px" }}>
+            Change over
+          </span>
           {BOARD_PERIODS.map(p => (
             <button key={p} onClick={() => setBoardPeriod(p)}
               title={p === "today" ? "Move against the previous close, live" : `Move over the last ${p}`}
@@ -1483,13 +1488,20 @@ export default function App() {
               {p}
             </button>
           ))}
+
         </div>
 
-        {board.length === 0
-          ? <span style={{ fontSize: "10px", color: "var(--text-faint)", padding: "6px 10px" }}>
-              Loading market board…
-            </span>
-          : board.map(renderBoardTile)}
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(132px, 1fr))",
+          gap: "8px",
+        }}>
+          {board.length === 0
+            ? <span style={{ fontSize: "10px", color: "var(--text-faint)", padding: "6px 10px" }}>
+                Loading market board…
+              </span>
+            : board.map(renderBoardTile)}
+        </div>
       </div>
 
       {/* Toast Alert */}
