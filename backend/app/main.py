@@ -962,6 +962,31 @@ def toggle_holding(watchlist_id: int, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/market/board")
+def get_index_board(period: str = Query("today"),
+                    feed: BaseMarketFeed = Depends(get_active_feed)):
+    """
+    The index, sector and commodity strip.
+
+    `today` gives the live move against the previous close. Any other period —
+    5d, 10d, 15d, 1m, 3m, 6m, 12m, 3y, 5y — is measured from daily closes, so
+    the same board answers "what is it doing now" and "what has it done since
+    March" without changing shape.
+    """
+    from app.services.index_board import PERIODS, live_board, period_board
+    try:
+        if period == "today":
+            rows = live_board(feed)
+        else:
+            rows = period_board(feed, period)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Index board failed: {e}")
+        return {"period": period, "periods": ["today"] + list(PERIODS), "rows": [], "error": str(e)[:200]}
+    return {"period": period, "periods": ["today"] + list(PERIODS), "rows": rows, "error": ""}
+
+
 @app.get("/api/market/indices")
 def get_indices(db: Session = Depends(get_db), feed: BaseMarketFeed = Depends(get_active_feed)):
     """Fetch live quotes for Nifty 50, Sensex, and major sectoral indices."""

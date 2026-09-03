@@ -20,6 +20,26 @@ import { Chart } from "./components/Chart";
 import { IntelligenceDashboard } from "./components/IntelligenceDashboard";
 import { TradingDashboard } from "./components/TradingDashboard";
 
+/**
+ * Is it inside NSE trading hours right now? Mon-Fri, 09:00 to 15:35 IST.
+ *
+ * At module scope because more than one refresh loop asks. Returns true when
+ * the clock cannot be read: refreshing needlessly is cheaper than a dashboard
+ * that silently stops updating.
+ */
+function checkIsMarketHours(): boolean {
+  try {
+    const istStr = new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" });
+    const ist = new Date(istStr);
+    const day = ist.getDay();
+    if (day === 0 || day === 6) return false;
+    const mins = ist.getHours() * 60 + ist.getMinutes();
+    return mins >= 540 && mins <= 935;
+  } catch {
+    return true;
+  }
+}
+
 const API_BASE = import.meta.env.VITE_API_BASE || (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" ? "http://localhost:8000" : "");
 
 interface AnalystRecommendation {
@@ -416,6 +436,18 @@ export default function App() {
   });
   const [watchlistPeriod, setWatchlistPeriod] = useState<string>("today");
 
+  interface BoardRow {
+    name: string; key: string; group: "index" | "sector" | "commodity";
+    last_price: number | null; prev_close: number | null;
+    change: number | null; pct_change: number | null;
+    period?: string; from_date?: string | null; truncated?: boolean;
+  }
+  const [board, setBoard] = useState<BoardRow[]>([]);
+  const [boardPeriod, setBoardPeriod] = useState<string>("today");
+  const boardPeriodRef = useRef<string>("today");
+  useEffect(() => { boardPeriodRef.current = boardPeriod; }, [boardPeriod]);
+  const BOARD_PERIODS = ["today", "5d", "10d", "15d", "1m", "3m", "6m", "12m", "3y", "5y"];
+
   // Movers lists
   const [gainers, setGainers] = useState<MoverItem[]>([]);
   const [losers, setLosers] = useState<MoverItem[]>([]);
@@ -514,21 +546,6 @@ export default function App() {
     fetchMovers("today");
     fetchIndices();
 
-    // Check if current IST time is within NSE market hours (Mon-Fri 9:00 AM to 3:35 PM IST)
-    const checkIsMarketHours = () => {
-      try {
-        const now = new Date();
-        const istStr = now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" });
-        const istDate = new Date(istStr);
-        const day = istDate.getDay(); // 0 = Sun, 6 = Sat
-        if (day === 0 || day === 6) return false;
-        const timeInMins = istDate.getHours() * 60 + istDate.getMinutes();
-        return timeInMins >= 540 && timeInMins <= 935; // 9:00 AM (540m) to 3:35 PM (935m)
-      } catch {
-        return true;
-      }
-    };
-
     // Auto-refresh quotes every 10 seconds during market hours. Each section can
     // be paused independently: Upstox meters quote requests per account, so a
     // table left polling in a background tab is quota the results panel cannot
@@ -573,6 +590,40 @@ export default function App() {
       console.error("Error fetching indices:", err);
     }
   };
+
+  /**
+   * The index, sector and commodity strip.
+   *
+   * Reads the backend's shared quote cache, so polling it costs no Upstox
+   * request however often it runs — the refresher upstream is what sets the
+   * rate. A period other than today comes off daily candles and does not move
+   * intraday, so it is fetched on change rather than on the tick.
+   */
+  const fetchBoard = async (period?: string) => {
+    const want = period ?? boardPeriodRef.current;
+    try {
+      const res = await fetch(`${API_BASE}/api/market/board?period=${want}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (boardPeriodRef.current === want) setBoard(data.rows || []);
+    } catch (err) {
+      console.error("Error fetching the index board:", err);
+    }
+  };
+
+  useEffect(() => { fetchBoard(boardPeriod); }, [boardPeriod]);
+
+  // Live only while a session is authorised and the market is open: the
+  // backend cache is ~3s fresh in hours, and there is nothing to refresh at
+  // that rate once trading has stopped.
+  useEffect(() => {
+    const t = setInterval(() => {
+      if (boardPeriodRef.current !== "today") return;
+      if (!authState.authenticated) return;
+      if (checkIsMarketHours()) fetchBoard("today");
+    }, 3000);
+    return () => clearInterval(t);
+  }, [authState.authenticated]);
 
   const handleToggleHolding = async (id: number, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -1248,41 +1299,50 @@ export default function App() {
     { label: "5Y", val: "5years" }
   ];
 
-  const renderHeaderIndex = (indexItem: IndexData) => {
-    const isUp = indexItem.pct_change >= 0;
+  const renderBoardTile = (row: BoardRow) => {
+    const pct = row.pct_change;
+    const tone = pct == null ? "var(--text-faint)"
+      : pct > 0 ? "var(--positive)" : pct < 0 ? "var(--negative)" : "var(--text-muted)";
+    const money = (v: number | null) =>
+      v == null ? "—" : v.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     return (
-      <div style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: "2px",
-        padding: "6px 10px",
-        backgroundColor: "rgba(22, 27, 36, 0.5)",
-        border: "1px solid rgba(255, 255, 255, 0.03)",
-        borderRadius: "8px",
-        minWidth: "115px",
-        transition: "all 0.15s ease"
-      }}>
-        <span style={{
-          fontSize: "9px",
-          fontWeight: "700",
-          color: "var(--text-faint)",
-          textTransform: "uppercase",
-          letterSpacing: "0.5px"
+      <div key={row.key} title={
+        row.period && row.period !== "today"
+          ? `${row.name}: ${money(row.prev_close)} on ${row.from_date || "the start of the period"} → ${money(row.last_price)}`
+          : `${row.name}: previous close ${money(row.prev_close)} → ${money(row.last_price)}`}
+        style={{
+          display: "flex", flexDirection: "column", gap: "1px",
+          padding: "6px 10px", borderRadius: "8px", minWidth: "132px",
+          backgroundColor: "rgba(22, 27, 36, 0.5)",
+          border: `1px solid ${row.group === "commodity" ? "rgba(224, 163, 62, 0.18)" : "rgba(255,255,255,0.03)"}`,
         }}>
-          {indexItem.name.replace("Nifty ", "").replace("BSE ", "")}
+        <span style={{
+          fontSize: "9px", fontWeight: 700, letterSpacing: "0.5px",
+          textTransform: "uppercase",
+          color: row.group === "commodity" ? "var(--warning)" : "var(--text-faint)",
+        }}>
+          {row.name}
+          {row.truncated && (
+            <span title="This contract has less history than the period asked for, so the change covers a shorter span."
+                  style={{ marginLeft: "4px", color: "var(--text-faint)" }}>*</span>
+          )}
         </span>
-        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: "4px" }}>
-          <span style={{ fontSize: "12px", fontWeight: "800", color: "var(--text-primary)" }}>
-            {indexItem.last_price.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+
+        <div style={{ display: "flex", alignItems: "baseline", gap: "6px" }}>
+          <span style={{ fontSize: "13px", fontWeight: 700, color: "var(--text-primary)",
+                         fontVariantNumeric: "tabular-nums" }}>
+            {money(row.last_price)}
           </span>
-          <span style={{
-            color: isUp ? "var(--positive)" : "var(--negative)",
-            fontSize: "9px",
-            fontWeight: "800"
-          }}>
-            {isUp ? "+" : ""}{indexItem.pct_change.toFixed(2)}%
+          <span style={{ fontSize: "10px", fontWeight: 700, color: tone,
+                         fontVariantNumeric: "tabular-nums" }}>
+            {pct == null ? "—" : `${pct > 0 ? "+" : ""}${pct.toFixed(2)}%`}
           </span>
         </div>
+
+        {/* Where it came from, so the percentage has a visible starting point. */}
+        <span style={{ fontSize: "9px", color: "var(--text-faint)", fontVariantNumeric: "tabular-nums" }}>
+          {money(row.prev_close)} <span style={{ opacity: 0.7 }}>→</span> {money(row.last_price)}
+        </span>
       </div>
     );
   };
@@ -1409,13 +1469,27 @@ export default function App() {
         borderBottom: "1px solid rgba(255, 255, 255, 0.05)",
         flexShrink: 0
       }}>
-        {renderHeaderIndex(indices.nifty)}
-        {renderHeaderIndex(indices.sensex)}
-        {indices.sectors && indices.sectors.map((sec, i) => (
-          <React.Fragment key={i}>
-            {renderHeaderIndex(sec)}
-          </React.Fragment>
-        ))}
+        <div style={{ display: "flex", gap: "3px", alignItems: "center", marginRight: "4px" }}>
+          {BOARD_PERIODS.map(p => (
+            <button key={p} onClick={() => setBoardPeriod(p)}
+              title={p === "today" ? "Move against the previous close, live" : `Move over the last ${p}`}
+              style={{
+                padding: "3px 7px", borderRadius: "5px", cursor: "pointer",
+                fontSize: "9px", fontWeight: 700, textTransform: "uppercase",
+                background: boardPeriod === p ? "var(--accent-bg)" : "transparent",
+                border: `1px solid ${boardPeriod === p ? "var(--accent-border)" : "rgba(255,255,255,0.06)"}`,
+                color: boardPeriod === p ? "var(--accent)" : "var(--text-faint)",
+              }}>
+              {p}
+            </button>
+          ))}
+        </div>
+
+        {board.length === 0
+          ? <span style={{ fontSize: "10px", color: "var(--text-faint)", padding: "6px 10px" }}>
+              Loading market board…
+            </span>
+          : board.map(renderBoardTile)}
       </div>
 
       {/* Toast Alert */}
