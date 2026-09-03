@@ -120,6 +120,12 @@ interface PendingResult {
   comparison?: DigestCompany["comparison"] | null;
   // The filed PDF read independently of the AI, with its confidence.
   extraction?: Extraction | null;
+  // The close recorded for this trade date, where one is on file. Live quotes
+  // are fetched for today only, so this is what a finished day can show.
+  stored_price?: {
+    last: number | null; prev_close: number | null;
+    change_pct: number | null; source: string | null;
+  } | null;
 }
 
 /**
@@ -420,12 +426,26 @@ function ResultQuoteStrip({ p, quote, signal, flash, live }: {
         </span>
       )}
 
-      {!hasQuote && (
+      {!hasQuote && p.stored_price?.last != null && (
+        <span title={`Recorded close for this day, from ${p.stored_price.source || "the price feed"}`}
+          style={{ fontSize: "10px", color: "var(--text-muted)", whiteSpace: "nowrap" }}>
+          close {rupees(p.stored_price.last)}
+          {p.stored_price.change_pct != null && (
+            <b style={{ marginLeft: "5px",
+                        color: p.stored_price.change_pct > 0 ? "var(--positive)"
+                          : p.stored_price.change_pct < 0 ? "var(--negative)" : "var(--text-muted)" }}>
+              {p.stored_price.change_pct > 0 ? "+" : ""}{p.stored_price.change_pct.toFixed(2)}%
+            </b>
+          )}
+        </span>
+      )}
+
+      {!hasQuote && p.stored_price?.last == null && (
         <span title={live === false
           ? "Live prices are fetched for the current day only. Every source reports the price now, and now against a baseline from an earlier day is not a move anyone made."
           : "No listing matched this symbol on either exchange, so there is no live quote to show"}
           style={{ fontSize: "10px", color: "var(--text-faint)", whiteSpace: "nowrap" }}>
-          {live === false ? "past date — prices not fetched" : "no live quote"}
+          {live === false ? "past date — no price on file" : "no live quote"}
         </span>
       )}
     </div>
@@ -1653,6 +1673,37 @@ export function TradingDashboard() {
    * allowance is spent, so pausing the rows you are not watching is what keeps
    * prices flowing on the ones you are.
    */
+  const [fetchingPrices, setFetchingPrices] = useState(false);
+
+  /**
+   * Fetch whatever price is still recoverable for the day being shown.
+   *
+   * On today that is a live quote, which also fills a baseline for any filing
+   * that landed without one. On a finished day it is that day's close: the
+   * baseline is gone and stays gone, because a price from a different moment
+   * in a field labelled "at result" would look exactly like data.
+   */
+  const handleFetchPrices = async () => {
+    setFetchingPrices(true);
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/trading/pending-results/fetch-prices?trade_date=${resultsDate}`,
+        { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.detail || "Could not fetch prices.");
+        return;
+      }
+      alert(data.message || "Done.");
+      await fetchData();
+    } catch (err) {
+      console.error("Price fetch failed:", err);
+      alert("Could not reach the server to fetch prices.");
+    } finally {
+      setFetchingPrices(false);
+    }
+  };
+
   const handleTogglePause = async (id: number) => {
     setActionLoading(prev => ({ ...prev, [`pause_${id}`]: true }));
     try {
@@ -2525,6 +2576,24 @@ export function TradingDashboard() {
               {/* The same rows as the panel, with the price baseline and the
                   move since the filing that the 08:00 digest cannot carry —
                   it runs before there are any prices. */}
+              <button
+                onClick={handleFetchPrices}
+                disabled={fetchingPrices}
+                title={isToday
+                  ? "Fetch a live price for any filing today that landed without one, and record today's price"
+                  : "Fetch this day's closing price. The price at the moment each filing landed was never recorded and cannot be recovered."}
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: "5px",
+                  padding: "6px 12px", borderRadius: "6px",
+                  background: "transparent", border: "1px solid var(--border-default)",
+                  color: fetchingPrices ? "var(--text-faint)" : "var(--text-secondary)",
+                  fontSize: "11px", fontWeight: 600,
+                  cursor: fetchingPrices ? "wait" : "pointer",
+                }}>
+                <RefreshCw size={11} className={fetchingPrices ? "spin" : undefined} />
+                {fetchingPrices ? "Fetching…" : "Fetch prices"}
+              </button>
+
               <a href={`${API_BASE}/api/trading/pending-results/pdf?trade_date=${resultsDate}`}
                  target="_blank" rel="noreferrer"
                  title="Export this day's decisions, with Screener figures and price movement"

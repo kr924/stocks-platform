@@ -776,6 +776,8 @@ def _serialize_pending(p: PendingResultOrder, ai_log: Optional[TradeAILog] = Non
         "paused": bool(getattr(p, "paused", False)),
         "extraction": (json.loads(p.extraction_json)
                        if getattr(p, "extraction_json", None) else None),
+        # Filled by the listing when a close is on file for this trade date.
+        "stored_price": None,
         "price_at_announcement": p.price_at_announcement,
         # Lifecycle: announced -> ingested -> alerted -> AI sent -> AI received
         "announced_at": p.event_time.isoformat() if p.event_time else None,
@@ -906,6 +908,25 @@ def list_pending_results(
             logs[log.id] = log
 
     serialized = [_serialize_pending(p, logs.get(p.ai_log_id), db) for p in pendings]
+
+    # The close recorded for this day, where one exists. Live quotes are only
+    # fetched for today, so without this a finished day has nothing to show
+    # even when its price is on file.
+    if pendings:
+        try:
+            from app.database import DailyPrice
+            syms = {p.symbol.upper() for p in pendings if p.symbol}
+            stored = {d.symbol: d for d in db.query(DailyPrice).filter(
+                DailyPrice.trade_date == day, DailyPrice.symbol.in_(syms)).all()} if syms else {}
+            for item in serialized:
+                d = stored.get((item.get("symbol") or "").upper())
+                if d:
+                    item["stored_price"] = {
+                        "last": d.last_price, "prev_close": d.prev_close,
+                        "change_pct": d.change_pct, "source": d.source,
+                    }
+        except Exception as e:
+            logger.debug(f"Stored day prices unavailable: {e}")
 
     # Screener figures, so the panel carries what the digest used to show
     # separately. Anything not yet on the rows is fetched behind the request.
@@ -1106,6 +1127,27 @@ def reanalyse_pending_result(pending_id: int, body: ReanalyseRequest,
     db.commit()
     return {"status": "success", "model": (body.model or "").strip() or "configured default",
             "pending": _serialize_pending(pending, None, db)}
+
+
+@router.post("/pending-results/fetch-prices")
+def fetch_prices_for_day(trade_date: Optional[str] = Query(None),
+                         db: Session = Depends(get_db)):
+    """
+    Fetch whatever price is still recoverable for one day's prompts.
+
+    On today that is the live quote: it fills a baseline for any filing that
+    landed without one, and records the day's price. On a finished day it is
+    that day's actual close from the daily candles — the baseline is gone, and
+    is left alone rather than filled with a number from a different moment.
+    """
+    from datetime import timedelta as _td, timezone as _tz
+    ist = _tz(_td(hours=5, minutes=30))
+    day = trade_date or datetime.now(ist).strftime("%Y-%m-%d")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+        raise HTTPException(status_code=400, detail="Date must be YYYY-MM-DD")
+
+    from app.services.price_backfill import backfill
+    return backfill(db, day)
 
 
 @router.get("/pending-results/pdf")
