@@ -278,6 +278,38 @@ class ScreenerQuarter(Base):
     )
 
 
+class DailyPrice(Base):
+    """
+    One symbol's price for one trading day, as it stood when we looked.
+
+    Recorded so a past day is not a row of blanks. Every quote source reports
+    the price *now*, so a day that has closed can only be described by what was
+    captured while it was open — nothing fetched tomorrow can answer for it.
+
+    Written insert-if-absent. The first reading of a settled day is the one
+    worth keeping; a later fetch is a different day's price wearing the same
+    date.
+
+    `source` names the tape, because the two are not interchangeable: Upstox is
+    the account that trades, the public feed is a free quote used when Upstox
+    has no session. A "since result" measured against a baseline from one and a
+    price from the other is worth being able to spot afterwards.
+    """
+    __tablename__ = "daily_prices"
+    symbol = Column(String(50), primary_key=True)
+    trade_date = Column(String(20), primary_key=True)   # YYYY-MM-DD, IST
+
+    last_price = Column(Float, nullable=True)
+    prev_close = Column(Float, nullable=True)
+    change_pct = Column(Float, nullable=True)
+    source = Column(String(20), nullable=True)          # "upstox" | "public feed"
+    fetched_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    __table_args__ = (
+        Index("ix_daily_prices_symbol", "symbol"),
+    )
+
+
 class AIAlert(Base):
     """AI-generated alerts for high-impact market events."""
     __tablename__ = "ai_alerts"

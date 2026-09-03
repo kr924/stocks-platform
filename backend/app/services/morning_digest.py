@@ -451,32 +451,116 @@ def attach_prices(rows: List[dict]) -> int:
     if not keys:
         return 0
 
+    quotes = {}
     try:
         from app.main import get_active_feed
         quotes = get_active_feed().get_quotes(keys) or {}
     except Exception as e:
-        logger.warning(f"[DIGEST] price lookup unavailable, sending without prices: {e}")
-        return 0
+        logger.warning(f"[DIGEST] Upstox unavailable ({e}); falling back to the public feed.")
 
-    priced = 0
+    # Upstox tokens expire daily and 08:00 IST sits after that expiry, so the
+    # run that most needs prices is the one least likely to have a session.
+    # Without a fallback the digest simply omitted them and said nothing about
+    # why. Public quotes are a free source of the previous session's close,
+    # which is the number this run is describing anyway.
+    public = {}
+    missing = [r["pending"].symbol for r in rows
+               if not (quotes.get((r["pending"].instrument_key or "").replace(":", "|")) or {}).get("last_price")]
+    if missing:
+        try:
+            from app.services.public_quotes import fetch_day_changes
+            public = fetch_day_changes(missing)
+        except Exception as e:
+            logger.warning(f"[DIGEST] public quote lookup failed: {e}")
+
+    priced, by_source = 0, {}
     for r in rows:
         p = r["pending"]
         base = p.price_at_announcement
         q = quotes.get((p.instrument_key or "").replace(":", "|")) or {}
         last = q.get("last_price")
         prev = (q.get("ohlc") or {}).get("close")
+        source = "Upstox" if last else None
+
+        if not last:
+            pq = public.get((p.symbol or "").upper()) or {}
+            last = pq.get("last_price")
+            prev = pq.get("prev_close")
+            source = "public feed" if last else None
+
+        # "Since result" against a public price is a baseline from one tape and
+        # a close from another. On a settled close of the same listing the two
+        # sit within a tick, and a figure carrying a named source beats a blank
+        # column — but the source is recorded so a reader can see which it was.
         r["price"] = {
             "at_announcement": base,
             "last": last,
             "since_pct": (round((last - base) / base * 100, 2) if base and last else None),
             "day_pct": (round((last - prev) / prev * 100, 2) if last and prev else None),
-            "day_source": "Upstox" if last else None,
+            "day_source": source,
+            "mixed_source": bool(base and last and source == "public feed"),
             "upstox_connected": bool(quotes),
         }
+        if last:
+            by_source[source] = by_source.get(source, 0) + 1
         if r["price"]["since_pct"] is not None:
             priced += 1
-    logger.info(f"[DIGEST] priced {priced}/{len(rows)} rows from Upstox.")
+
+    _store_daily_prices(rows)
+    logger.info(f"[DIGEST] priced {priced}/{len(rows)} rows "
+                f"({', '.join(f'{k}: {n}' for k, n in sorted(by_source.items())) or 'none'}).")
     return priced
+
+
+def _store_daily_prices(rows: List[dict]) -> int:
+    """
+    Keep each day's price, because tomorrow cannot answer for today.
+
+    Every quote source reports the price *now*, so once a day has closed the
+    only description of it is what was captured while it was open. Without this
+    a past date in the panel is a row of blanks for good.
+
+    Insert-if-absent on (symbol, date): the first reading of a settled day is
+    the one worth keeping. Never raises — this is bookkeeping behind a digest
+    that has already been built.
+    """
+    try:
+        from app.database import DailyPrice, SessionLocal
+    except Exception:
+        return 0
+
+    db = SessionLocal()
+    try:
+        stored = 0
+        seen = set()
+        for r in rows:
+            p, price = r["pending"], (r.get("price") or {})
+            sym = (p.symbol or "").strip().upper()
+            day = p.trade_date or datetime.now(IST).strftime("%Y-%m-%d")
+            if not sym or not price.get("last") or (sym, day) in seen:
+                continue
+            seen.add((sym, day))
+            exists = db.query(DailyPrice).filter(
+                DailyPrice.symbol == sym, DailyPrice.trade_date == day).first()
+            if exists:
+                continue
+            db.add(DailyPrice(
+                symbol=sym, trade_date=day,
+                last_price=price.get("last"), prev_close=None,
+                change_pct=price.get("day_pct"),
+                source=(price.get("day_source") or "").lower() or None,
+            ))
+            stored += 1
+        if stored:
+            db.commit()
+            logger.info(f"[DIGEST] stored {stored} daily price(s).")
+        return stored
+    except Exception as e:
+        db.rollback()
+        logger.warning(f"Could not store daily prices: {e}")
+        return 0
+    finally:
+        db.close()
 
 
 def build_and_publish(db: Session, for_date: Optional[str] = None) -> dict:

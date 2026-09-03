@@ -105,15 +105,15 @@ def _price_lines(r: dict, st: dict) -> list:
     """
     The two price figures, and where each came from.
 
-    "Since result" is Upstox only: it is measured against a baseline Upstox
-    captured when the filing landed, and mixing venues would report a move no
-    single tape ever showed. With no Upstox session it is simply absent, rather
-    than recomputed from a source that cannot be compared with the baseline.
+    Both fall back to a public feed when Upstox has no session — the day's
+    change because it is public information anyway, and "since result" because
+    a figure carrying a named source beats an empty column. Its baseline was
+    captured from Upstox, so a public comparison price means the two figures
+    come off different tapes; on a settled close of the same listing they sit
+    within a tick, and the mixing is marked rather than hidden.
 
-    The day's change is public information, so it falls back to a public feed
-    once the market has closed or when there is no Upstox session at all. Which
-    source answered is printed, because a reader comparing this against their
-    terminal deserves to know which tape it came off.
+    Which source answered is printed either way, because a reader checking
+    these against their own terminal should know which tape they came off.
     """
     price = r.get("price") or {}
     if not (price.get("at_announcement") or price.get("last") or price.get("day_pct") is not None):
@@ -135,9 +135,15 @@ def _price_lines(r: dict, st: dict) -> list:
 
     since = price.get("since_pct")
     if since is None and not price.get("upstox_connected"):
-        since_txt = '<font color="#8b95a6">NA (Upstox not connected)</font>'
+        since_txt = '<font color="#8b95a6">NA (no price source)</font>'
     else:
         since_txt = pct(since)
+        # The baseline came off Upstox. When the comparison price came off the
+        # public feed instead, the two figures are from different tapes — close
+        # enough on a settled price of the same listing to be worth showing,
+        # but not something to present as one measurement.
+        if price.get("mixed_source"):
+            since_txt += ' <font color="#8b95a6" size="6">(vs public close)</font>' 
 
     day_txt = pct(price.get("day_pct"))
     if price.get("day_source"):
