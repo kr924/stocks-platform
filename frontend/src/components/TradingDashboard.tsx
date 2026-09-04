@@ -2497,821 +2497,824 @@ export function TradingDashboard() {
         </div>
       </div>
 
-      {/* FINANCIAL RESULT ORDER PROMPTS — results that arrived on unarmed stocks */}
-      {pendingResults.length > 0 && (
-        <div style={{
-          background: "var(--warning-bg)",
-          border: "1px solid var(--warning-border)",
-          borderRadius: "14px",
-          padding: "18px",
-          marginBottom: "20px"
-        }}>
-          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "12px" }}>
-            <h3 style={{ fontSize: "15px", fontWeight: 700, color: "var(--warning)", display: "flex", alignItems: "center", gap: "8px", margin: 0 }}>
-              <AlertTriangle size={18} /> Order Decisions
-              {" "}({visiblePendingResults.length}{pendingSearch.trim() ? ` of ${categoryCounts[pendingCategory]}` : ""})
-            </h3>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <input
-                value={pendingSearch}
-                onChange={e => setPendingSearch(e.target.value)}
-                placeholder="Search symbol, company, filing or ref…"
-                style={{
-                  padding: "6px 10px", minWidth: "240px", fontSize: "12px",
-                  background: "rgba(20, 23, 28,0.8)", border: "1px solid rgba(216, 174, 100, 0.18)",
-                  borderRadius: "6px", color: "var(--text-primary)",
-                }}
-              />
-              {pendingSearch && (
-                <button onClick={() => setPendingSearch("")}
-                  style={{ padding: "6px 10px", background: "transparent", border: "1px solid rgba(160, 168, 180, 0.18)", borderRadius: "6px", color: "var(--text-muted)", fontSize: "11px", cursor: "pointer" }}>
-                  Clear
-                </button>
-              )}
-
-              <button
-                onClick={enableAlerts}
-                title={alertsOn
-                  ? "Desktop notification and a short tone when a result lands. Click to turn off."
-                  : "Notify me when a result lands (asks for browser permission)"}
-                style={{
-                  display: "inline-flex", alignItems: "center", gap: "5px",
-                  padding: "6px 10px", borderRadius: "6px", cursor: "pointer",
-                  fontSize: "11px", fontWeight: 700,
-                  background: alertsOn ? "rgba(91, 190, 147, 0.09)" : "transparent",
-                  border: `1px solid ${alertsOn ? "rgba(91, 190, 147, 0.22)" : "rgba(160, 168, 180, 0.18)"}`,
-                  color: alertsOn ? "var(--positive)" : "var(--text-muted)",
-                }}>
-                {alertsOn ? <Bell size={12} /> : <BellOff size={12} />}
-                {alertsOn ? "ALERTS ON" : "Alerts off"}
+      {/* FINANCIAL RESULT ORDER PROMPTS — results that arrived on unarmed stocks.
+          Rendered unconditionally. It used to be gated on
+          `pendingResults.length > 0`, which hid the panel on any day with no
+          filings — and the date picker that reaches the previous 30 days is
+          *inside* the panel, so an empty day left no way to navigate off it.
+          The per-category empty state below already says when a day is empty. */}
+      <div style={{
+        background: "var(--warning-bg)",
+        border: "1px solid var(--warning-border)",
+        borderRadius: "14px",
+        padding: "18px",
+        marginBottom: "20px"
+      }}>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "12px" }}>
+          <h3 style={{ fontSize: "15px", fontWeight: 700, color: "var(--warning)", display: "flex", alignItems: "center", gap: "8px", margin: 0 }}>
+            <AlertTriangle size={18} /> Order Decisions
+            {" "}({visiblePendingResults.length}{pendingSearch.trim() ? ` of ${categoryCounts[pendingCategory]}` : ""})
+          </h3>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <input
+              value={pendingSearch}
+              onChange={e => setPendingSearch(e.target.value)}
+              placeholder="Search symbol, company, filing or ref…"
+              style={{
+                padding: "6px 10px", minWidth: "240px", fontSize: "12px",
+                background: "rgba(20, 23, 28,0.8)", border: "1px solid rgba(216, 174, 100, 0.18)",
+                borderRadius: "6px", color: "var(--text-primary)",
+              }}
+            />
+            {pendingSearch && (
+              <button onClick={() => setPendingSearch("")}
+                style={{ padding: "6px 10px", background: "transparent", border: "1px solid rgba(160, 168, 180, 0.18)", borderRadius: "6px", color: "var(--text-muted)", fontSize: "11px", cursor: "pointer" }}>
+                Clear
               </button>
-
-              <label title="Cash you have available. Each card shows what its order costs and what would be left."
-                style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "11px", color: "var(--text-muted)" }}>
-                ₹
-                <input
-                  type="number"
-                  min={0}
-                  value={availableFunds}
-                  onChange={e => setAvailableFunds(e.target.value)}
-                  placeholder="funds"
-                  style={{
-                    width: "96px", padding: "6px 8px", fontSize: "12px",
-                    background: "rgba(20, 23, 28,0.8)", border: "1px solid rgba(160, 168, 180, 0.18)",
-                    borderRadius: "6px", color: "var(--text-primary)",
-                  }}
-                />
-              </label>
-
-              <input
-                type="date"
-                value={resultsDate}
-                max={todayStr}
-                min={oldestStr}
-                onChange={e => setResultsDate(e.target.value || todayStr)}
-                title="Trade date to show. Only today carries live prices; earlier days are kept for 30 days."
-                style={{
-                  padding: "6px 10px", fontSize: "12px",
-                  background: "rgba(20, 23, 28,0.8)",
-                  border: `1px solid ${isToday ? "rgba(216, 174, 100, 0.18)" : "var(--accent-border)"}`,
-                  borderRadius: "6px", color: "var(--text-primary)",
-                }}
-              />
-              {!isToday && (
-                <button onClick={() => setResultsDate(todayStr)}
-                  style={{ padding: "6px 10px", background: "var(--accent-bg)", border: "1px solid var(--accent-border)", borderRadius: "6px", color: "var(--accent)", fontSize: "11px", fontWeight: 700, cursor: "pointer" }}>
-                  Today
-                </button>
-              )}
-
-              {/* The same rows as the panel, with the price baseline and the
-                  move since the filing that the 08:00 digest cannot carry —
-                  it runs before there are any prices. */}
-              <button
-                onClick={handleFetchPrices}
-                disabled={fetchingPrices}
-                title={isToday
-                  ? "Fetch a live price for any filing today that landed without one, and record today's price"
-                  : "Fetch this day's closing price. The price at the moment each filing landed was never recorded and cannot be recovered."}
-                style={{
-                  display: "inline-flex", alignItems: "center", gap: "5px",
-                  padding: "6px 12px", borderRadius: "6px",
-                  background: "transparent", border: "1px solid var(--border-default)",
-                  color: fetchingPrices ? "var(--text-faint)" : "var(--text-secondary)",
-                  fontSize: "11px", fontWeight: 600,
-                  cursor: fetchingPrices ? "wait" : "pointer",
-                }}>
-                <RefreshCw size={11} className={fetchingPrices ? "spin" : undefined} />
-                {fetchingPrices ? "Fetching…" : "Fetch prices"}
-              </button>
-
-              <a href={`${API_BASE}/api/trading/pending-results/pdf?trade_date=${resultsDate}`}
-                 target="_blank" rel="noreferrer"
-                 title="Export this day's decisions, with Screener figures and price movement"
-                 style={{ padding: "6px 12px", background: "transparent", border: "1px solid var(--border-default)", borderRadius: "6px", color: "var(--text-secondary)", fontSize: "11px", fontWeight: 600, textDecoration: "none" }}>
-                PDF
-              </a>
-
-              <span style={{
-                fontSize: "11px", padding: "4px 10px", borderRadius: "20px", whiteSpace: "nowrap",
-                color: isToday ? "var(--warning)" : "var(--text-muted)",
-                background: isToday ? "rgba(216, 174, 100, 0.09)" : "rgba(160, 168, 180, 0.09)",
-              }}>
-                {isToday ? "Today · not armed" : "Past date · prices not fetched"}
-              </span>
-            </div>
-          </div>
-
-          {/* One tab per kind of filing. Results are the only ones with figures
-              to read, so they are the only ones carrying a Screener table or an
-              AI section; an order win has no quarter in it. Counts are of the
-              whole day, so an empty tab reads as empty rather than missing. */}
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "12px" }}>
-            {(["results", "order", "merger", "other"] as PromptCategory[]).map(cat => {
-              const on = pendingCategory === cat;
-              const n = categoryCounts[cat];
-              return (
-                <button key={cat} onClick={() => setPendingCategory(cat)}
-                  style={{
-                    padding: "6px 12px", borderRadius: "6px", cursor: "pointer",
-                    fontSize: "11px", fontWeight: 700, letterSpacing: "0.3px",
-                    background: on ? "rgba(216, 174, 100, 0.11)" : "transparent",
-                    border: `1px solid ${on ? "rgba(216, 174, 100, 0.34)" : "rgba(160, 168, 180, 0.16)"}`,
-                    color: on ? "var(--warning)" : n ? "var(--text-secondary)" : "var(--text-faint)",
-                  }}>
-                  {CATEGORY_LABEL[cat]}
-                  <span style={{ marginLeft: "6px", opacity: 0.8, fontWeight: 600 }}>{n}</span>
-                </button>
-              );
-            })}
-            {pendingBuilding > 0 && pendingCategory === "results" && (
-              <span title="Screener is fetched one company at a time to stay inside its rate limit. Refresh in a few minutes."
-                style={{ fontSize: "11px", color: "var(--warning)", background: "var(--warning-bg)", padding: "5px 10px", borderRadius: "20px", alignSelf: "center" }}>
-                Screener figures still arriving — {pendingBuilding} to go
-              </span>
             )}
-          </div>
 
-          {/* Hour-by-hour overview. Click a symbol to filter the list to it. */}
-          {resultsByHour.length > 0 && (
-            <div style={{
-              marginBottom: "14px", padding: "10px 12px", borderRadius: "10px",
-              background: "rgba(20, 23, 28, 0.45)", border: "1px solid rgba(255,255,255,0.06)",
-              maxHeight: "190px", overflowY: "auto",
+            <button
+              onClick={enableAlerts}
+              title={alertsOn
+                ? "Desktop notification and a short tone when a result lands. Click to turn off."
+                : "Notify me when a result lands (asks for browser permission)"}
+              style={{
+                display: "inline-flex", alignItems: "center", gap: "5px",
+                padding: "6px 10px", borderRadius: "6px", cursor: "pointer",
+                fontSize: "11px", fontWeight: 700,
+                background: alertsOn ? "rgba(91, 190, 147, 0.09)" : "transparent",
+                border: `1px solid ${alertsOn ? "rgba(91, 190, 147, 0.22)" : "rgba(160, 168, 180, 0.18)"}`,
+                color: alertsOn ? "var(--positive)" : "var(--text-muted)",
+              }}>
+              {alertsOn ? <Bell size={12} /> : <BellOff size={12} />}
+              {alertsOn ? "ALERTS ON" : "Alerts off"}
+            </button>
+
+            <label title="Cash you have available. Each card shows what its order costs and what would be left."
+              style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "11px", color: "var(--text-muted)" }}>
+              ₹
+              <input
+                type="number"
+                min={0}
+                value={availableFunds}
+                onChange={e => setAvailableFunds(e.target.value)}
+                placeholder="funds"
+                style={{
+                  width: "96px", padding: "6px 8px", fontSize: "12px",
+                  background: "rgba(20, 23, 28,0.8)", border: "1px solid rgba(160, 168, 180, 0.18)",
+                  borderRadius: "6px", color: "var(--text-primary)",
+                }}
+              />
+            </label>
+
+            <input
+              type="date"
+              value={resultsDate}
+              max={todayStr}
+              min={oldestStr}
+              onChange={e => setResultsDate(e.target.value || todayStr)}
+              title="Trade date to show. Only today carries live prices; earlier days are kept for 30 days."
+              style={{
+                padding: "6px 10px", fontSize: "12px",
+                background: "rgba(20, 23, 28,0.8)",
+                border: `1px solid ${isToday ? "rgba(216, 174, 100, 0.18)" : "var(--accent-border)"}`,
+                borderRadius: "6px", color: "var(--text-primary)",
+              }}
+            />
+            {!isToday && (
+              <button onClick={() => setResultsDate(todayStr)}
+                style={{ padding: "6px 10px", background: "var(--accent-bg)", border: "1px solid var(--accent-border)", borderRadius: "6px", color: "var(--accent)", fontSize: "11px", fontWeight: 700, cursor: "pointer" }}>
+                Today
+              </button>
+            )}
+
+            {/* The same rows as the panel, with the price baseline and the
+                move since the filing that the 08:00 digest cannot carry —
+                it runs before there are any prices. */}
+            <button
+              onClick={handleFetchPrices}
+              disabled={fetchingPrices}
+              title={isToday
+                ? "Fetch a live price for any filing today that landed without one, and record today's price"
+                : "Fetch this day's closing price. The price at the moment each filing landed was never recorded and cannot be recovered."}
+              style={{
+                display: "inline-flex", alignItems: "center", gap: "5px",
+                padding: "6px 12px", borderRadius: "6px",
+                background: "transparent", border: "1px solid var(--border-default)",
+                color: fetchingPrices ? "var(--text-faint)" : "var(--text-secondary)",
+                fontSize: "11px", fontWeight: 600,
+                cursor: fetchingPrices ? "wait" : "pointer",
+              }}>
+              <RefreshCw size={11} className={fetchingPrices ? "spin" : undefined} />
+              {fetchingPrices ? "Fetching…" : "Fetch prices"}
+            </button>
+
+            <a href={`${API_BASE}/api/trading/pending-results/pdf?trade_date=${resultsDate}`}
+               target="_blank" rel="noreferrer"
+               title="Export this day's decisions, with Screener figures and price movement"
+               style={{ padding: "6px 12px", background: "transparent", border: "1px solid var(--border-default)", borderRadius: "6px", color: "var(--text-secondary)", fontSize: "11px", fontWeight: 600, textDecoration: "none" }}>
+              PDF
+            </a>
+
+            <span style={{
+              fontSize: "11px", padding: "4px 10px", borderRadius: "20px", whiteSpace: "nowrap",
+              color: isToday ? "var(--warning)" : "var(--text-muted)",
+              background: isToday ? "rgba(216, 174, 100, 0.09)" : "rgba(160, 168, 180, 0.09)",
             }}>
-              {resultsByHour.map(bucket => (
-                <div key={bucket.hour} style={{ display: "flex", gap: "10px", alignItems: "flex-start", padding: "4px 0" }}>
-                  <span style={{
-                    minWidth: "96px", fontSize: "11px", fontWeight: 700, color: "var(--text-secondary)",
-                    fontVariantNumeric: "tabular-nums", paddingTop: "3px", whiteSpace: "nowrap",
-                  }}>
-                    {bucket.hour}
-                    <span style={{ color: "var(--text-faint)", fontWeight: 500 }}> · {bucket.items.length}</span>
-                    {bucket.up > 0 && <span style={{ color: "var(--positive)", fontWeight: 700 }}> ↑{bucket.up}</span>}
-                    {bucket.down > 0 && <span style={{ color: "var(--negative)", fontWeight: 700 }}> ↓{bucket.down}</span>}
-                  </span>
-                  <span style={{ display: "flex", flexWrap: "wrap", gap: "4px", flex: 1 }}>
-                    {bucket.items.map(item => {
-                      const tone = item.since == null ? "faint" : item.since > 0 ? "up" : item.since < 0 ? "down" : "flat";
-                      const color = tone === "up" ? "var(--positive)"
-                        : tone === "down" ? "var(--negative)" : "var(--text-faint)";
-                      const bg = tone === "up" ? "rgba(91, 190, 147, 0.09)"
-                        : tone === "down" ? "rgba(226, 141, 131, 0.09)" : "rgba(160, 168, 180, 0.08)";
-                      const selected = pendingSearch.trim().toLowerCase() === item.symbol.toLowerCase();
-                      return (
-                        <button
-                          key={item.symbol}
-                          onClick={() => setPendingSearch(selected ? "" : item.symbol)}
-                          title={`${item.symbol}\n`
-                            + `Since result: ${item.since == null ? "not recorded (no baseline or no live quote)" : `${item.since > 0 ? "+" : ""}${item.since.toFixed(2)}%`}\n`
-                            + `Day: ${item.day == null ? "no quote" : `${item.day > 0 ? "+" : ""}${item.day.toFixed(2)}%`}`}
-                          style={{
-                            display: "inline-flex", alignItems: "baseline", gap: "4px",
-                            padding: "2px 7px", borderRadius: "5px", cursor: "pointer",
-                            background: bg, color,
-                            border: `1px solid ${selected ? color : "transparent"}`,
-                            fontSize: "10px", fontWeight: 700, fontVariantNumeric: "tabular-nums",
-                          }}>
-                          {item.symbol}
-                          <span style={{ fontSize: "9px", opacity: 0.9 }}>
-                            {item.since == null ? "—" : `${item.since > 0 ? "+" : ""}${item.since.toFixed(1)}%`}
-                          </span>
-                          {/* Day change, dimmed: the move since the result is the
-                              decision, the day's change is the context it sits in. */}
-                          <span style={{
-                            fontSize: "9px", fontWeight: 600, opacity: 0.75,
-                            color: item.day == null ? "var(--text-faint)"
-                              : item.day > 0 ? "var(--positive)" : item.day < 0 ? "var(--negative)" : "var(--text-faint)",
-                          }}>
-                            {item.day == null ? "· —" : `· ${item.day > 0 ? "+" : ""}${item.day.toFixed(1)}%d`}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </span>
-                </div>
-              ))}
+              {isToday ? "Today · not armed" : "Past date · prices not fetched"}
+            </span>
+          </div>
+        </div>
+
+        {/* One tab per kind of filing. Results are the only ones with figures
+            to read, so they are the only ones carrying a Screener table or an
+            AI section; an order win has no quarter in it. Counts are of the
+            whole day, so an empty tab reads as empty rather than missing. */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "12px" }}>
+          {(["results", "order", "merger", "other"] as PromptCategory[]).map(cat => {
+            const on = pendingCategory === cat;
+            const n = categoryCounts[cat];
+            return (
+              <button key={cat} onClick={() => setPendingCategory(cat)}
+                style={{
+                  padding: "6px 12px", borderRadius: "6px", cursor: "pointer",
+                  fontSize: "11px", fontWeight: 700, letterSpacing: "0.3px",
+                  background: on ? "rgba(216, 174, 100, 0.11)" : "transparent",
+                  border: `1px solid ${on ? "rgba(216, 174, 100, 0.34)" : "rgba(160, 168, 180, 0.16)"}`,
+                  color: on ? "var(--warning)" : n ? "var(--text-secondary)" : "var(--text-faint)",
+                }}>
+                {CATEGORY_LABEL[cat]}
+                <span style={{ marginLeft: "6px", opacity: 0.8, fontWeight: 600 }}>{n}</span>
+              </button>
+            );
+          })}
+          {pendingBuilding > 0 && pendingCategory === "results" && (
+            <span title="Screener is fetched one company at a time to stay inside its rate limit. Refresh in a few minutes."
+              style={{ fontSize: "11px", color: "var(--warning)", background: "var(--warning-bg)", padding: "5px 10px", borderRadius: "20px", alignSelf: "center" }}>
+              Screener figures still arriving — {pendingBuilding} to go
+            </span>
+          )}
+        </div>
+
+        {/* Hour-by-hour overview. Click a symbol to filter the list to it. */}
+        {resultsByHour.length > 0 && (
+          <div style={{
+            marginBottom: "14px", padding: "10px 12px", borderRadius: "10px",
+            background: "rgba(20, 23, 28, 0.45)", border: "1px solid rgba(255,255,255,0.06)",
+            maxHeight: "190px", overflowY: "auto",
+          }}>
+            {resultsByHour.map(bucket => (
+              <div key={bucket.hour} style={{ display: "flex", gap: "10px", alignItems: "flex-start", padding: "4px 0" }}>
+                <span style={{
+                  minWidth: "96px", fontSize: "11px", fontWeight: 700, color: "var(--text-secondary)",
+                  fontVariantNumeric: "tabular-nums", paddingTop: "3px", whiteSpace: "nowrap",
+                }}>
+                  {bucket.hour}
+                  <span style={{ color: "var(--text-faint)", fontWeight: 500 }}> · {bucket.items.length}</span>
+                  {bucket.up > 0 && <span style={{ color: "var(--positive)", fontWeight: 700 }}> ↑{bucket.up}</span>}
+                  {bucket.down > 0 && <span style={{ color: "var(--negative)", fontWeight: 700 }}> ↓{bucket.down}</span>}
+                </span>
+                <span style={{ display: "flex", flexWrap: "wrap", gap: "4px", flex: 1 }}>
+                  {bucket.items.map(item => {
+                    const tone = item.since == null ? "faint" : item.since > 0 ? "up" : item.since < 0 ? "down" : "flat";
+                    const color = tone === "up" ? "var(--positive)"
+                      : tone === "down" ? "var(--negative)" : "var(--text-faint)";
+                    const bg = tone === "up" ? "rgba(91, 190, 147, 0.09)"
+                      : tone === "down" ? "rgba(226, 141, 131, 0.09)" : "rgba(160, 168, 180, 0.08)";
+                    const selected = pendingSearch.trim().toLowerCase() === item.symbol.toLowerCase();
+                    return (
+                      <button
+                        key={item.symbol}
+                        onClick={() => setPendingSearch(selected ? "" : item.symbol)}
+                        title={`${item.symbol}\n`
+                          + `Since result: ${item.since == null ? "not recorded (no baseline or no live quote)" : `${item.since > 0 ? "+" : ""}${item.since.toFixed(2)}%`}\n`
+                          + `Day: ${item.day == null ? "no quote" : `${item.day > 0 ? "+" : ""}${item.day.toFixed(2)}%`}`}
+                        style={{
+                          display: "inline-flex", alignItems: "baseline", gap: "4px",
+                          padding: "2px 7px", borderRadius: "5px", cursor: "pointer",
+                          background: bg, color,
+                          border: `1px solid ${selected ? color : "transparent"}`,
+                          fontSize: "10px", fontWeight: 700, fontVariantNumeric: "tabular-nums",
+                        }}>
+                        {item.symbol}
+                        <span style={{ fontSize: "9px", opacity: 0.9 }}>
+                          {item.since == null ? "—" : `${item.since > 0 ? "+" : ""}${item.since.toFixed(1)}%`}
+                        </span>
+                        {/* Day change, dimmed: the move since the result is the
+                            decision, the day's change is the context it sits in. */}
+                        <span style={{
+                          fontSize: "9px", fontWeight: 600, opacity: 0.75,
+                          color: item.day == null ? "var(--text-faint)"
+                            : item.day > 0 ? "var(--positive)" : item.day < 0 ? "var(--negative)" : "var(--text-faint)",
+                        }}>
+                          {item.day == null ? "· —" : `· ${item.day > 0 ? "+" : ""}${item.day.toFixed(1)}%d`}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Capped height: a heavy results day can produce hundreds of prompts,
+            and the panel must not push the rest of the dashboard off-screen. */}
+        <div style={{
+          display: "flex", flexDirection: "column", gap: "12px",
+          maxHeight: "560px", overflowY: "auto", paddingRight: "6px",
+        }}>
+          {visiblePendingResults.length === 0 && (
+            <div style={{ padding: "18px", textAlign: "center", color: "var(--text-muted)", fontSize: "12px" }}>
+              {pendingSearch.trim()
+                ? `No ${CATEGORY_LABEL[pendingCategory].toLowerCase()} match "${pendingSearch}".`
+                : `No ${CATEGORY_LABEL[pendingCategory].toLowerCase()} awaiting a decision on this date.`}
             </div>
           )}
-
-          {/* Capped height: a heavy results day can produce hundreds of prompts,
-              and the panel must not push the rest of the dashboard off-screen. */}
-          <div style={{
-            display: "flex", flexDirection: "column", gap: "12px",
-            maxHeight: "560px", overflowY: "auto", paddingRight: "6px",
-          }}>
-            {visiblePendingResults.length === 0 && (
-              <div style={{ padding: "18px", textAlign: "center", color: "var(--text-muted)", fontSize: "12px" }}>
-                {pendingSearch.trim()
-                  ? `No ${CATEGORY_LABEL[pendingCategory].toLowerCase()} match "${pendingSearch}".`
-                  : `No ${CATEGORY_LABEL[pendingCategory].toLowerCase()} awaiting a decision on this date.`}
-              </div>
-            )}
-            {visiblePendingResults.map(pending => {
-              const form = getResultForm(pending.id);
-              const busy = !!actionLoading[`result_${pending.id}`];
-              const ai = pending.ai_analysis;
-              const quote = marketQuotesMap[pending.symbol.toUpperCase()] || {};
-              const isOpen = !!expandedResults[pending.id];
-              // Only a quarterly filing has figures to read. Impact news gets no
-              // Screener lookup and no earnings AI — asking would spend a
-              // premium call to be told there are no numbers in an order win.
-              const isResult = categoryOf(pending) === "results";
-              const tab = resultTab[pending.id] || "ai";
-              const modelChoice = reanalyseModel[pending.id] ?? "";
-              const reanalysing = !!actionLoading[`reanalyse_${pending.id}`];
-              return (
-                <div key={pending.id} style={{
-                  background: "rgba(25, 28, 34, 0.6)",
-                  border: "1px solid rgba(216, 174, 100, 0.16)",
-                  borderRadius: "10px",
-                  padding: "14px"
-                }}>
-                  {/* Header line */}
-                  <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "10px", marginBottom: "10px" }}>
-                    {/* Blue means an order was placed against this filing, so the
-                        row can be picked out of a list of hundreds at a glance. */}
-                    <span style={{
-                      fontSize: "16px", fontWeight: 800,
-                      color: pending.position ? "var(--accent)" : "var(--text-primary)",
-                    }}>
-                      {pending.symbol}
+          {visiblePendingResults.map(pending => {
+            const form = getResultForm(pending.id);
+            const busy = !!actionLoading[`result_${pending.id}`];
+            const ai = pending.ai_analysis;
+            const quote = marketQuotesMap[pending.symbol.toUpperCase()] || {};
+            const isOpen = !!expandedResults[pending.id];
+            // Only a quarterly filing has figures to read. Impact news gets no
+            // Screener lookup and no earnings AI — asking would spend a
+            // premium call to be told there are no numbers in an order win.
+            const isResult = categoryOf(pending) === "results";
+            const tab = resultTab[pending.id] || "ai";
+            const modelChoice = reanalyseModel[pending.id] ?? "";
+            const reanalysing = !!actionLoading[`reanalyse_${pending.id}`];
+            return (
+              <div key={pending.id} style={{
+                background: "rgba(25, 28, 34, 0.6)",
+                border: "1px solid rgba(216, 174, 100, 0.16)",
+                borderRadius: "10px",
+                padding: "14px"
+              }}>
+                {/* Header line */}
+                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "10px", marginBottom: "10px" }}>
+                  {/* Blue means an order was placed against this filing, so the
+                      row can be picked out of a list of hundreds at a glance. */}
+                  <span style={{
+                    fontSize: "16px", fontWeight: 800,
+                    color: pending.position ? "var(--accent)" : "var(--text-primary)",
+                  }}>
+                    {pending.symbol}
+                  </span>
+                  {pending.position && (
+                    <span title={`Order placed from this filing · config #${pending.position.config_id}`}
+                      style={{
+                        fontSize: "10px", fontWeight: 700, letterSpacing: "0.4px",
+                        color: "var(--accent)", background: "var(--accent-bg)",
+                        border: "1px solid var(--accent-border)",
+                        padding: "2px 7px", borderRadius: "4px",
+                      }}>
+                      {pending.position.status.toUpperCase()}
+                      {pending.position.quantity ? ` · ${pending.position.quantity}` : ""}
+                      {pending.position.buy_price ? ` @ ₹${pending.position.buy_price}` : ""}
+                      {pending.position.pnl != null ? ` · P&L ₹${pending.position.pnl}` : ""}
                     </span>
-                    {pending.position && (
-                      <span title={`Order placed from this filing · config #${pending.position.config_id}`}
-                        style={{
-                          fontSize: "10px", fontWeight: 700, letterSpacing: "0.4px",
-                          color: "var(--accent)", background: "var(--accent-bg)",
-                          border: "1px solid var(--accent-border)",
-                          padding: "2px 7px", borderRadius: "4px",
-                        }}>
-                        {pending.position.status.toUpperCase()}
-                        {pending.position.quantity ? ` · ${pending.position.quantity}` : ""}
-                        {pending.position.buy_price ? ` @ ₹${pending.position.buy_price}` : ""}
-                        {pending.position.pnl != null ? ` · P&L ₹${pending.position.pnl}` : ""}
-                      </span>
-                    )}
-                    <span style={{
-                      fontSize: "10px", fontWeight: 700, letterSpacing: "0.5px",
-                      color: pending.exchange === "nse" ? "var(--accent)" : "var(--ai)",
-                      background: pending.exchange === "nse" ? "rgba(127, 166, 225, 0.1)" : "rgba(176, 155, 217, 0.1)",
-                      padding: "3px 8px", borderRadius: "4px"
-                    }}>{pending.exchange.toUpperCase()}</span>
-                    {pending.company_name && (
-                      <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: 500 }}>
-                        {pending.company_name}
-                      </span>
-                    )}
-                    {pending.tracking_ref && (
-                      <span title="Tracking reference — the same code appears on the Telegram alert and the AI analysis"
-                        style={{ fontSize: "10px", fontFamily: "ui-monospace, Menlo, monospace", color: "var(--text-muted)",
-                                 background: "var(--surface-2)", padding: "2px 6px", borderRadius: "4px" }}>
-                        {pending.tracking_ref}
-                      </span>
-                    )}
-                    {pending.kind && pending.kind !== "result" && (
-                      <span title="Impact news — good news worth acting on, with no quarterly figures to analyse. No Screener lookup and no earnings AI run on these."
-                        style={{
-                          fontSize: "10px", fontWeight: 700, letterSpacing: "0.4px",
-                          color: "var(--positive)", background: "rgba(91, 190, 147, 0.1)",
-                          border: "1px solid rgba(91, 190, 147, 0.18)",
-                          padding: "2px 7px", borderRadius: "4px",
-                        }}>
-                        {pending.kind.replace(/_/g, " ").toUpperCase()}
-                      </span>
-                    )}
-                    {isResult && pending.screener_signal && (
-                      <span title={`Screener read: ${pending.screener_signal.reason}`}
-                        style={{
-                          fontSize: "10px", fontWeight: 700, padding: "2px 7px", borderRadius: "4px",
-                          color: pending.screener_signal.tone === "pos" ? "var(--positive)"
-                            : pending.screener_signal.tone === "neg" ? "var(--negative)" : "var(--text-muted)",
-                          background: pending.screener_signal.tone === "pos" ? "rgba(91, 190, 147, 0.09)"
-                            : pending.screener_signal.tone === "neg" ? "rgba(226, 141, 131, 0.09)" : "var(--surface-2)",
-                        }}>
-                        SCREENER {pending.screener_signal.label}
-                      </span>
-                    )}
-                    {isResult && pending.all_positive && (
-                      <span title="Revenue and profit both up year-on-year and quarter-on-quarter"
-                        style={{ fontSize: "10px", fontWeight: 800, padding: "2px 7px", borderRadius: "4px", color: "var(--positive-strong)", background: "rgba(91, 190, 147, 0.12)" }}>
-                        ALL POSITIVE
-                      </span>
-                    )}
-                    {pending.paused && (
-                      <span title="Live pricing is suspended for this row. The price shown is the last one fetched."
-                        style={{ fontSize: "10px", fontWeight: 700, color: "var(--text-muted)",
-                                 background: "var(--surface-2)", border: "1px solid rgba(160, 168, 180, 0.18)",
-                                 padding: "2px 7px", borderRadius: "4px" }}>
-                        PAUSED
-                      </span>
-                    )}
-                    {pending.deferred && (
-                      <span title="Filed after the 15:20 IST cutoff — held for the 08:00 digest, no alert or AI overnight"
-                        style={{ fontSize: "10px", fontWeight: 700, color: "var(--warning)",
-                                 background: "var(--warning-bg)", padding: "2px 6px", borderRadius: "4px" }}>
-                        DEFERRED
-                      </span>
-                    )}
-                    <span style={{ fontSize: "12px", color: "var(--text-secondary)", flex: 1, minWidth: "200px" }}>{pending.title}</span>
-                    {pending.event_time && (
-                      <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
-                        {new Date(pending.event_time).toLocaleString()}
-                      </span>
-                    )}
-                    <button
-                      onClick={() => openEarningsChart(pending.symbol, pending.instrument_key || undefined)}
-                      title="Open price chart"
+                  )}
+                  <span style={{
+                    fontSize: "10px", fontWeight: 700, letterSpacing: "0.5px",
+                    color: pending.exchange === "nse" ? "var(--accent)" : "var(--ai)",
+                    background: pending.exchange === "nse" ? "rgba(127, 166, 225, 0.1)" : "rgba(176, 155, 217, 0.1)",
+                    padding: "3px 8px", borderRadius: "4px"
+                  }}>{pending.exchange.toUpperCase()}</span>
+                  {pending.company_name && (
+                    <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: 500 }}>
+                      {pending.company_name}
+                    </span>
+                  )}
+                  {pending.tracking_ref && (
+                    <span title="Tracking reference — the same code appears on the Telegram alert and the AI analysis"
+                      style={{ fontSize: "10px", fontFamily: "ui-monospace, Menlo, monospace", color: "var(--text-muted)",
+                               background: "var(--surface-2)", padding: "2px 6px", borderRadius: "4px" }}>
+                      {pending.tracking_ref}
+                    </span>
+                  )}
+                  {pending.kind && pending.kind !== "result" && (
+                    <span title="Impact news — good news worth acting on, with no quarterly figures to analyse. No Screener lookup and no earnings AI run on these."
                       style={{
-                        padding: "3px 9px", background: "var(--accent-bg)",
-                        border: "1px solid var(--accent-border)", borderRadius: "5px",
-                        color: "var(--accent)", fontSize: "10px", fontWeight: 700,
-                        cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px",
+                        fontSize: "10px", fontWeight: 700, letterSpacing: "0.4px",
+                        color: "var(--positive)", background: "rgba(91, 190, 147, 0.1)",
+                        border: "1px solid rgba(91, 190, 147, 0.18)",
+                        padding: "2px 7px", borderRadius: "4px",
                       }}>
-                      <TrendingUp size={11} /> Chart
-                    </button>
-                    {pending.attachment_url && (
-                      <a href={pending.attachment_url} target="_blank" rel="noreferrer"
-                         style={{ fontSize: "11px", color: "var(--accent)", display: "flex", alignItems: "center", gap: "4px" }}>
-                        <ExternalLink size={12} /> Filing
-                      </a>
-                    )}
-                  </div>
-
-                  {/* Quote and timing belong to the stock, not to the AI verdict:
-                      how long ago the filing landed decides whether the move is
-                      still tradeable, and it has to be readable without opening
-                      anything. */}
-                  <div style={{ marginBottom: "10px" }}>
-                    <ResultQuoteStrip
-                      p={pending}
-                      quote={quote}
-                      signal={get2MinSignal(pending.symbol, quote)}
-                      flash={priceFlash[pending.symbol.toUpperCase()]}
-                      live={isToday}
-                    />
-                    <LifecycleStrip p={pending} />
-                  </div>
-
-                  {/* Order form */}
-                  <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: "10px" }}>
-                    <label style={{ fontSize: "10px", color: "var(--text-muted)" }}>
-                      QTY
-                      <input type="number" min={1} value={form.quantity}
-                        onChange={e => updateResultForm(pending.id, { quantity: parseInt(e.target.value) || 1 })}
-                        style={{ display: "block", width: "70px", marginTop: "3px", padding: "6px 8px", background: "rgba(20, 23, 28,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "12px" }} />
-                    </label>
-                    <label style={{ fontSize: "10px", color: "var(--text-muted)" }}>
-                      TYPE
-                      <select value={form.order_type}
-                        onChange={e => updateResultForm(pending.id, { order_type: e.target.value })}
-                        style={{ display: "block", marginTop: "3px", padding: "6px 8px", background: "rgba(20, 23, 28,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "12px" }}>
-                        <option value="MARKET">MARKET</option>
-                        <option value="LIMIT">LIMIT</option>
-                      </select>
-                    </label>
-                    {form.order_type === "LIMIT" && (
-                      <label style={{ fontSize: "10px", color: "var(--text-muted)" }}>
-                        LIMIT ₹
-                        <input type="number" step="0.05" value={form.limit_price}
-                          onChange={e => updateResultForm(pending.id, { limit_price: e.target.value })}
-                          style={{ display: "block", width: "90px", marginTop: "3px", padding: "6px 8px", background: "rgba(20, 23, 28,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "12px" }} />
-                      </label>
-                    )}
-                    <label style={{ fontSize: "10px", color: "var(--text-muted)" }}>
-                      SL %
-                      <input type="number" step="0.5" min={0.5} value={form.stoploss_pct}
-                        onChange={e => updateResultForm(pending.id, { stoploss_pct: parseFloat(e.target.value) || 2 })}
-                        style={{ display: "block", width: "70px", marginTop: "3px", padding: "6px 8px", background: "rgba(20, 23, 28,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "12px" }} />
-                    </label>
-                    <label style={{ fontSize: "10px", color: "var(--text-muted)" }}>
-                      BROKER
-                      <select value={form.broker}
-                        onChange={e => updateResultForm(pending.id, { broker: e.target.value })}
-                        style={{ display: "block", marginTop: "3px", padding: "6px 8px", background: "rgba(20, 23, 28,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "12px" }}>
-                        <option value="upstox">Upstox</option>
-                        <option value="zerodha">Zerodha</option>
-                      </select>
-                    </label>
-
-                    {/* Once a position exists the buy is done; the only action
-                        left on this filing is getting out of it. */}
-                    {!pending.position && (
-                      <button onClick={() => handlePlaceResultOrder(pending)} disabled={busy}
-                        style={{
-                          padding: "8px 16px", background: busy ? "rgba(91, 190, 147, 0.26)" : "var(--positive)",
-                          border: "none", borderRadius: "6px", color: "var(--on-accent)", fontSize: "12px", fontWeight: 700,
-                          cursor: busy ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: "6px"
-                        }}>
-                        <ShoppingBag size={14} />
-                        {busy ? "Placing…" : canTradeNow() ? "Place Buy Order" : "Queue Buy for 09:15"}
-                      </button>
-                    )}
-                    {pending.position?.can_sell && (
-                      <button onClick={() => handleSellResultPosition(pending)}
-                        disabled={!!actionLoading[`sell_${pending.id}`]}
-                        style={{
-                          padding: "8px 16px",
-                          background: actionLoading[`sell_${pending.id}`] ? "rgba(226, 141, 131, 0.26)" : "var(--negative)",
-                          border: "none", borderRadius: "6px", color: "var(--on-accent)", fontSize: "12px", fontWeight: 700,
-                          cursor: actionLoading[`sell_${pending.id}`] ? "not-allowed" : "pointer",
-                          display: "flex", alignItems: "center", gap: "6px"
-                        }}>
-                        <DollarSign size={14} /> {actionLoading[`sell_${pending.id}`] ? "Selling…" : "Sell Now"}
-                      </button>
-                    )}
-                    {pending.position && !pending.position.can_sell && (
-                      <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
-                        {pending.position.status === "sold"
-                          ? `Sold${pending.position.sell_price ? ` at ₹${pending.position.sell_price}` : ""}`
-                          : `Position is '${pending.position.status}' — sell available once the buy fills`}
-                      </span>
-                    )}
-                    {/* What this order costs, against what you said you have.
-                        Priced at the live LTP, so it moves with the quote and is
-                        an estimate for a MARKET order, not a quotation. */}
-                    {(() => {
-                      const ltp = quote?.last_price || 0;
-                      if (!ltp || !form.quantity) return null;
-                      const cost = ltp * form.quantity;
-                      const funds = parseFloat(availableFunds);
-                      const haveFunds = isFinite(funds) && funds > 0;
-                      const left = haveFunds ? funds - cost : null;
-                      const short = left != null && left < 0;
-                      const money = (v: number) =>
-                        `₹${Math.abs(v).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
-                      return (
-                        <span style={{ fontSize: "11px", lineHeight: 1.35, whiteSpace: "nowrap" }}
-                          title={`${form.quantity} × ₹${ltp.toFixed(2)} at the current price`}>
-                          <span style={{ color: "var(--text-muted)" }}>Needs </span>
-                          <b style={{ color: "var(--text-primary)", fontVariantNumeric: "tabular-nums" }}>{money(cost)}</b>
-                          {left != null && (
-                            <>
-                              <span style={{ color: "var(--text-muted)" }}>{short ? " · short by " : " · leaves "}</span>
-                              <b style={{ color: short ? "var(--negative)" : "var(--positive)", fontVariantNumeric: "tabular-nums" }}>
-                                {money(left)}
-                              </b>
-                            </>
-                          )}
-                        </span>
-                      );
-                    })()}
-
-                    {/* The only per-card action besides ordering. Dismiss used
-                        to sit beside it and removed the card outright, which
-                        was the wrong shape for a panel that is now the record
-                        of the last 30 days — it is still reachable from the
-                        Telegram alert's inline buttons, where hiding a prompt
-                        you have decided against is what you actually want. */}
-                    <button onClick={() => handleTogglePause(pending.id)}
-                      disabled={!!actionLoading[`pause_${pending.id}`]}
-                      title={pending.paused
-                        ? "Resume refreshing this row's live price"
-                        : "Stop refreshing this row's live price. The card stays; the last price is kept."}
+                      {pending.kind.replace(/_/g, " ").toUpperCase()}
+                    </span>
+                  )}
+                  {isResult && pending.screener_signal && (
+                    <span title={`Screener read: ${pending.screener_signal.reason}`}
                       style={{
-                        padding: "8px 14px", background: "transparent",
-                        border: `1px solid ${pending.paused ? "rgba(216, 174, 100, 0.34)" : "rgba(160, 168, 180, 0.22)"}`,
-                        borderRadius: "6px",
-                        color: pending.paused ? "var(--warning)" : "var(--text-muted)",
-                        fontSize: "12px", fontWeight: 600,
-                        cursor: actionLoading[`pause_${pending.id}`] ? "not-allowed" : "pointer"
+                        fontSize: "10px", fontWeight: 700, padding: "2px 7px", borderRadius: "4px",
+                        color: pending.screener_signal.tone === "pos" ? "var(--positive)"
+                          : pending.screener_signal.tone === "neg" ? "var(--negative)" : "var(--text-muted)",
+                        background: pending.screener_signal.tone === "pos" ? "rgba(91, 190, 147, 0.09)"
+                          : pending.screener_signal.tone === "neg" ? "rgba(226, 141, 131, 0.09)" : "var(--surface-2)",
                       }}>
-                      {pending.paused ? "Resume prices" : "Pause prices"}
-                    </button>
+                      SCREENER {pending.screener_signal.label}
+                    </span>
+                  )}
+                  {isResult && pending.all_positive && (
+                    <span title="Revenue and profit both up year-on-year and quarter-on-quarter"
+                      style={{ fontSize: "10px", fontWeight: 800, padding: "2px 7px", borderRadius: "4px", color: "var(--positive-strong)", background: "rgba(91, 190, 147, 0.12)" }}>
+                      ALL POSITIVE
+                    </span>
+                  )}
+                  {pending.paused && (
+                    <span title="Live pricing is suspended for this row. The price shown is the last one fetched."
+                      style={{ fontSize: "10px", fontWeight: 700, color: "var(--text-muted)",
+                               background: "var(--surface-2)", border: "1px solid rgba(160, 168, 180, 0.18)",
+                               padding: "2px 7px", borderRadius: "4px" }}>
+                      PAUSED
+                    </span>
+                  )}
+                  {pending.deferred && (
+                    <span title="Filed after the 15:20 IST cutoff — held for the 08:00 digest, no alert or AI overnight"
+                      style={{ fontSize: "10px", fontWeight: 700, color: "var(--warning)",
+                               background: "var(--warning-bg)", padding: "2px 6px", borderRadius: "4px" }}>
+                      DEFERRED
+                    </span>
+                  )}
+                  <span style={{ fontSize: "12px", color: "var(--text-secondary)", flex: 1, minWidth: "200px" }}>{pending.title}</span>
+                  {pending.event_time && (
+                    <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
+                      {new Date(pending.event_time).toLocaleString()}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => openEarningsChart(pending.symbol, pending.instrument_key || undefined)}
+                    title="Open price chart"
+                    style={{
+                      padding: "3px 9px", background: "var(--accent-bg)",
+                      border: "1px solid var(--accent-border)", borderRadius: "5px",
+                      color: "var(--accent)", fontSize: "10px", fontWeight: 700,
+                      cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px",
+                    }}>
+                    <TrendingUp size={11} /> Chart
+                  </button>
+                  {pending.attachment_url && (
+                    <a href={pending.attachment_url} target="_blank" rel="noreferrer"
+                       style={{ fontSize: "11px", color: "var(--accent)", display: "flex", alignItems: "center", gap: "4px" }}>
+                      <ExternalLink size={12} /> Filing
+                    </a>
+                  )}
+                </div>
 
-                  </div>
+                {/* Quote and timing belong to the stock, not to the AI verdict:
+                    how long ago the filing landed decides whether the move is
+                    still tradeable, and it has to be readable without opening
+                    anything. */}
+                <div style={{ marginBottom: "10px" }}>
+                  <ResultQuoteStrip
+                    p={pending}
+                    quote={quote}
+                    signal={get2MinSignal(pending.symbol, quote)}
+                    flash={priceFlash[pending.symbol.toUpperCase()]}
+                    live={isToday}
+                  />
+                  <LifecycleStrip p={pending} />
+                </div>
 
-                  {/* One collapsed row carries the AI state, so the verdict is
-                      still visible without the five-row table pushing the next
-                      order card off screen. Impact news has no AI section at
-                      all: there are no quarterly figures to extract. */}
-                  <div style={{ marginTop: "10px", paddingTop: "9px", borderTop: "1px solid var(--border-subtle)",
-                                display: isResult ? undefined : "none" }}>
-                    <button
-                      onClick={() => setExpandedResults(prev => ({ ...prev, [pending.id]: !prev[pending.id] }))}
+                {/* Order form */}
+                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: "10px" }}>
+                  <label style={{ fontSize: "10px", color: "var(--text-muted)" }}>
+                    QTY
+                    <input type="number" min={1} value={form.quantity}
+                      onChange={e => updateResultForm(pending.id, { quantity: parseInt(e.target.value) || 1 })}
+                      style={{ display: "block", width: "70px", marginTop: "3px", padding: "6px 8px", background: "rgba(20, 23, 28,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "12px" }} />
+                  </label>
+                  <label style={{ fontSize: "10px", color: "var(--text-muted)" }}>
+                    TYPE
+                    <select value={form.order_type}
+                      onChange={e => updateResultForm(pending.id, { order_type: e.target.value })}
+                      style={{ display: "block", marginTop: "3px", padding: "6px 8px", background: "rgba(20, 23, 28,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "12px" }}>
+                      <option value="MARKET">MARKET</option>
+                      <option value="LIMIT">LIMIT</option>
+                    </select>
+                  </label>
+                  {form.order_type === "LIMIT" && (
+                    <label style={{ fontSize: "10px", color: "var(--text-muted)" }}>
+                      LIMIT ₹
+                      <input type="number" step="0.05" value={form.limit_price}
+                        onChange={e => updateResultForm(pending.id, { limit_price: e.target.value })}
+                        style={{ display: "block", width: "90px", marginTop: "3px", padding: "6px 8px", background: "rgba(20, 23, 28,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "12px" }} />
+                    </label>
+                  )}
+                  <label style={{ fontSize: "10px", color: "var(--text-muted)" }}>
+                    SL %
+                    <input type="number" step="0.5" min={0.5} value={form.stoploss_pct}
+                      onChange={e => updateResultForm(pending.id, { stoploss_pct: parseFloat(e.target.value) || 2 })}
+                      style={{ display: "block", width: "70px", marginTop: "3px", padding: "6px 8px", background: "rgba(20, 23, 28,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "12px" }} />
+                  </label>
+                  <label style={{ fontSize: "10px", color: "var(--text-muted)" }}>
+                    BROKER
+                    <select value={form.broker}
+                      onChange={e => updateResultForm(pending.id, { broker: e.target.value })}
+                      style={{ display: "block", marginTop: "3px", padding: "6px 8px", background: "rgba(20, 23, 28,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "12px" }}>
+                      <option value="upstox">Upstox</option>
+                      <option value="zerodha">Zerodha</option>
+                    </select>
+                  </label>
+
+                  {/* Once a position exists the buy is done; the only action
+                      left on this filing is getting out of it. */}
+                  {!pending.position && (
+                    <button onClick={() => handlePlaceResultOrder(pending)} disabled={busy}
                       style={{
-                        display: "flex", alignItems: "center", gap: "8px", width: "100%",
-                        background: "transparent", border: "none", padding: 0,
-                        cursor: "pointer", textAlign: "left", flexWrap: "wrap",
+                        padding: "8px 16px", background: busy ? "rgba(91, 190, 147, 0.26)" : "var(--positive)",
+                        border: "none", borderRadius: "6px", color: "var(--on-accent)", fontSize: "12px", fontWeight: 700,
+                        cursor: busy ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: "6px"
                       }}>
-                      <ChevronRight
-                        size={13}
-                        style={{
-                          color: "var(--ai)", flexShrink: 0,
-                          transform: isOpen ? "rotate(90deg)" : "none",
-                          transition: "transform 0.15s",
-                        }} />
-                      <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--ai)" }}>EARNINGS ANALYSIS</span>
-
-                      {pending.ai_status === "done" && ai ? (
-                        <>
-                          <VerdictBadge verdict={ai.ai_suggestion} />
-                          {ai.extraction_ok === false && (
-                            <span style={{ fontSize: "10px", color: "var(--text-muted)", fontStyle: "italic" }}>
-                              figures not extractable
-                            </span>
-                          )}
-                          {ai.validation?.issues?.length ? (
-                            <span style={{ fontSize: "10px", color: "var(--warning)", fontWeight: 700 }}>
-                              ⚠ {ai.validation.issues.length} consistency issue{ai.validation.issues.length > 1 ? "s" : ""}
-                            </span>
-                          ) : null}
-                        </>
-                      ) : pending.ai_status === "failed" ? (
-                        <span style={{ fontSize: "10px", color: "var(--negative-strong)" }}>failed</span>
-                      ) : pending.deferred ? (
-                        <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>not analysed — after cutoff</span>
-                      ) : (
-                        <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "inline-flex", alignItems: "center", gap: "5px" }}>
-                          <RefreshCw size={11} className="spin" /> running…
-                        </span>
-                      )}
-
-                      <span style={{ marginLeft: "auto", fontSize: "10px", color: "var(--text-faint)" }}>
-                        {isOpen ? "hide" : "details"}
-                      </span>
+                      <ShoppingBag size={14} />
+                      {busy ? "Placing…" : canTradeNow() ? "Place Buy Order" : "Queue Buy for 09:15"}
                     </button>
-
-                    {isOpen && (
-                      <CardBoundary label="This analysis">
-                      <div style={{ marginTop: "10px" }}>
-                        {/* Two ways of getting figures out of the same filing.
-                            OCR reads the PDF directly; AI asks a model. They are
-                            tabs rather than a setting because the interesting
-                            question is where two readings disagree. */}
-                        <div style={{ display: "flex", gap: "6px", marginBottom: "10px" }}>
-                          {(["ai", "ocr"] as const).map(t => (
-                            <button key={t}
-                              onClick={() => setResultTab(prev => ({ ...prev, [pending.id]: t }))}
-                              style={{
-                                padding: "4px 12px", borderRadius: "5px", cursor: "pointer",
-                                fontSize: "10px", fontWeight: 700, letterSpacing: "0.4px",
-                                background: tab === t ? "var(--ai-bg)" : "transparent",
-                                border: `1px solid ${tab === t ? "rgba(176, 155, 217, 0.34)" : "rgba(160, 168, 180, 0.16)"}`,
-                                color: tab === t ? "var(--ai)" : "var(--text-muted)",
-                              }}>
-                              {t.toUpperCase()}
-                            </button>
-                          ))}
-                        </div>
-
-                        {tab === "ocr" ? (() => {
-                          const rawAny = pending.extraction as Extraction | null | undefined;
-                          // Shape-check what came out of the database rather
-                          // than trusting it. This expression is an inline IIFE
-                          // in the card's JSX, so React evaluates it during the
-                          // *parent's* render — before the error boundary that
-                          // wraps it ever renders. A throw here escapes the
-                          // boundary and unmounts the dashboard, which is what
-                          // a blank screen is. Components rendered inside the
-                          // boundary are protected; this is not.
-                          const raw: Extraction | null =
-                            rawAny && typeof rawAny === "object" && rawAny.confidence
-                              ? rawAny : null;
-                          // "READING" is the placeholder the endpoint returns
-                          // while the job runs; it carries no figures, so the
-                          // card shows progress rather than an empty table.
-                          const startedAt = extracting[pending.id];
-                          // In progress until the finished extraction lands. The
-                          // endpoint's own READING placeholder is not enough on
-                          // its own: the poll replaces the row every few seconds
-                          // and would wipe it.
-                          const reading = !!startedAt || raw?.confidence?.tier === "READING";
-                          const ex = reading ? null : raw;
-                          const busy = !!actionLoading[`extract_${pending.id}`] || reading;
-                          const elapsed = startedAt
-                            ? Math.max(0, Math.round((nowTick - startedAt) / 1000)) : 0;
-                          const LABEL: Record<string, string> = {
-                            revenue: "Revenue", expenses: "Expenses",
-                            other_income: "Other income", ebitda: "EBITDA",
-                            pbt: "PBT", pat: "Profit after tax",
-                          };
-                          return (
-                            <div>
-                              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "10px", marginBottom: "10px" }}>
-                                <button onClick={() => handleExtract(pending, !!ex)} disabled={busy}
-                                  title="Read the filing's PDF and check the figures against Screener"
-                                  style={{
-                                    display: "inline-flex", alignItems: "center", gap: "5px",
-                                    padding: "5px 12px", borderRadius: "6px",
-                                    background: "var(--ai-bg)", border: "1px solid rgba(176, 155, 217, 0.3)",
-                                    color: "var(--ai)", fontSize: "11px", fontWeight: 700,
-                                    cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.6 : 1,
-                                  }}>
-                                  <RefreshCw size={11} className={busy ? "spin" : undefined} />
-                                  {reading
-                                    ? `Reading the filing… ${elapsed}s`
-                                    : ex ? "Read again" : "Read the filing"}
-                                </button>
-                                {ex && <ConfidenceBadge c={ex.confidence} />}
-                                {ex?.engine && (
-                                  <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>
-                                    via {ex.engine}{ex.page ? ` · page ${ex.page}` : ""}
-                                    {ex.basis ? ` · ${ex.basis}` : ""}{ex.unit ? ` · ${ex.unit}` : ""}
-                                  </span>
-                                )}
-                              </div>
-
-                              {!ex ? (
-                                <div style={{ padding: "16px", borderRadius: "8px", textAlign: "center",
-                                              background: "var(--surface-2)", border: "1px dashed rgba(160, 168, 180, 0.18)",
-                                              fontSize: "11px", color: "var(--text-muted)", lineHeight: 1.6 }}>
-                                  {reading ? (
-                                    <>
-                                      <b style={{ color: "var(--text-secondary)" }}>Reading the filing…</b>
-                                      <div style={{ marginTop: "4px" }}>
-                                        The text layer answers in under a second. A scanned filing has to
-                                        have its statement page found by OCR, which takes up to a minute —
-                                        this stays put and fills in when it finishes.
-                                      </div>
-                                    </>
-                                  ) : "Reads the figures out of the filing itself, then checks each one against Screener. Two independent sources agreeing is evidence; the model's reading on its own is not."}
-                                </div>
-                              ) : (
-                                <>
-                                  <div style={{ fontSize: "11px", color: "var(--text-secondary)", lineHeight: 1.55, marginBottom: "10px" }}>
-                                    {ex.confidence.reason}
-                                  </div>
-
-                                  {Array.isArray(ex.confidence.flags) && ex.confidence.flags.length > 0 && (
-                                    <div style={{ display: "flex", flexWrap: "wrap", gap: "5px", marginBottom: "10px" }}>
-                                      {ex.confidence.flags.map(f => (
-                                        <span key={f} title="A validation check the extractor raised on this reading"
-                                          style={{ fontSize: "9px", fontFamily: "ui-monospace, Menlo, monospace",
-                                                   color: "var(--warning)", background: "var(--warning-bg)",
-                                                   padding: "2px 6px", borderRadius: "4px" }}>
-                                          {f}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  )}
-
-                                  {ex.quarter && !ex.covers_screener_quarter && ex.screener_quarter && (
-                                    <div style={{ fontSize: "10px", color: "var(--warning)", marginBottom: "8px" }}>
-                                      The filing covers {ex.quarter}; Screener's latest is {ex.screener_quarter}.
-                                      The two describe different periods, so the gaps below are not errors.
-                                    </div>
-                                  )}
-
-                                  {Array.isArray(ex.comparisons) && ex.comparisons.length > 0 && (
-                                    <div style={{ overflowX: "auto" }}>
-                                      <table style={{ borderCollapse: "collapse", fontSize: "11px", width: "100%", minWidth: "440px" }}>
-                                        <thead>
-                                          <tr>
-                                            {["", `From the filing${ex.quarter ? ` (${ex.quarter})` : ""}`, "Screener", "Gap", ""].map((h, i) => (
-                                              <th key={i} style={{ textAlign: i === 0 || i === 4 ? "left" : "right",
-                                                                   padding: "4px 8px", color: "var(--text-muted)", fontWeight: 600,
-                                                                   fontSize: "10px", borderBottom: "1px solid var(--border-subtle)",
-                                                                   whiteSpace: "nowrap" }}>{h}</th>
-                                            ))}
-                                          </tr>
-                                        </thead>
-                                        <tbody>
-                                          {ex.comparisons.map(c => (
-                                            <tr key={c.metric}>
-                                              <td style={{ padding: "4px 8px", fontWeight: 600, color: "var(--text-primary)", whiteSpace: "nowrap" }}>
-                                                {LABEL[c.metric] || c.metric}
-                                              </td>
-                                              <td style={{ padding: "4px 8px", textAlign: "right", whiteSpace: "nowrap",
-                                                           color: c.pdf == null ? "var(--text-faint)" : "var(--text-primary)" }}>
-                                                {c.pdf == null ? "—" : c.pdf.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                                              </td>
-                                              <td style={{ padding: "4px 8px", textAlign: "right", whiteSpace: "nowrap",
-                                                           color: c.screener == null ? "var(--text-faint)" : "var(--text-secondary)" }}>
-                                                {c.screener == null ? "—" : c.screener.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                                              </td>
-                                              <td style={{ padding: "4px 8px", textAlign: "right", whiteSpace: "nowrap",
-                                                           color: c.agrees === true ? "var(--positive)"
-                                                             : c.agrees === false ? "var(--negative)" : "var(--text-faint)" }}>
-                                                {c.gap_pct == null ? "—" : `${c.gap_pct > 0 ? "+" : ""}${c.gap_pct.toFixed(2)}%`}
-                                              </td>
-                                              <td style={{ padding: "4px 8px", fontSize: "9px", color: "var(--text-faint)", lineHeight: 1.4 }}>
-                                                {c.note || (c.agrees === true ? "agrees" : c.agrees === false ? "differs" : "")}
-                                              </td>
-                                            </tr>
-                                          ))}
-                                        </tbody>
-                                      </table>
-                                    </div>
-                                  )}
-                                </>
-                              )}
-                            </div>
-                          );
-                        })() : (
+                  )}
+                  {pending.position?.can_sell && (
+                    <button onClick={() => handleSellResultPosition(pending)}
+                      disabled={!!actionLoading[`sell_${pending.id}`]}
+                      style={{
+                        padding: "8px 16px",
+                        background: actionLoading[`sell_${pending.id}`] ? "rgba(226, 141, 131, 0.26)" : "var(--negative)",
+                        border: "none", borderRadius: "6px", color: "var(--on-accent)", fontSize: "12px", fontWeight: 700,
+                        cursor: actionLoading[`sell_${pending.id}`] ? "not-allowed" : "pointer",
+                        display: "flex", alignItems: "center", gap: "6px"
+                      }}>
+                      <DollarSign size={14} /> {actionLoading[`sell_${pending.id}`] ? "Selling…" : "Sell Now"}
+                    </button>
+                  )}
+                  {pending.position && !pending.position.can_sell && (
+                    <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
+                      {pending.position.status === "sold"
+                        ? `Sold${pending.position.sell_price ? ` at ₹${pending.position.sell_price}` : ""}`
+                        : `Position is '${pending.position.status}' — sell available once the buy fills`}
+                    </span>
+                  )}
+                  {/* What this order costs, against what you said you have.
+                      Priced at the live LTP, so it moves with the quote and is
+                      an estimate for a MARKET order, not a quotation. */}
+                  {(() => {
+                    const ltp = quote?.last_price || 0;
+                    if (!ltp || !form.quantity) return null;
+                    const cost = ltp * form.quantity;
+                    const funds = parseFloat(availableFunds);
+                    const haveFunds = isFinite(funds) && funds > 0;
+                    const left = haveFunds ? funds - cost : null;
+                    const short = left != null && left < 0;
+                    const money = (v: number) =>
+                      `₹${Math.abs(v).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+                    return (
+                      <span style={{ fontSize: "11px", lineHeight: 1.35, whiteSpace: "nowrap" }}
+                        title={`${form.quantity} × ₹${ltp.toFixed(2)} at the current price`}>
+                        <span style={{ color: "var(--text-muted)" }}>Needs </span>
+                        <b style={{ color: "var(--text-primary)", fontVariantNumeric: "tabular-nums" }}>{money(cost)}</b>
+                        {left != null && (
                           <>
-                            {/* Model choice applies to this run only; it does not
-                                change the configured default for future filings. */}
-                            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px", marginBottom: "10px" }}>
-                              <span style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 600 }}>MODEL</span>
-                              <select
-                                value={modelChoice}
-                                onChange={e => setReanalyseModel(prev => ({ ...prev, [pending.id]: e.target.value }))}
-                                style={{ padding: "5px 8px", fontSize: "11px", background: "var(--bg-sunken)", border: "1px solid var(--border-default)", borderRadius: "6px", color: "var(--text-primary)", maxWidth: "280px" }}>
-                                {AI_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
-                              </select>
-                              {modelChoice === "__custom__" && (
-                                <input
-                                  value={customModel[pending.id] || ""}
-                                  onChange={e => setCustomModel(prev => ({ ...prev, [pending.id]: e.target.value }))}
-                                  placeholder="provider/model-id"
-                                  style={{ padding: "5px 8px", fontSize: "11px", minWidth: "200px", background: "var(--bg-sunken)", border: "1px solid var(--border-default)", borderRadius: "6px", color: "var(--text-primary)" }}
-                                />
-                              )}
-                              <button
-                                onClick={() => handleReanalyse(pending)}
-                                disabled={reanalysing || pending.ai_status === "running"}
-                                title="Run the earnings analysis again. The verdict on screen is kept until the new one lands."
+                            <span style={{ color: "var(--text-muted)" }}>{short ? " · short by " : " · leaves "}</span>
+                            <b style={{ color: short ? "var(--negative)" : "var(--positive)", fontVariantNumeric: "tabular-nums" }}>
+                              {money(left)}
+                            </b>
+                          </>
+                        )}
+                      </span>
+                    );
+                  })()}
+
+                  {/* The only per-card action besides ordering. Dismiss used
+                      to sit beside it and removed the card outright, which
+                      was the wrong shape for a panel that is now the record
+                      of the last 30 days — it is still reachable from the
+                      Telegram alert's inline buttons, where hiding a prompt
+                      you have decided against is what you actually want. */}
+                  <button onClick={() => handleTogglePause(pending.id)}
+                    disabled={!!actionLoading[`pause_${pending.id}`]}
+                    title={pending.paused
+                      ? "Resume refreshing this row's live price"
+                      : "Stop refreshing this row's live price. The card stays; the last price is kept."}
+                    style={{
+                      padding: "8px 14px", background: "transparent",
+                      border: `1px solid ${pending.paused ? "rgba(216, 174, 100, 0.34)" : "rgba(160, 168, 180, 0.22)"}`,
+                      borderRadius: "6px",
+                      color: pending.paused ? "var(--warning)" : "var(--text-muted)",
+                      fontSize: "12px", fontWeight: 600,
+                      cursor: actionLoading[`pause_${pending.id}`] ? "not-allowed" : "pointer"
+                    }}>
+                    {pending.paused ? "Resume prices" : "Pause prices"}
+                  </button>
+
+                </div>
+
+                {/* One collapsed row carries the AI state, so the verdict is
+                    still visible without the five-row table pushing the next
+                    order card off screen. Impact news has no AI section at
+                    all: there are no quarterly figures to extract. */}
+                <div style={{ marginTop: "10px", paddingTop: "9px", borderTop: "1px solid var(--border-subtle)",
+                              display: isResult ? undefined : "none" }}>
+                  <button
+                    onClick={() => setExpandedResults(prev => ({ ...prev, [pending.id]: !prev[pending.id] }))}
+                    style={{
+                      display: "flex", alignItems: "center", gap: "8px", width: "100%",
+                      background: "transparent", border: "none", padding: 0,
+                      cursor: "pointer", textAlign: "left", flexWrap: "wrap",
+                    }}>
+                    <ChevronRight
+                      size={13}
+                      style={{
+                        color: "var(--ai)", flexShrink: 0,
+                        transform: isOpen ? "rotate(90deg)" : "none",
+                        transition: "transform 0.15s",
+                      }} />
+                    <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--ai)" }}>EARNINGS ANALYSIS</span>
+
+                    {pending.ai_status === "done" && ai ? (
+                      <>
+                        <VerdictBadge verdict={ai.ai_suggestion} />
+                        {ai.extraction_ok === false && (
+                          <span style={{ fontSize: "10px", color: "var(--text-muted)", fontStyle: "italic" }}>
+                            figures not extractable
+                          </span>
+                        )}
+                        {ai.validation?.issues?.length ? (
+                          <span style={{ fontSize: "10px", color: "var(--warning)", fontWeight: 700 }}>
+                            ⚠ {ai.validation.issues.length} consistency issue{ai.validation.issues.length > 1 ? "s" : ""}
+                          </span>
+                        ) : null}
+                      </>
+                    ) : pending.ai_status === "failed" ? (
+                      <span style={{ fontSize: "10px", color: "var(--negative-strong)" }}>failed</span>
+                    ) : pending.deferred ? (
+                      <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>not analysed — after cutoff</span>
+                    ) : (
+                      <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                        <RefreshCw size={11} className="spin" /> running…
+                      </span>
+                    )}
+
+                    <span style={{ marginLeft: "auto", fontSize: "10px", color: "var(--text-faint)" }}>
+                      {isOpen ? "hide" : "details"}
+                    </span>
+                  </button>
+
+                  {isOpen && (
+                    <CardBoundary label="This analysis">
+                    <div style={{ marginTop: "10px" }}>
+                      {/* Two ways of getting figures out of the same filing.
+                          OCR reads the PDF directly; AI asks a model. They are
+                          tabs rather than a setting because the interesting
+                          question is where two readings disagree. */}
+                      <div style={{ display: "flex", gap: "6px", marginBottom: "10px" }}>
+                        {(["ai", "ocr"] as const).map(t => (
+                          <button key={t}
+                            onClick={() => setResultTab(prev => ({ ...prev, [pending.id]: t }))}
+                            style={{
+                              padding: "4px 12px", borderRadius: "5px", cursor: "pointer",
+                              fontSize: "10px", fontWeight: 700, letterSpacing: "0.4px",
+                              background: tab === t ? "var(--ai-bg)" : "transparent",
+                              border: `1px solid ${tab === t ? "rgba(176, 155, 217, 0.34)" : "rgba(160, 168, 180, 0.16)"}`,
+                              color: tab === t ? "var(--ai)" : "var(--text-muted)",
+                            }}>
+                            {t.toUpperCase()}
+                          </button>
+                        ))}
+                      </div>
+
+                      {tab === "ocr" ? (() => {
+                        const rawAny = pending.extraction as Extraction | null | undefined;
+                        // Shape-check what came out of the database rather
+                        // than trusting it. This expression is an inline IIFE
+                        // in the card's JSX, so React evaluates it during the
+                        // *parent's* render — before the error boundary that
+                        // wraps it ever renders. A throw here escapes the
+                        // boundary and unmounts the dashboard, which is what
+                        // a blank screen is. Components rendered inside the
+                        // boundary are protected; this is not.
+                        const raw: Extraction | null =
+                          rawAny && typeof rawAny === "object" && rawAny.confidence
+                            ? rawAny : null;
+                        // "READING" is the placeholder the endpoint returns
+                        // while the job runs; it carries no figures, so the
+                        // card shows progress rather than an empty table.
+                        const startedAt = extracting[pending.id];
+                        // In progress until the finished extraction lands. The
+                        // endpoint's own READING placeholder is not enough on
+                        // its own: the poll replaces the row every few seconds
+                        // and would wipe it.
+                        const reading = !!startedAt || raw?.confidence?.tier === "READING";
+                        const ex = reading ? null : raw;
+                        const busy = !!actionLoading[`extract_${pending.id}`] || reading;
+                        const elapsed = startedAt
+                          ? Math.max(0, Math.round((nowTick - startedAt) / 1000)) : 0;
+                        const LABEL: Record<string, string> = {
+                          revenue: "Revenue", expenses: "Expenses",
+                          other_income: "Other income", ebitda: "EBITDA",
+                          pbt: "PBT", pat: "Profit after tax",
+                        };
+                        return (
+                          <div>
+                            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "10px", marginBottom: "10px" }}>
+                              <button onClick={() => handleExtract(pending, !!ex)} disabled={busy}
+                                title="Read the filing's PDF and check the figures against Screener"
                                 style={{
                                   display: "inline-flex", alignItems: "center", gap: "5px",
                                   padding: "5px 12px", borderRadius: "6px",
                                   background: "var(--ai-bg)", border: "1px solid rgba(176, 155, 217, 0.3)",
                                   color: "var(--ai)", fontSize: "11px", fontWeight: 700,
-                                  cursor: (reanalysing || pending.ai_status === "running") ? "not-allowed" : "pointer",
-                                  opacity: (reanalysing || pending.ai_status === "running") ? 0.6 : 1,
+                                  cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.6 : 1,
                                 }}>
-                                <RefreshCw size={11} className={pending.ai_status === "running" ? "spin" : undefined} />
-                                {pending.ai_status === "running" ? "Analysing…" : "Re-analyse"}
+                                <RefreshCw size={11} className={busy ? "spin" : undefined} />
+                                {reading
+                                  ? `Reading the filing… ${elapsed}s`
+                                  : ex ? "Read again" : "Read the filing"}
                               </button>
+                              {ex && <ConfidenceBadge c={ex.confidence} />}
+                              {ex?.engine && (
+                                <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>
+                                  via {ex.engine}{ex.page ? ` · page ${ex.page}` : ""}
+                                  {ex.basis ? ` · ${ex.basis}` : ""}{ex.unit ? ` · ${ex.unit}` : ""}
+                                </span>
+                              )}
                             </div>
 
-                            {pending.ai_status === "done" && ai ? (
-                              <div style={{ marginTop: "8px" }}>
-                                <MetricsTable metrics={ai.metrics} />
-                                <ValidationNotice v={ai.validation} />
-                                <div style={{ fontSize: "11px", color: "var(--text-secondary)", lineHeight: 1.55, marginTop: "8px" }}>{ai.ai_summary}</div>
-                                {(ai.future_growth_outlook || ai.future_projected_numbers) && (
-                                  <div style={{ display: "flex", flexDirection: "column", gap: "3px", marginTop: "8px", fontSize: "10px", color: "var(--text-muted)" }}>
-                                    {ai.future_growth_outlook && <span><b style={{ color: "var(--text-primary)" }}>Outlook:</b> {ai.future_growth_outlook}</span>}
-                                    {ai.future_projected_numbers && <span><b style={{ color: "var(--text-primary)" }}>Projected:</b> {ai.future_projected_numbers}</span>}
-                                  </div>
-                                )}
+                            {!ex ? (
+                              <div style={{ padding: "16px", borderRadius: "8px", textAlign: "center",
+                                            background: "var(--surface-2)", border: "1px dashed rgba(160, 168, 180, 0.18)",
+                                            fontSize: "11px", color: "var(--text-muted)", lineHeight: 1.6 }}>
+                                {reading ? (
+                                  <>
+                                    <b style={{ color: "var(--text-secondary)" }}>Reading the filing…</b>
+                                    <div style={{ marginTop: "4px" }}>
+                                      The text layer answers in under a second. A scanned filing has to
+                                      have its statement page found by OCR, which takes up to a minute —
+                                      this stays put and fills in when it finishes.
+                                    </div>
+                                  </>
+                                ) : "Reads the figures out of the filing itself, then checks each one against Screener. Two independent sources agreeing is evidence; the model's reading on its own is not."}
                               </div>
-                            ) : pending.ai_status === "failed" ? (
-                              <div style={{ fontSize: "11px", color: "var(--negative-strong)", marginTop: "8px" }}>
-                                AI analysis failed — place the order on the filing itself, or try another model above.
-                              </div>
-                            ) : null}
-
-                            {/* Screener's own figures for the quarter, beside
-                                ours. This is what the Results Digest showed in a
-                                second list of these same rows. */}
-                            {Array.isArray(pending.comparison) && pending.comparison.length > 0 && (
-                              <div style={{ marginTop: "12px", paddingTop: "10px", borderTop: "1px solid var(--border-subtle)" }}>
-                                <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--info)", marginBottom: "6px", letterSpacing: "0.4px" }}>
-                                  SCREENER COMPARISON
+                            ) : (
+                              <>
+                                <div style={{ fontSize: "11px", color: "var(--text-secondary)", lineHeight: 1.55, marginBottom: "10px" }}>
+                                  {ex.confidence.reason}
                                 </div>
-                                {!pending.screener?.ok && (
-                                  <div style={{ fontSize: "10px", color: "var(--text-muted)", marginBottom: "6px" }}>
-                                    {pending.screener?.error === "not fetched yet"
-                                      ? "Screener figures still being fetched — refresh shortly."
-                                      : `Screener unavailable — ${pending.screener?.error || "no data"}`}
+
+                                {Array.isArray(ex.confidence.flags) && ex.confidence.flags.length > 0 && (
+                                  <div style={{ display: "flex", flexWrap: "wrap", gap: "5px", marginBottom: "10px" }}>
+                                    {ex.confidence.flags.map(f => (
+                                      <span key={f} title="A validation check the extractor raised on this reading"
+                                        style={{ fontSize: "9px", fontFamily: "ui-monospace, Menlo, monospace",
+                                                 color: "var(--warning)", background: "var(--warning-bg)",
+                                                 padding: "2px 6px", borderRadius: "4px" }}>
+                                        {f}
+                                      </span>
+                                    ))}
                                   </div>
                                 )}
-                                <ScreenerComparison
-                                  rows={pending.comparison}
-                                  quarter={pending.screener?.quarter}
-                                  analysed={pending.ai_status === "done" && !!ai}
-                                />
-                                {pending.screener?.source_url && (
-                                  <div style={{ fontSize: "10px", color: "var(--text-faint)", marginTop: "6px" }}>
-                                    <a href={pending.screener.source_url} target="_blank" rel="noreferrer" style={{ color: "var(--text-muted)" }}>screener.in</a>
+
+                                {ex.quarter && !ex.covers_screener_quarter && ex.screener_quarter && (
+                                  <div style={{ fontSize: "10px", color: "var(--warning)", marginBottom: "8px" }}>
+                                    The filing covers {ex.quarter}; Screener's latest is {ex.screener_quarter}.
+                                    The two describe different periods, so the gaps below are not errors.
                                   </div>
                                 )}
-                              </div>
+
+                                {Array.isArray(ex.comparisons) && ex.comparisons.length > 0 && (
+                                  <div style={{ overflowX: "auto" }}>
+                                    <table style={{ borderCollapse: "collapse", fontSize: "11px", width: "100%", minWidth: "440px" }}>
+                                      <thead>
+                                        <tr>
+                                          {["", `From the filing${ex.quarter ? ` (${ex.quarter})` : ""}`, "Screener", "Gap", ""].map((h, i) => (
+                                            <th key={i} style={{ textAlign: i === 0 || i === 4 ? "left" : "right",
+                                                                 padding: "4px 8px", color: "var(--text-muted)", fontWeight: 600,
+                                                                 fontSize: "10px", borderBottom: "1px solid var(--border-subtle)",
+                                                                 whiteSpace: "nowrap" }}>{h}</th>
+                                          ))}
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {ex.comparisons.map(c => (
+                                          <tr key={c.metric}>
+                                            <td style={{ padding: "4px 8px", fontWeight: 600, color: "var(--text-primary)", whiteSpace: "nowrap" }}>
+                                              {LABEL[c.metric] || c.metric}
+                                            </td>
+                                            <td style={{ padding: "4px 8px", textAlign: "right", whiteSpace: "nowrap",
+                                                         color: c.pdf == null ? "var(--text-faint)" : "var(--text-primary)" }}>
+                                              {c.pdf == null ? "—" : c.pdf.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                                            </td>
+                                            <td style={{ padding: "4px 8px", textAlign: "right", whiteSpace: "nowrap",
+                                                         color: c.screener == null ? "var(--text-faint)" : "var(--text-secondary)" }}>
+                                              {c.screener == null ? "—" : c.screener.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                                            </td>
+                                            <td style={{ padding: "4px 8px", textAlign: "right", whiteSpace: "nowrap",
+                                                         color: c.agrees === true ? "var(--positive)"
+                                                           : c.agrees === false ? "var(--negative)" : "var(--text-faint)" }}>
+                                              {c.gap_pct == null ? "—" : `${c.gap_pct > 0 ? "+" : ""}${c.gap_pct.toFixed(2)}%`}
+                                            </td>
+                                            <td style={{ padding: "4px 8px", fontSize: "9px", color: "var(--text-faint)", lineHeight: 1.4 }}>
+                                              {c.note || (c.agrees === true ? "agrees" : c.agrees === false ? "differs" : "")}
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                )}
+                              </>
                             )}
-                          </>
-                        )}
-                      </div>
-                      </CardBoundary>
-                    )}
-                  </div>
+                          </div>
+                        );
+                      })() : (
+                        <>
+                          {/* Model choice applies to this run only; it does not
+                              change the configured default for future filings. */}
+                          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px", marginBottom: "10px" }}>
+                            <span style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 600 }}>MODEL</span>
+                            <select
+                              value={modelChoice}
+                              onChange={e => setReanalyseModel(prev => ({ ...prev, [pending.id]: e.target.value }))}
+                              style={{ padding: "5px 8px", fontSize: "11px", background: "var(--bg-sunken)", border: "1px solid var(--border-default)", borderRadius: "6px", color: "var(--text-primary)", maxWidth: "280px" }}>
+                              {AI_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                            </select>
+                            {modelChoice === "__custom__" && (
+                              <input
+                                value={customModel[pending.id] || ""}
+                                onChange={e => setCustomModel(prev => ({ ...prev, [pending.id]: e.target.value }))}
+                                placeholder="provider/model-id"
+                                style={{ padding: "5px 8px", fontSize: "11px", minWidth: "200px", background: "var(--bg-sunken)", border: "1px solid var(--border-default)", borderRadius: "6px", color: "var(--text-primary)" }}
+                              />
+                            )}
+                            <button
+                              onClick={() => handleReanalyse(pending)}
+                              disabled={reanalysing || pending.ai_status === "running"}
+                              title="Run the earnings analysis again. The verdict on screen is kept until the new one lands."
+                              style={{
+                                display: "inline-flex", alignItems: "center", gap: "5px",
+                                padding: "5px 12px", borderRadius: "6px",
+                                background: "var(--ai-bg)", border: "1px solid rgba(176, 155, 217, 0.3)",
+                                color: "var(--ai)", fontSize: "11px", fontWeight: 700,
+                                cursor: (reanalysing || pending.ai_status === "running") ? "not-allowed" : "pointer",
+                                opacity: (reanalysing || pending.ai_status === "running") ? 0.6 : 1,
+                              }}>
+                              <RefreshCw size={11} className={pending.ai_status === "running" ? "spin" : undefined} />
+                              {pending.ai_status === "running" ? "Analysing…" : "Re-analyse"}
+                            </button>
+                          </div>
+
+                          {pending.ai_status === "done" && ai ? (
+                            <div style={{ marginTop: "8px" }}>
+                              <MetricsTable metrics={ai.metrics} />
+                              <ValidationNotice v={ai.validation} />
+                              <div style={{ fontSize: "11px", color: "var(--text-secondary)", lineHeight: 1.55, marginTop: "8px" }}>{ai.ai_summary}</div>
+                              {(ai.future_growth_outlook || ai.future_projected_numbers) && (
+                                <div style={{ display: "flex", flexDirection: "column", gap: "3px", marginTop: "8px", fontSize: "10px", color: "var(--text-muted)" }}>
+                                  {ai.future_growth_outlook && <span><b style={{ color: "var(--text-primary)" }}>Outlook:</b> {ai.future_growth_outlook}</span>}
+                                  {ai.future_projected_numbers && <span><b style={{ color: "var(--text-primary)" }}>Projected:</b> {ai.future_projected_numbers}</span>}
+                                </div>
+                              )}
+                            </div>
+                          ) : pending.ai_status === "failed" ? (
+                            <div style={{ fontSize: "11px", color: "var(--negative-strong)", marginTop: "8px" }}>
+                              AI analysis failed — place the order on the filing itself, or try another model above.
+                            </div>
+                          ) : null}
+
+                          {/* Screener's own figures for the quarter, beside
+                              ours. This is what the Results Digest showed in a
+                              second list of these same rows. */}
+                          {Array.isArray(pending.comparison) && pending.comparison.length > 0 && (
+                            <div style={{ marginTop: "12px", paddingTop: "10px", borderTop: "1px solid var(--border-subtle)" }}>
+                              <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--info)", marginBottom: "6px", letterSpacing: "0.4px" }}>
+                                SCREENER COMPARISON
+                              </div>
+                              {!pending.screener?.ok && (
+                                <div style={{ fontSize: "10px", color: "var(--text-muted)", marginBottom: "6px" }}>
+                                  {pending.screener?.error === "not fetched yet"
+                                    ? "Screener figures still being fetched — refresh shortly."
+                                    : `Screener unavailable — ${pending.screener?.error || "no data"}`}
+                                </div>
+                              )}
+                              <ScreenerComparison
+                                rows={pending.comparison}
+                                quarter={pending.screener?.quarter}
+                                analysed={pending.ai_status === "done" && !!ai}
+                              />
+                              {pending.screener?.source_url && (
+                                <div style={{ fontSize: "10px", color: "var(--text-faint)", marginTop: "6px" }}>
+                                  <a href={pending.screener.source_url} target="_blank" rel="noreferrer" style={{ color: "var(--text-muted)" }}>screener.in</a>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                    </CardBoundary>
+                  )}
                 </div>
-              );
-            })}
-          </div>
+              </div>
+            );
+          })}
         </div>
-      )}
+      </div>
 
       {/* The Results Digest panel used to live here. It was a second list
           of the same PendingResultOrder rows the panel above renders — same
