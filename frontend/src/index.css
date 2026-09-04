@@ -16,16 +16,24 @@
 
   /* ===================================================================
      COLOUR SYSTEM
-     Tuned for long sessions in front of a dark screen. Three rules:
+     Tuned for long sessions in front of a dark screen. Four rules:
 
-     1. Never pure white on near-black. The old pairing measured 17.9:1, which
-        makes glyph edges bloom (worse with astigmatism). Primary text now sits
-        at 15:1 and is very slightly cool-neutral instead of pure white.
-     2. Never fully saturated accents. The old palette ran 72-100% saturation;
-        the eye cannot focus deep red and deep blue at the same depth, so
-        saturated hues on dark shimmer. Everything here is 38-72%.
-     3. Surfaces step in even, small increments so depth reads without any
-        single edge being harsh.
+     1. The base is not near-black. It was #0f1319 — 7% lightness — and a
+        screen that is almost entirely near-black holds the pupil wide open,
+        so every bright glyph and every coloured chip blooms at its edges.
+        The base sits at 12% now. Contrast against text is *lower* than the
+        old palette and the text is easier to read, which is the whole point:
+        past roughly 12:1 more contrast stops buying legibility and starts
+        buying halation.
+     2. Never fully saturated accents. The old accent blue measured 100%
+        saturation and the loss red 81% — the eye cannot focus deep red and
+        deep blue at the same depth, so saturated hues on dark shimmer.
+        Everything here is 43-62%.
+     3. Surfaces step in even increments of ~8/255 so depth reads without
+        any single edge being harsh.
+     4. Colour is signal, not decoration. Fills sit at 9% and borders at 18%
+        (they were 12% and 30%), so a row of status chips recedes behind the
+        text it annotates instead of competing with it.
 
      Positive/negative are separated by BOTH hue-shift (green leans teal, red
      leans orange) and luminance, so they stay distinguishable with red-green
@@ -33,64 +41,70 @@
      =================================================================== */
 
   /* Surfaces — elevation ladder, never pure black */
-  --bg-base:       #0f1319;
-  --bg-sunken:     #0a0d12;
-  --surface-1:     #161b24;
-  --surface-2:     #1c222d;
-  --surface-3:     #232a37;
-  --surface-hover: #2a3240;
+  --bg-base:       #191c22;
+  --bg-sunken:     #14171c;
+  --surface-1:     #21242b;
+  --surface-2:     #282c34;
+  --surface-3:     #30353e;
+  --surface-hover: #383d47;
 
   /* Borders */
-  --border-subtle:  rgba(255, 255, 255, 0.06);
-  --border-default: rgba(255, 255, 255, 0.10);
-  --border-strong:  rgba(255, 255, 255, 0.16);
-  --border-color:   rgba(255, 255, 255, 0.10);
+  --border-subtle:  rgba(255, 255, 255, 0.05);
+  --border-default: rgba(255, 255, 255, 0.09);
+  --border-strong:  rgba(255, 255, 255, 0.14);
+  --border-color:   rgba(255, 255, 255, 0.09);
 
-  /* Text — every step stays at or above 4.5:1 on --bg-base, so nothing here
-     forces you to squint. --text-faint was previously #5a6475 (3.1:1), which
-     was being used for real labels like index names, not just decoration. */
-  --text-primary:   #e3e7ee;   /* 15.0:1 */
-  --text-secondary: #a8b2c4;   /*  8.7:1 */
-  --text-muted:     #8b95a6;   /*  6.0:1 */
-  --text-faint:     #7c8698;   /*  5.0:1 */
+  /* Text. Ratios are given against --bg-base and against --surface-2, because
+     most small labels sit on a card rather than on the page — targeting the
+     base alone put ten-pixel labels at ~4.1:1, under AA. Every step now clears
+     4.5:1 on both, and the top step stops short of the 15:1 that was making
+     glyph edges bloom (worse with astigmatism). */
+  --text-primary:   #dde1e8;   /* 13.0:1 base / 10.7:1 card */
+  --text-secondary: #aeb5c1;   /*  8.3:1      /  6.8:1 */
+  --text-muted:     #9ba3b0;   /*  6.7:1      /  5.5:1 */
+  --text-faint:     #8f97a5;   /*  5.8:1      /  4.8:1 */
 
   /* Text placed ON a filled accent/semantic button. The fills are light, so
      white lands at 2.2-2.9:1 there — worse than the dark surfaces it was
-     borrowed from. Near-black gives 6.6-8.6:1 on every fill. */
-  --on-accent: #0b1017;
+     borrowed from. Near-black gives 7.3-8.8:1 on every fill. */
+  --on-accent: #12151a;
 
   /* Positive / gain */
-  --positive:        #3fbf87;
-  --positive-strong: #52d69a;
-  --positive-bg:     rgba(63, 191, 135, 0.12);
-  --positive-border: rgba(63, 191, 135, 0.30);
+  --positive:        #5bbe93;  /* 7.5:1 base / 6.2:1 card */
+  --positive-strong: #7ccfa8;
+  --positive-bg:     rgba(91, 190, 147, 0.09);
+  --positive-border: rgba(91, 190, 147, 0.18);
 
   /* Negative / loss */
-  --negative:        #f0736f;
-  --negative-strong: #ff8a86;
-  --negative-bg:     rgba(240, 115, 111, 0.12);
-  --negative-border: rgba(240, 115, 111, 0.30);
+  --negative:        #e28d83;  /* 6.8:1      / 5.6:1 */
+  --negative-strong: #f0a49c;
+  --negative-bg:     rgba(226, 141, 131, 0.09);
+  --negative-border: rgba(226, 141, 131, 0.18);
 
   /* Warning / pending */
-  --warning:        #e0a33e;
-  --warning-bg:     rgba(224, 163, 62, 0.12);
-  --warning-border: rgba(224, 163, 62, 0.30);
+  --warning:        #d8ae64;  /* 8.3:1      / 6.8:1 */
+  --warning-bg:     rgba(216, 174, 100, 0.09);
+  --warning-border: rgba(216, 174, 100, 0.18);
 
   /* Primary action */
-  --accent:        #5b9dff;
-  --accent-strong: #7db0ff;
-  --accent-bg:     rgba(91, 157, 255, 0.12);
-  --accent-border: rgba(91, 157, 255, 0.30);
-  --accent-glow:   rgba(91, 157, 255, 0.28);
+  --accent:        #7fa6e1;  /* 6.9:1      / 5.6:1 */
+  --accent-strong: #9ab8e9;
+  --accent-bg:     rgba(127, 166, 225, 0.09);
+  --accent-border: rgba(127, 166, 225, 0.18);
+  --accent-glow:   rgba(127, 166, 225, 0.18);
 
   /* Informational */
-  --info:    #4fb8d9;
-  --info-bg: rgba(79, 184, 217, 0.12);
+  --info:    #68b3ca;
+  --info-bg: rgba(104, 179, 202, 0.09);
 
   /* AI / analysis */
-  --ai:        #a48ae0;
-  --ai-bg:     rgba(164, 138, 224, 0.12);
-  --ai-border: rgba(164, 138, 224, 0.30);
+  --ai:        #b09bd9;  /* 6.9:1      / 5.7:1 */
+  --ai-bg:     rgba(176, 155, 217, 0.09);
+  --ai-border: rgba(176, 155, 217, 0.18);
+
+  /* Neutral / hold — a signal that deliberately reads as "no signal" */
+  --neutral:    #9ba3b0;
+  --neutral-bg: rgba(160, 168, 180, 0.09);
 
   /* Legacy aliases so older rules keep resolving */
   --bg-main:       var(--bg-base);
@@ -123,12 +137,12 @@ body {
 
 /* ===== ANIMATIONS ===== */
 @keyframes flash-green {
-  0% { background-color: rgba(63, 191, 135, 0.35); }
+  0% { background-color: rgba(91, 190, 147, 0.22); }
   100% { background-color: transparent; }
 }
 
 @keyframes flash-red {
-  0% { background-color: rgba(240, 115, 111, 0.35); }
+  0% { background-color: rgba(226, 141, 131, 0.22); }
   100% { background-color: transparent; }
 }
 
@@ -209,7 +223,7 @@ input {
 .search-dropdown::-webkit-scrollbar-thumb:hover,
 .news-scroll-area::-webkit-scrollbar-thumb:hover,
 .modal-scroll-area::-webkit-scrollbar-thumb:hover {
-  background: rgba(91, 157, 255, 0.4);
+  background: rgba(127, 166, 225, 0.26);
 }
 
 /* ===== APP LAYOUT ===== */
@@ -228,7 +242,7 @@ input {
   justify-content: space-between;
   padding: 0 24px;
   border-bottom: 1px solid var(--border-color);
-  background: rgba(15, 19, 25, 0.85);
+  background: rgba(25, 28, 34, 0.85);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   height: 52px;
@@ -257,7 +271,7 @@ input {
   padding: 7px 12px;
   border-radius: 8px;
   border: 1px solid var(--border-color);
-  background: rgba(10, 13, 18, 0.7);
+  background: rgba(20, 23, 28, 0.7);
   transition: all 0.2s ease;
 }
 
@@ -275,7 +289,7 @@ input {
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: var(--surface-1);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.65);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
   z-index: 1000;
   max-height: 220px;
   overflow-y: auto;
@@ -300,7 +314,7 @@ input {
 
 /* ===== DATA SECTION (Watchlist / Movers) ===== */
 .data-section {
-  background: rgba(22, 27, 36, 0.6);
+  background: rgba(33, 36, 43, 0.6);
   border: 1px solid var(--border-color);
   border-radius: 10px;
   backdrop-filter: blur(8px);
@@ -315,7 +329,7 @@ input {
   gap: 14px;
   padding: 8px 16px;
   border-bottom: 1px solid var(--border-color);
-  background: rgba(15, 19, 25, 0.5);
+  background: rgba(25, 28, 34, 0.5);
   flex-wrap: wrap;
 }
 
@@ -359,12 +373,12 @@ input {
 }
 
 .toggle-btn.active-gain {
-  background: rgba(63, 191, 135, 0.15);
+  background: rgba(91, 190, 147, 0.1);
   color: var(--success-color);
 }
 
 .toggle-btn.active-loss {
-  background: rgba(240, 115, 111, 0.15);
+  background: rgba(226, 141, 131, 0.1);
   color: var(--danger-color);
 }
 
@@ -391,7 +405,7 @@ input {
 .period-pill.active {
   background: var(--accent-color);
   color: var(--on-accent);
-  box-shadow: 0 2px 6px rgba(91, 157, 255, 0.3);
+  box-shadow: 0 2px 6px rgba(127, 166, 225, 0.18);
 }
 
 .period-pill:hover:not(.active) {
@@ -416,7 +430,7 @@ input {
   text-transform: uppercase;
   color: var(--text-muted);
   border-bottom: 1px solid var(--border-color);
-  background: rgba(15, 19, 25, 0.4);
+  background: rgba(25, 28, 34, 0.4);
   letter-spacing: 0.05em;
   white-space: nowrap;
   position: sticky;
@@ -444,7 +458,7 @@ input {
 }
 
 .stock-data-table tbody tr.active {
-  background: rgba(91, 157, 255, 0.06);
+  background: rgba(127, 166, 225, 0.06);
   box-shadow: inset 3px 0 0 var(--accent-color);
 }
 
@@ -479,33 +493,33 @@ input {
 }
 
 .trend-badge.strong-buy {
-  background: rgba(63, 191, 135, 0.22);
+  background: rgba(91, 190, 147, 0.14);
   color: var(--positive);
-  border: 1px solid rgba(63, 191, 135, 0.45);
+  border: 1px solid rgba(91, 190, 147, 0.3);
 }
 
 .trend-badge.buy {
-  background: rgba(63, 191, 135, 0.15);
+  background: rgba(91, 190, 147, 0.1);
   color: var(--positive-strong);
-  border: 1px solid rgba(63, 191, 135, 0.3);
+  border: 1px solid rgba(91, 190, 147, 0.18);
 }
 
 .trend-badge.hold {
-  background: rgba(125, 135, 153, 0.15);
+  background: rgba(160, 168, 180, 0.1);
   color: var(--text-muted);
-  border: 1px solid rgba(125, 135, 153, 0.3);
+  border: 1px solid rgba(160, 168, 180, 0.18);
 }
 
 .trend-badge.sell {
-  background: rgba(240, 115, 111, 0.15);
+  background: rgba(226, 141, 131, 0.1);
   color: var(--negative-strong);
-  border: 1px solid rgba(240, 115, 111, 0.3);
+  border: 1px solid rgba(226, 141, 131, 0.18);
 }
 
 .trend-badge.strong-sell {
-  background: rgba(240, 115, 111, 0.22);
+  background: rgba(226, 141, 131, 0.14);
   color: var(--negative);
-  border: 1px solid rgba(240, 115, 111, 0.45);
+  border: 1px solid rgba(226, 141, 131, 0.3);
 }
 
 
@@ -521,21 +535,21 @@ input {
 }
 
 .ai-badge.buy {
-  background: rgba(63, 191, 135, 0.15);
+  background: rgba(91, 190, 147, 0.1);
   color: var(--success-color);
-  border: 1px solid rgba(63, 191, 135, 0.3);
+  border: 1px solid rgba(91, 190, 147, 0.18);
 }
 
 .ai-badge.sell {
-  background: rgba(240, 115, 111, 0.15);
+  background: rgba(226, 141, 131, 0.1);
   color: var(--danger-color);
-  border: 1px solid rgba(240, 115, 111, 0.3);
+  border: 1px solid rgba(226, 141, 131, 0.18);
 }
 
 .ai-badge.hold {
-  background: rgba(224, 163, 62, 0.15);
+  background: rgba(216, 174, 100, 0.1);
   color: var(--warning);
-  border: 1px solid rgba(224, 163, 62, 0.3);
+  border: 1px solid rgba(216, 174, 100, 0.18);
 }
 
 /* ===== ACTION BUTTONS ===== */
@@ -554,7 +568,7 @@ input {
 
 .action-btn-danger:hover {
   color: var(--danger-color);
-  background: rgba(240, 115, 111, 0.12);
+  background: rgba(226, 141, 131, 0.09);
 }
 
 .action-btn-add {
@@ -572,7 +586,7 @@ input {
 
 .action-btn-add:hover {
   color: var(--accent-color);
-  background: rgba(91, 157, 255, 0.12);
+  background: rgba(127, 166, 225, 0.09);
 }
 
 .action-btn-add.in-watchlist {
@@ -595,7 +609,7 @@ input {
 
 .action-btn-refresh:hover:not(:disabled) {
   color: var(--success-color);
-  background: rgba(63, 191, 135, 0.12);
+  background: rgba(91, 190, 147, 0.09);
 }
 
 .action-btn-refresh:disabled {
@@ -639,12 +653,12 @@ input {
 }
 
 .pill-change.positive {
-  background: rgba(63, 191, 135, 0.12);
+  background: rgba(91, 190, 147, 0.09);
   color: var(--success-color);
 }
 
 .pill-change.negative {
-  background: rgba(240, 115, 111, 0.12);
+  background: rgba(226, 141, 131, 0.09);
   color: var(--danger-color);
 }
 
@@ -656,7 +670,7 @@ input {
 }
 
 .stats-card {
-  background: rgba(28, 34, 45, 0.45);
+  background: rgba(40, 44, 52, 0.45);
   border: 1px solid rgba(255, 255, 255, 0.04);
   padding: 12px 14px;
   border-radius: 8px;
@@ -681,7 +695,7 @@ input {
 
 /* ===== MODAL: CHART CARD ===== */
 .chart-card {
-  background: rgba(28, 34, 45, 0.25);
+  background: rgba(40, 44, 52, 0.25);
   border: 1px solid rgba(255, 255, 255, 0.04);
   padding: 16px;
   border-radius: 10px;
@@ -702,7 +716,7 @@ input {
 }
 
 .info-card {
-  background: rgba(28, 34, 45, 0.35);
+  background: rgba(40, 44, 52, 0.35);
   border: 1px solid rgba(255, 255, 255, 0.04);
   padding: 16px;
   border-radius: 10px;
@@ -743,7 +757,7 @@ input {
 }
 
 .modal-scroll-area::-webkit-scrollbar-thumb:hover {
-  background: rgba(91, 157, 255, 0.5);
+  background: rgba(127, 166, 225, 0.34);
 }
 
 /* ===== CHATBOT STYLES ===== */
@@ -778,7 +792,7 @@ input {
   background: linear-gradient(135deg, var(--accent) 0%, var(--accent) 100%);
   color: var(--on-accent);
   border-bottom-right-radius: 2px;
-  box-shadow: 0 4px 12px rgba(91, 157, 255, 0.2);
+  box-shadow: 0 4px 12px rgba(127, 166, 225, 0.13);
 }
 
 .chat-bubble.assistant {
@@ -798,7 +812,7 @@ input {
 
 .chat-input-field {
   flex: 1;
-  background: rgba(15, 19, 25, 0.6);
+  background: rgba(25, 28, 34, 0.6);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
   padding: 8px 12px;
@@ -810,8 +824,8 @@ input {
 
 .chat-input-field:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(91, 157, 255, 0.2);
-  background: rgba(15, 19, 25, 0.85);
+  box-shadow: 0 0 0 2px rgba(127, 166, 225, 0.13);
+  background: rgba(25, 28, 34, 0.85);
 }
 
 .chat-send-btn {
@@ -829,7 +843,7 @@ input {
 
 .chat-send-btn:hover:not(:disabled) {
   background: var(--accent);
-  box-shadow: 0 4px 12px rgba(91, 157, 255, 0.3);
+  box-shadow: 0 4px 12px rgba(127, 166, 225, 0.18);
   transform: translateY(-1px);
 }
 
@@ -887,7 +901,7 @@ input {
 }
 
 .index-card {
-  background: rgba(28, 34, 45, 0.45);
+  background: rgba(40, 44, 52, 0.45);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   padding: 6px 14px;

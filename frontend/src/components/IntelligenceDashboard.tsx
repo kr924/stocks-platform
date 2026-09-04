@@ -647,24 +647,24 @@ function IntelligenceDashboardContent() {
     switch (sentiment) {
       case "positive":
         return {
-          bg: "rgba(63, 191, 135, 0.18)",
+          bg: "rgba(91, 190, 147, 0.12)",
           text: "var(--positive-strong)",
-          border: "rgba(63, 191, 135, 0.4)",
+          border: "rgba(91, 190, 147, 0.26)",
           badgeText: "Positive Impact"
         };
       case "negative":
         return {
-          bg: "rgba(240, 115, 111, 0.18)",
+          bg: "rgba(226, 141, 131, 0.12)",
           text: "var(--negative)",
-          border: "rgba(240, 115, 111, 0.4)",
+          border: "rgba(226, 141, 131, 0.26)",
           badgeText: "Negative Impact"
         };
       case "neutral":
       default:
         return {
-          bg: "rgba(79, 184, 217, 0.15)",
+          bg: "rgba(104, 179, 202, 0.1)",
           text: "var(--info)",
-          border: "rgba(79, 184, 217, 0.35)",
+          border: "rgba(104, 179, 202, 0.22)",
           badgeText: "Neutral / Minimal"
         };
     }
@@ -779,33 +779,33 @@ function IntelligenceDashboardContent() {
 
   const getCategoryLabel = (category: string | undefined, eventType: string) => {
     if (!category) {
-      if (eventType === "board_meeting") return { label: "Board Meeting", icon: "🏛️", color: "var(--ai)", bg: "rgba(164, 138, 224, 0.15)" };
-      if (eventType === "announcement") return { label: "Announcement", icon: "📢", color: "var(--accent-strong)", bg: "rgba(91, 157, 255, 0.15)" };
-      return { label: eventType.replace("_", " "), icon: "📝", color: "var(--text-muted)", bg: "rgba(125, 135, 153, 0.15)" };
+      if (eventType === "board_meeting") return { label: "Board Meeting", icon: "🏛️", color: "var(--ai)", bg: "rgba(176, 155, 217, 0.1)" };
+      if (eventType === "announcement") return { label: "Announcement", icon: "📢", color: "var(--accent-strong)", bg: "rgba(127, 166, 225, 0.1)" };
+      return { label: eventType.replace("_", " "), icon: "📝", color: "var(--text-muted)", bg: "rgba(160, 168, 180, 0.1)" };
     }
     const cat = category.toLowerCase();
     switch (cat) {
       case "board_meeting":
-        return { label: "Board Meeting", icon: "🏛️", color: "var(--ai)", bg: "rgba(164, 138, 224, 0.15)" };
+        return { label: "Board Meeting", icon: "🏛️", color: "var(--ai)", bg: "rgba(176, 155, 217, 0.1)" };
       case "earnings":
-        return { label: "Earnings/Results", icon: "📊", color: "var(--positive-strong)", bg: "rgba(63, 191, 135, 0.15)" };
+        return { label: "Earnings/Results", icon: "📊", color: "var(--positive-strong)", bg: "rgba(91, 190, 147, 0.1)" };
       case "corporate_action":
-        return { label: "Corporate Action", icon: "⚡", color: "var(--warning)", bg: "rgba(234, 179, 8, 0.15)" };
+        return { label: "Corporate Action", icon: "⚡", color: "var(--warning)", bg: "rgba(216, 174, 100, 0.1)" };
       case "sebi_filing":
-        return { label: "SEBI Filing", icon: "⚖️", color: "var(--accent-strong)", bg: "rgba(91, 157, 255, 0.15)" };
+        return { label: "SEBI Filing", icon: "⚖️", color: "var(--accent-strong)", bg: "rgba(127, 166, 225, 0.1)" };
       case "insider_trade":
-        return { label: "Insider Trade", icon: "👤", color: "var(--warning)", bg: "rgba(249, 115, 22, 0.15)" };
+        return { label: "Insider Trade", icon: "👤", color: "var(--warning)", bg: "rgba(216, 174, 100, 0.1)" };
       case "bulk_deal":
-        return { label: "Bulk/Block Deal", icon: "💼", color: "var(--ai)", bg: "rgba(236, 72, 153, 0.15)" };
+        return { label: "Bulk/Block Deal", icon: "💼", color: "var(--ai)", bg: "rgba(176, 155, 217, 0.1)" };
       case "credit_rating":
-        return { label: "Credit Rating", icon: "⭐️", color: "var(--ai)", bg: "rgba(139, 92, 246, 0.15)" };
+        return { label: "Credit Rating", icon: "⭐️", color: "var(--ai)", bg: "rgba(176, 155, 217, 0.1)" };
       case "filing":
-        return { label: "Quarterly Filing", icon: "📁", color: "var(--text-secondary)", bg: "rgba(125, 135, 153, 0.15)" };
+        return { label: "Quarterly Filing", icon: "📁", color: "var(--text-secondary)", bg: "rgba(160, 168, 180, 0.1)" };
       case "news":
       case "market_update":
-        return { label: "Market News", icon: "📰", color: "var(--info)", bg: "rgba(6, 182, 212, 0.15)" };
+        return { label: "Market News", icon: "📰", color: "var(--info)", bg: "rgba(104, 179, 202, 0.1)" };
       default:
-        return { label: category.replace("_", " "), icon: "📝", color: "var(--text-muted)", bg: "rgba(125, 135, 153, 0.15)" };
+        return { label: category.replace("_", " "), icon: "📝", color: "var(--text-muted)", bg: "rgba(160, 168, 180, 0.1)" };
     }
   };
 
@@ -997,15 +997,15 @@ function IntelligenceDashboardContent() {
                 fontWeight: "600",
                 background:
                   sseStatus === "connected"
-                    ? "rgba(63, 191, 135, 0.1)"
+                    ? "rgba(91, 190, 147, 0.08)"
                     : sseStatus === "connecting"
-                      ? "rgba(234, 179, 8, 0.1)"
-                      : "rgba(240, 115, 111, 0.1)",
+                      ? "rgba(216, 174, 100, 0.08)"
+                      : "rgba(226, 141, 131, 0.08)",
                 border: `1px solid ${sseStatus === "connected"
-                  ? "rgba(63, 191, 135, 0.25)"
+                  ? "rgba(91, 190, 147, 0.16)"
                   : sseStatus === "connecting"
-                    ? "rgba(234, 179, 8, 0.25)"
-                    : "rgba(240, 115, 111, 0.25)"
+                    ? "rgba(216, 174, 100, 0.16)"
+                    : "rgba(226, 141, 131, 0.16)"
                   }`,
                 color:
                   sseStatus === "connected"
@@ -1042,7 +1042,7 @@ function IntelligenceDashboardContent() {
                         : "none",
                   boxShadow:
                     sseStatus === "connected"
-                      ? "0 0 6px rgba(63, 191, 135, 0.6)"
+                      ? "0 0 6px rgba(91, 190, 147, 0.6)"
                       : "none",
                 }}
               />
@@ -1060,8 +1060,8 @@ function IntelligenceDashboardContent() {
                 display: "flex",
                 alignItems: "center",
                 gap: "6px",
-                backgroundColor: localLlmEnabled ? "rgba(63, 191, 135, 0.12)" : "rgba(240, 115, 111, 0.15)",
-                border: localLlmEnabled ? "1px solid rgba(63, 191, 135, 0.3)" : "1px solid rgba(240, 115, 111, 0.4)",
+                backgroundColor: localLlmEnabled ? "rgba(91, 190, 147, 0.09)" : "rgba(226, 141, 131, 0.1)",
+                border: localLlmEnabled ? "1px solid rgba(91, 190, 147, 0.18)" : "1px solid rgba(226, 141, 131, 0.26)",
                 color: localLlmEnabled ? "var(--positive-strong)" : "var(--negative-strong)",
                 borderRadius: "8px",
                 padding: "8px 14px",
@@ -1082,8 +1082,8 @@ function IntelligenceDashboardContent() {
                 display: "flex",
                 alignItems: "center",
                 gap: "6px",
-                backgroundColor: "rgba(91, 157, 255, 0.1)",
-                border: "1px solid rgba(91, 157, 255, 0.2)",
+                backgroundColor: "rgba(127, 166, 225, 0.08)",
+                border: "1px solid rgba(127, 166, 225, 0.13)",
                 color: "var(--accent)",
                 borderRadius: "8px",
                 padding: "8px 14px",
@@ -1093,10 +1093,10 @@ function IntelligenceDashboardContent() {
                 transition: "all 0.2s"
               }}
               onMouseOver={(e) => {
-                e.currentTarget.style.backgroundColor = "rgba(91, 157, 255, 0.2)";
+                e.currentTarget.style.backgroundColor = "rgba(127, 166, 225, 0.13)";
               }}
               onMouseOut={(e) => {
-                e.currentTarget.style.backgroundColor = "rgba(91, 157, 255, 0.1)";
+                e.currentTarget.style.backgroundColor = "rgba(127, 166, 225, 0.08)";
               }}
               disabled={pollingNow}
             >
@@ -1115,8 +1115,8 @@ function IntelligenceDashboardContent() {
                 borderRadius: "8px",
                 fontSize: "12px",
                 fontWeight: "600",
-                background: showLogsDrawer ? "rgba(164, 138, 224, 0.25)" : "rgba(164, 138, 224, 0.1)",
-                border: "1px solid rgba(164, 138, 224, 0.3)",
+                background: showLogsDrawer ? "rgba(176, 155, 217, 0.16)" : "rgba(176, 155, 217, 0.08)",
+                border: "1px solid rgba(176, 155, 217, 0.18)",
                 color: "var(--ai)",
                 cursor: "pointer",
                 transition: "all 0.2s"
@@ -1128,7 +1128,7 @@ function IntelligenceDashboardContent() {
               {aiLogs.length > 0 && (
                 <span style={{
                   background: "var(--ai)",
-                  color: "var(--text-primary)",
+                  color: "var(--on-accent)",
                   fontSize: "10px",
                   borderRadius: "10px",
                   padding: "1px 6px",
@@ -1148,7 +1148,7 @@ function IntelligenceDashboardContent() {
           gap: "10px",
           padding: "10px 14px",
           borderRadius: "12px",
-          background: "linear-gradient(135deg, rgba(15, 19, 25, 0.9), rgba(28, 34, 45, 0.8))",
+          background: "linear-gradient(135deg, rgba(25, 28, 34, 0.9), rgba(40, 44, 52, 0.8))",
           border: "1px solid rgba(255, 255, 255, 0.1)",
           boxShadow: "0 4px 20px rgba(0, 0, 0, 0.3)",
           overflowX: "auto",
@@ -1169,12 +1169,12 @@ function IntelligenceDashboardContent() {
               borderRadius: "8px",
               fontSize: "12px",
               fontWeight: "700",
-              border: filterCategory === "finance_ai" || filterCategory === "all" ? "1px solid rgba(91, 157, 255, 0.6)" : "1px solid rgba(255, 255, 255, 0.08)",
+              border: filterCategory === "finance_ai" || filterCategory === "all" ? "1px solid rgba(127, 166, 225, 0.6)" : "1px solid rgba(255, 255, 255, 0.08)",
               background: filterCategory === "finance_ai" || filterCategory === "all"
-                ? "linear-gradient(135deg, rgba(91, 157, 255, 0.35), rgba(124, 58, 237, 0.35))"
-                : "rgba(22, 27, 36, 0.6)",
+                ? "linear-gradient(135deg, rgba(127, 166, 225, 0.22), rgba(176, 155, 217, 0.22))"
+                : "rgba(33, 36, 43, 0.6)",
               color: filterCategory === "finance_ai" || filterCategory === "all" ? "var(--accent)" : "var(--text-muted)",
-              boxShadow: filterCategory === "finance_ai" || filterCategory === "all" ? "0 0 14px rgba(91, 157, 255, 0.35)" : "none",
+              boxShadow: filterCategory === "finance_ai" || filterCategory === "all" ? "0 0 14px rgba(127, 166, 225, 0.22)" : "none",
               cursor: "pointer",
               transition: "all 0.2s ease"
             }}
@@ -1187,7 +1187,7 @@ function IntelligenceDashboardContent() {
               padding: "2px 6px",
               borderRadius: "10px",
               backgroundColor: filterCategory === "finance_ai" || filterCategory === "all" ? "var(--accent)" : "rgba(255, 255, 255, 0.1)",
-              color: "var(--text-primary)"
+              color: filterCategory === "finance_ai" || filterCategory === "all" ? "var(--on-accent)" : "var(--text-primary)"
             }}>
               DEFAULT
             </span>
@@ -1204,12 +1204,12 @@ function IntelligenceDashboardContent() {
               borderRadius: "8px",
               fontSize: "12px",
               fontWeight: "700",
-              border: filterCategory === "nse_bse_general" || filterCategory === "nse_bse_active" ? "1px solid rgba(63, 191, 135, 0.6)" : "1px solid rgba(255, 255, 255, 0.08)",
+              border: filterCategory === "nse_bse_general" || filterCategory === "nse_bse_active" ? "1px solid rgba(91, 190, 147, 0.6)" : "1px solid rgba(255, 255, 255, 0.08)",
               background: filterCategory === "nse_bse_general" || filterCategory === "nse_bse_active"
-                ? "linear-gradient(135deg, rgba(5, 150, 105, 0.35), rgba(63, 191, 135, 0.35))"
-                : "rgba(22, 27, 36, 0.6)",
+                ? "linear-gradient(135deg, rgba(91, 190, 147, 0.22), rgba(91, 190, 147, 0.22))"
+                : "rgba(33, 36, 43, 0.6)",
               color: filterCategory === "nse_bse_general" || filterCategory === "nse_bse_active" ? "var(--positive-strong)" : "var(--text-muted)",
-              boxShadow: filterCategory === "nse_bse_general" || filterCategory === "nse_bse_active" ? "0 0 14px rgba(63, 191, 135, 0.35)" : "none",
+              boxShadow: filterCategory === "nse_bse_general" || filterCategory === "nse_bse_active" ? "0 0 14px rgba(91, 190, 147, 0.22)" : "none",
               cursor: "pointer",
               transition: "all 0.2s ease"
             }}
@@ -1229,12 +1229,12 @@ function IntelligenceDashboardContent() {
               borderRadius: "8px",
               fontSize: "12px",
               fontWeight: "700",
-              border: filterCategory === "other_news" ? "1px solid rgba(6, 182, 212, 0.6)" : "1px solid rgba(255, 255, 255, 0.08)",
+              border: filterCategory === "other_news" ? "1px solid rgba(104, 179, 202, 0.6)" : "1px solid rgba(255, 255, 255, 0.08)",
               background: filterCategory === "other_news"
-                ? "linear-gradient(135deg, rgba(2, 132, 199, 0.35), rgba(6, 182, 212, 0.35))"
-                : "rgba(22, 27, 36, 0.6)",
+                ? "linear-gradient(135deg, rgba(127, 166, 225, 0.22), rgba(104, 179, 202, 0.22))"
+                : "rgba(33, 36, 43, 0.6)",
               color: filterCategory === "other_news" ? "var(--info)" : "var(--text-muted)",
-              boxShadow: filterCategory === "other_news" ? "0 0 14px rgba(6, 182, 212, 0.35)" : "none",
+              boxShadow: filterCategory === "other_news" ? "0 0 14px rgba(104, 179, 202, 0.22)" : "none",
               cursor: "pointer",
               transition: "all 0.2s ease"
             }}
@@ -1254,12 +1254,12 @@ function IntelligenceDashboardContent() {
               borderRadius: "8px",
               fontSize: "12px",
               fontWeight: "700",
-              border: filterCategory === "auto_skip" ? "1px solid rgba(224, 163, 62, 0.6)" : "1px solid rgba(255, 255, 255, 0.08)",
+              border: filterCategory === "auto_skip" ? "1px solid rgba(216, 174, 100, 0.6)" : "1px solid rgba(255, 255, 255, 0.08)",
               background: filterCategory === "auto_skip"
-                ? "linear-gradient(135deg, rgba(224, 163, 62, 0.35), rgba(224, 163, 62, 0.35))"
-                : "rgba(22, 27, 36, 0.6)",
+                ? "linear-gradient(135deg, rgba(216, 174, 100, 0.22), rgba(216, 174, 100, 0.22))"
+                : "rgba(33, 36, 43, 0.6)",
               color: filterCategory === "auto_skip" ? "var(--warning)" : "var(--text-muted)",
-              boxShadow: filterCategory === "auto_skip" ? "0 0 14px rgba(224, 163, 62, 0.35)" : "none",
+              boxShadow: filterCategory === "auto_skip" ? "0 0 14px rgba(216, 174, 100, 0.22)" : "none",
               cursor: "pointer",
               transition: "all 0.2s ease"
             }}
@@ -1273,7 +1273,7 @@ function IntelligenceDashboardContent() {
         {showLogsDrawer && (
           <div style={{
             background: "var(--bg-sunken)",
-            border: "1px solid rgba(164, 138, 224, 0.3)",
+            border: "1px solid rgba(176, 155, 217, 0.18)",
             borderRadius: "12px",
             padding: "16px",
             marginBottom: "20px",
@@ -1291,7 +1291,7 @@ function IntelligenceDashboardContent() {
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                 <span style={{ fontSize: "16px" }}>🤖</span>
                 <span style={{ color: "var(--ai)", fontWeight: 700, fontSize: "14px" }}>Live AI Execution & Call Reason Terminal</span>
-                <span style={{ fontSize: "11px", color: "var(--positive)", background: "rgba(63, 191, 135,0.15)", padding: "2px 8px", borderRadius: "10px", fontWeight: 600 }}>
+                <span style={{ fontSize: "11px", color: "var(--positive)", background: "rgba(91, 190, 147, 0.1)", padding: "2px 8px", borderRadius: "10px", fontWeight: 600 }}>
                   ● LIVE STREAMING
                 </span>
               </div>
@@ -1299,8 +1299,8 @@ function IntelligenceDashboardContent() {
                 <button
                   onClick={() => setAiLogs([])}
                   style={{
-                    background: "rgba(240, 115, 111, 0.15)",
-                    border: "1px solid rgba(240, 115, 111, 0.3)",
+                    background: "rgba(226, 141, 131, 0.1)",
+                    border: "1px solid rgba(226, 141, 131, 0.18)",
                     color: "var(--negative-strong)",
                     borderRadius: "6px",
                     padding: "4px 10px",
@@ -1313,8 +1313,8 @@ function IntelligenceDashboardContent() {
                 <button
                   onClick={() => setShowLogsDrawer(false)}
                   style={{
-                    background: "rgba(125, 135, 153, 0.15)",
-                    border: "1px solid rgba(125, 135, 153, 0.3)",
+                    background: "rgba(160, 168, 180, 0.1)",
+                    border: "1px solid rgba(160, 168, 180, 0.18)",
                     color: "var(--text-muted)",
                     borderRadius: "6px",
                     padding: "4px 10px",
@@ -1342,24 +1342,24 @@ function IntelligenceDashboardContent() {
                 </div>
               ) : (
                 aiLogs.map((log, idx) => {
-                  let badgeBg = "rgba(91, 157, 255, 0.15)";
+                  let badgeBg = "rgba(127, 166, 225, 0.1)";
                   let badgeColor = "var(--accent)";
                   let tagText = (log.tier || "AI").toUpperCase();
 
                   if (log.tier === "skip") {
-                    badgeBg = "rgba(125, 135, 153, 0.2)";
+                    badgeBg = "rgba(160, 168, 180, 0.13)";
                     badgeColor = "var(--text-muted)";
                     tagText = "AUTOSKIP";
                   } else if (log.tier === "financial_results") {
-                    badgeBg = "rgba(164, 138, 224, 0.2)";
+                    badgeBg = "rgba(176, 155, 217, 0.13)";
                     badgeColor = "var(--ai)";
                     tagText = "FINANCIALS";
                   } else if (log.tier === "execution") {
-                    badgeBg = "rgba(63, 191, 135, 0.2)";
+                    badgeBg = "rgba(91, 190, 147, 0.13)";
                     badgeColor = "var(--positive-strong)";
                     tagText = "EXECUTION";
                   } else if (log.tier === "manual_only") {
-                    badgeBg = "rgba(224, 163, 62, 0.2)";
+                    badgeBg = "rgba(216, 174, 100, 0.13)";
                     badgeColor = "var(--warning)";
                     tagText = "MANUAL_ONLY";
                   }
@@ -1373,7 +1373,7 @@ function IntelligenceDashboardContent() {
                       lineHeight: "1.5",
                       padding: "6px 10px",
                       borderRadius: "6px",
-                      background: "rgba(15, 19, 25, 0.6)",
+                      background: "rgba(25, 28, 34, 0.6)",
                       borderLeft: `3px solid ${badgeColor}`
                     }}>
                       <span style={{ color: "var(--text-faint)", fontSize: "11px", minWidth: "55px" }}>{log.timestamp}</span>
@@ -1430,7 +1430,7 @@ function IntelligenceDashboardContent() {
                   alignItems: "center",
                   justifyContent: "center",
                   padding: "80px 20px",
-                  background: "rgba(22, 27, 36, 0.2)",
+                  background: "rgba(33, 36, 43, 0.2)",
                   borderRadius: "16px",
                   border: "1px solid rgba(255, 255, 255, 0.03)"
                 }}>
@@ -1445,7 +1445,7 @@ function IntelligenceDashboardContent() {
                 <div style={{
                   textAlign: "center",
                   padding: "60px 20px",
-                  background: "rgba(22, 27, 36, 0.2)",
+                  background: "rgba(33, 36, 43, 0.2)",
                   borderRadius: "16px",
                   border: "1px solid rgba(255, 255, 255, 0.03)",
                   color: "var(--text-faint)"
@@ -1527,7 +1527,7 @@ function IntelligenceDashboardContent() {
                       })()}
                       {item.symbol && (
                         <span style={{
-                          backgroundColor: "rgba(91, 157, 255, 0.15)",
+                          backgroundColor: "rgba(127, 166, 225, 0.1)",
                           color: "var(--accent-strong)",
                           padding: "3px 8px",
                           borderRadius: "6px",
@@ -1543,12 +1543,12 @@ function IntelligenceDashboardContent() {
                             display: "flex",
                             alignItems: "center",
                             gap: "4px",
-                            backgroundColor: item.ai_provider === "openrouter" ? "rgba(6, 182, 212, 0.15)"
-                              : item.ai_provider === "groq" ? "rgba(164, 138, 224, 0.15)"
-                              : item.ai_provider === "ollama" ? "rgba(224, 163, 62, 0.15)"
-                              : item.ai_provider === "gemini" ? "rgba(63, 191, 135, 0.15)"
-                              : item.ai_provider === "ollama_failed" ? "rgba(240, 115, 111, 0.15)"
-                              : "rgba(125, 135, 153, 0.15)",
+                            backgroundColor: item.ai_provider === "openrouter" ? "rgba(104, 179, 202, 0.1)"
+                              : item.ai_provider === "groq" ? "rgba(176, 155, 217, 0.1)"
+                              : item.ai_provider === "ollama" ? "rgba(216, 174, 100, 0.1)"
+                              : item.ai_provider === "gemini" ? "rgba(91, 190, 147, 0.1)"
+                              : item.ai_provider === "ollama_failed" ? "rgba(226, 141, 131, 0.1)"
+                              : "rgba(160, 168, 180, 0.1)",
                             color: item.ai_provider === "openrouter" ? "var(--info)"
                               : item.ai_provider === "groq" ? "var(--ai)"
                               : item.ai_provider === "ollama" ? "var(--warning)"
@@ -1561,12 +1561,12 @@ function IntelligenceDashboardContent() {
                             fontWeight: "700",
                             cursor: "help",
                             border: `1px solid ${
-                              item.ai_provider === "openrouter" ? "rgba(6, 182, 212, 0.3)"
-                              : item.ai_provider === "groq" ? "rgba(164, 138, 224, 0.3)"
-                              : item.ai_provider === "ollama" ? "rgba(224, 163, 62, 0.3)"
-                              : item.ai_provider === "gemini" ? "rgba(63, 191, 135, 0.3)"
-                              : item.ai_provider === "ollama_failed" ? "rgba(240, 115, 111, 0.3)"
-                              : "rgba(125, 135, 153, 0.3)"
+                              item.ai_provider === "openrouter" ? "rgba(104, 179, 202, 0.18)"
+                              : item.ai_provider === "groq" ? "rgba(176, 155, 217, 0.18)"
+                              : item.ai_provider === "ollama" ? "rgba(216, 174, 100, 0.18)"
+                              : item.ai_provider === "gemini" ? "rgba(91, 190, 147, 0.18)"
+                              : item.ai_provider === "ollama_failed" ? "rgba(226, 141, 131, 0.18)"
+                              : "rgba(160, 168, 180, 0.18)"
                             }`
                           }}>
                             <Bot size={11} />
@@ -1589,8 +1589,8 @@ function IntelligenceDashboardContent() {
                             width: "280px",
                             padding: "10px 12px",
                             borderRadius: "8px",
-                            backgroundColor: "rgba(15, 19, 25, 0.95)",
-                            border: "1px solid rgba(91, 157, 255, 0.3)",
+                            backgroundColor: "rgba(25, 28, 34, 0.95)",
+                            border: "1px solid rgba(127, 166, 225, 0.18)",
                             boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.5)",
                             backdropFilter: "blur(8px)",
                             zIndex: 50,
@@ -1638,9 +1638,9 @@ function IntelligenceDashboardContent() {
                         display: "flex",
                         alignItems: "center",
                         gap: "4px",
-                        backgroundColor: "rgba(79, 184, 217, 0.08)",
+                        backgroundColor: "rgba(104, 179, 202, 0.08)",
                         color: "var(--info)",
-                        border: "1px solid rgba(79, 184, 217, 0.15)",
+                        border: "1px solid rgba(104, 179, 202, 0.1)",
                         padding: "2px 8px",
                         borderRadius: "6px",
                         fontSize: "10px",
@@ -1670,8 +1670,8 @@ function IntelligenceDashboardContent() {
                           }
                         }}
                         style={{
-                          backgroundColor: "rgba(15, 19, 25, 0.8)",
-                          border: "1px solid rgba(91, 157, 255, 0.3)",
+                          backgroundColor: "rgba(25, 28, 34, 0.8)",
+                          border: "1px solid rgba(127, 166, 225, 0.18)",
                           color: "var(--accent-strong)",
                           borderRadius: "6px",
                           padding: "2px 6px",
@@ -1699,8 +1699,8 @@ function IntelligenceDashboardContent() {
                           display: "inline-flex",
                           alignItems: "center",
                           gap: "4px",
-                          backgroundColor: "rgba(91, 157, 255, 0.12)",
-                          border: "1px solid rgba(91, 157, 255, 0.3)",
+                          backgroundColor: "rgba(127, 166, 225, 0.09)",
+                          border: "1px solid rgba(127, 166, 225, 0.18)",
                           color: "var(--accent)",
                           borderRadius: "6px",
                           padding: "2px 6px",
@@ -1827,7 +1827,7 @@ function IntelligenceDashboardContent() {
                               setPage(1);
                             }}
                             style={{
-                              backgroundColor: "rgba(63, 191, 135, 0.12)",
+                              backgroundColor: "rgba(91, 190, 147, 0.09)",
                               color: "var(--positive-strong)",
                               padding: "2px 6px",
                               borderRadius: "4px",
@@ -1837,10 +1837,10 @@ function IntelligenceDashboardContent() {
                               transition: "all 0.15s"
                             }}
                             onMouseOver={(e) => {
-                              e.currentTarget.style.backgroundColor = "rgba(63, 191, 135, 0.25)";
+                              e.currentTarget.style.backgroundColor = "rgba(91, 190, 147, 0.16)";
                             }}
                             onMouseOut={(e) => {
-                              e.currentTarget.style.backgroundColor = "rgba(63, 191, 135, 0.12)";
+                              e.currentTarget.style.backgroundColor = "rgba(91, 190, 147, 0.09)";
                             }}
                           >
                             {stk}
@@ -1858,7 +1858,7 @@ function IntelligenceDashboardContent() {
                       gap: "6px",
                       fontSize: "11px",
                       color: "var(--accent)",
-                      backgroundColor: "rgba(91, 157, 255, 0.08)",
+                      backgroundColor: "rgba(127, 166, 225, 0.08)",
                       padding: "4px 8px",
                       borderRadius: "6px",
                       width: "fit-content"
@@ -1924,7 +1924,7 @@ function IntelligenceDashboardContent() {
         {/* Tab Buttons */}
         <div style={{
           display: "flex",
-          backgroundColor: "rgba(22, 27, 36, 0.4)",
+          backgroundColor: "rgba(33, 36, 43, 0.4)",
           border: "1px solid rgba(255, 255, 255, 0.05)",
           borderRadius: "12px",
           padding: "4px",
@@ -1948,7 +1948,7 @@ function IntelligenceDashboardContent() {
                 border: "none",
                 cursor: "pointer",
                 backgroundColor: sidebarTab === tab.id ? "var(--accent)" : "transparent",
-                color: sidebarTab === tab.id ? "var(--text-primary)" : "var(--text-muted)",
+                color: sidebarTab === tab.id ? "var(--on-accent)" : "var(--text-muted)",
                 transition: "all 0.2s"
               }}
             >
@@ -1961,7 +1961,7 @@ function IntelligenceDashboardContent() {
         {sidebarTab === "ai" && (
           <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
             <div style={{
-              background: "rgba(22, 27, 36, 0.4)",
+              background: "rgba(33, 36, 43, 0.4)",
               border: "1px solid rgba(255, 255, 255, 0.05)",
               borderRadius: "16px",
               padding: "16px",
@@ -2021,7 +2021,7 @@ function IntelligenceDashboardContent() {
                 <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                   {/* Gauge / Sentiment Score Display */}
                   <div style={{
-                    backgroundColor: "rgba(22, 27, 36, 0.6)",
+                    backgroundColor: "rgba(33, 36, 43, 0.6)",
                     border: "1px solid rgba(255, 255, 255, 0.03)",
                     borderRadius: "12px",
                     padding: "14px",
@@ -2032,7 +2032,7 @@ function IntelligenceDashboardContent() {
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                       <span style={{ fontSize: "11px", fontWeight: "600", color: "var(--text-faint)" }}>Market Mood</span>
                       <span style={{
-                        backgroundColor: marketSentiment.sentiment === "Bullish" ? "rgba(63, 191, 135, 0.15)" : marketSentiment.sentiment === "Bearish" ? "rgba(240, 115, 111, 0.15)" : "rgba(107, 114, 128, 0.15)",
+                        backgroundColor: marketSentiment.sentiment === "Bullish" ? "rgba(91, 190, 147, 0.1)" : marketSentiment.sentiment === "Bearish" ? "rgba(226, 141, 131, 0.1)" : "rgba(143, 151, 165, 0.1)",
                         color: marketSentiment.sentiment === "Bullish" ? "var(--positive)" : marketSentiment.sentiment === "Bearish" ? "var(--negative)" : "var(--text-muted)",
                         fontSize: "11px",
                         fontWeight: "800",
@@ -2153,7 +2153,7 @@ function IntelligenceDashboardContent() {
                                 fontSize: "8px",
                                 fontWeight: "800",
                                 color: drv.impact === "Positive" ? "var(--positive)" : drv.impact === "Negative" ? "var(--negative)" : "var(--text-muted)",
-                                backgroundColor: drv.impact === "Positive" ? "rgba(63, 191, 135,0.1)" : drv.impact === "Negative" ? "rgba(240, 115, 111,0.1)" : "rgba(107,114,128,0.1)",
+                                backgroundColor: drv.impact === "Positive" ? "rgba(91, 190, 147, 0.08)" : drv.impact === "Negative" ? "rgba(226, 141, 131, 0.08)" : "rgba(143, 151, 165, 0.08)",
                                 padding: "1px 5px",
                                 borderRadius: "3px",
                                 textTransform: "uppercase"
@@ -2186,7 +2186,7 @@ function IntelligenceDashboardContent() {
                             ) : (
                               marketSentiment.sectors.positive.map((sec, i) => (
                                 <span key={i} style={{
-                                  backgroundColor: "rgba(63, 191, 135,0.08)",
+                                  backgroundColor: "rgba(91, 190, 147,0.08)",
                                   color: "var(--positive-strong)",
                                   padding: "2px 6px",
                                   borderRadius: "4px",
@@ -2207,7 +2207,7 @@ function IntelligenceDashboardContent() {
                             ) : (
                               marketSentiment.sectors.negative.map((sec, i) => (
                                 <span key={i} style={{
-                                  backgroundColor: "rgba(240, 115, 111,0.08)",
+                                  backgroundColor: "rgba(226, 141, 131,0.08)",
                                   color: "var(--negative-strong)",
                                   padding: "2px 6px",
                                   borderRadius: "4px",
@@ -2246,7 +2246,7 @@ function IntelligenceDashboardContent() {
         {/* Tab Content: Active Stocks (24h) */}
         {sidebarTab === "active" && (
           <div style={{
-            background: "rgba(22, 27, 36, 0.4)",
+            background: "rgba(33, 36, 43, 0.4)",
             border: "1px solid rgba(255, 255, 255, 0.05)",
             borderRadius: "16px",
             padding: "16px",
@@ -2312,14 +2312,14 @@ function IntelligenceDashboardContent() {
                         display: "flex",
                         alignItems: "center",
                         gap: "6px",
-                        backgroundColor: isUnread ? "rgba(91, 157, 255, 0.15)" : "rgba(22, 27, 36, 0.4)",
-                        border: `1px solid ${isUnread ? "rgba(91, 157, 255, 0.4)" : "rgba(255, 255, 255, 0.05)"}`,
+                        backgroundColor: isUnread ? "rgba(127, 166, 225, 0.1)" : "rgba(33, 36, 43, 0.4)",
+                        border: `1px solid ${isUnread ? "rgba(127, 166, 225, 0.26)" : "rgba(255, 255, 255, 0.05)"}`,
                         borderRadius: "20px",
                         padding: "6px 12px",
                         cursor: "pointer",
                         transition: "all 0.15s",
                         opacity: isUnread ? 1 : 0.6,
-                        boxShadow: isUnread ? "0 0 8px rgba(91, 157, 255, 0.1)" : "none"
+                        boxShadow: isUnread ? "0 0 8px rgba(127, 166, 225, 0.08)" : "none"
                       }}
                     >
                       <span style={{
@@ -2347,7 +2347,7 @@ function IntelligenceDashboardContent() {
             {hoveredStock && (
               <div style={{
                 marginTop: "4px",
-                backgroundColor: "rgba(22, 27, 36, 0.9)",
+                backgroundColor: "rgba(33, 36, 43, 0.9)",
                 border: "1px solid rgba(255,255,255,0.06)",
                 borderRadius: "10px",
                 padding: "10px 12px",
@@ -2382,7 +2382,7 @@ function IntelligenceDashboardContent() {
         {/* Tab Content: Global/Stock News */}
         {sidebarTab === "news" && (
           <div style={{
-            background: "rgba(22, 27, 36, 0.4)",
+            background: "rgba(33, 36, 43, 0.4)",
             border: "1px solid rgba(255, 255, 255, 0.05)",
             borderRadius: "16px",
             padding: "16px",
@@ -2417,7 +2417,7 @@ function IntelligenceDashboardContent() {
                       key={i}
                       onClick={() => setSelectedItem(story)}
                       style={{
-                        backgroundColor: "rgba(22, 27, 36, 0.6)",
+                        backgroundColor: "rgba(33, 36, 43, 0.6)",
                         borderLeft: `3px solid ${sentiment.text}`,
                         borderTop: "1px solid rgba(255,255,255,0.03)",
                         borderRight: "1px solid rgba(255,255,255,0.03)",
@@ -2431,10 +2431,10 @@ function IntelligenceDashboardContent() {
                         gap: "6px"
                       }}
                       onMouseOver={(e) => {
-                        e.currentTarget.style.backgroundColor = "rgba(22, 27, 36, 0.8)";
+                        e.currentTarget.style.backgroundColor = "rgba(33, 36, 43, 0.8)";
                       }}
                       onMouseOut={(e) => {
-                        e.currentTarget.style.backgroundColor = "rgba(22, 27, 36, 0.6)";
+                        e.currentTarget.style.backgroundColor = "rgba(33, 36, 43, 0.6)";
                       }}
                     >
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px" }}>
@@ -2471,7 +2471,7 @@ function IntelligenceDashboardContent() {
                             setPage(1);
                           }}
                           style={{
-                            backgroundColor: "rgba(91, 157, 255, 0.15)",
+                            backgroundColor: "rgba(127, 166, 225, 0.1)",
                             color: "var(--accent-strong)",
                             padding: "2px 6px",
                             borderRadius: "4px",
@@ -2509,7 +2509,7 @@ function IntelligenceDashboardContent() {
         {/* Tab Content: Upcoming Earnings (7d) */}
         {sidebarTab === "earnings" && (
           <div style={{
-            background: "rgba(22, 27, 36, 0.4)",
+            background: "rgba(33, 36, 43, 0.4)",
             border: "1px solid rgba(255, 255, 255, 0.05)",
             borderRadius: "16px",
             padding: "16px",
@@ -2550,7 +2550,7 @@ function IntelligenceDashboardContent() {
                         setPage(1);
                       }}
                       style={{
-                        backgroundColor: "rgba(22, 27, 36, 0.6)",
+                        backgroundColor: "rgba(33, 36, 43, 0.6)",
                         border: "1px solid rgba(255,255,255,0.03)",
                         borderRadius: "10px",
                         padding: "10px 12px",
@@ -2558,10 +2558,10 @@ function IntelligenceDashboardContent() {
                         transition: "all 0.15s"
                       }}
                       onMouseOver={(e) => {
-                        e.currentTarget.style.backgroundColor = "rgba(22, 27, 36, 0.8)";
+                        e.currentTarget.style.backgroundColor = "rgba(33, 36, 43, 0.8)";
                       }}
                       onMouseOut={(e) => {
-                        e.currentTarget.style.backgroundColor = "rgba(22, 27, 36, 0.6)";
+                        e.currentTarget.style.backgroundColor = "rgba(33, 36, 43, 0.6)";
                       }}
                     >
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -2574,7 +2574,7 @@ function IntelligenceDashboardContent() {
                               fontSize: "10px",
                               fontWeight: "700",
                               color: isPos ? "var(--positive-strong)" : isNeg ? "var(--negative-strong)" : "var(--text-muted)",
-                              backgroundColor: isPos ? "rgba(63, 191, 135, 0.12)" : isNeg ? "rgba(240, 115, 111, 0.12)" : "rgba(125, 135, 153, 0.12)",
+                              backgroundColor: isPos ? "rgba(91, 190, 147, 0.09)" : isNeg ? "rgba(226, 141, 131, 0.09)" : "rgba(160, 168, 180, 0.09)",
                               padding: "2px 5px",
                               borderRadius: "4px"
                             }}>
@@ -2586,7 +2586,7 @@ function IntelligenceDashboardContent() {
                           fontSize: "10px",
                           fontWeight: "700",
                           color: "var(--accent)",
-                          backgroundColor: "rgba(91, 157, 255, 0.12)",
+                          backgroundColor: "rgba(127, 166, 225, 0.09)",
                           padding: "2px 6px",
                           borderRadius: "4px"
                         }}>
@@ -2684,7 +2684,7 @@ function IntelligenceDashboardContent() {
             <div style={{ padding: "20px", display: "flex", flexDirection: "column", gap: "16px" }}>
               {selectedItem.symbol && (
                 <div style={{
-                  backgroundColor: "rgba(91, 157, 255, 0.15)",
+                  backgroundColor: "rgba(127, 166, 225, 0.1)",
                   color: "var(--accent-strong)",
                   padding: "4px 10px",
                   borderRadius: "6px",
@@ -2709,7 +2709,7 @@ function IntelligenceDashboardContent() {
                           setSelectedItem(null); // close modal
                         }}
                         style={{
-                          backgroundColor: "rgba(63, 191, 135, 0.15)",
+                          backgroundColor: "rgba(91, 190, 147, 0.1)",
                           color: "var(--positive-strong)",
                           padding: "4px 10px",
                           borderRadius: "6px",
@@ -2719,10 +2719,10 @@ function IntelligenceDashboardContent() {
                           transition: "all 0.15s"
                         }}
                         onMouseOver={(e) => {
-                          e.currentTarget.style.backgroundColor = "rgba(63, 191, 135, 0.25)";
+                          e.currentTarget.style.backgroundColor = "rgba(91, 190, 147, 0.16)";
                         }}
                         onMouseOut={(e) => {
-                          e.currentTarget.style.backgroundColor = "rgba(63, 191, 135, 0.15)";
+                          e.currentTarget.style.backgroundColor = "rgba(91, 190, 147, 0.1)";
                         }}
                       >
                         {stk}
@@ -2779,8 +2779,8 @@ function IntelligenceDashboardContent() {
               {/* AI Invocation & Call Reason Box */}
               {selectedItem.ai_provider && selectedItem.ai_provider !== "auto_skip" && (
                 <div style={{
-                  backgroundColor: "rgba(15, 19, 25, 0.7)",
-                  border: "1px solid rgba(91, 157, 255, 0.25)",
+                  backgroundColor: "rgba(25, 28, 34, 0.7)",
+                  border: "1px solid rgba(127, 166, 225, 0.16)",
                   borderRadius: "10px",
                   padding: "14px",
                   display: "flex",
@@ -2796,7 +2796,7 @@ function IntelligenceDashboardContent() {
                       fontWeight: "700",
                       padding: "2px 8px",
                       borderRadius: "4px",
-                      backgroundColor: selectedItem.ai_provider === "groq" ? "rgba(164, 138, 224, 0.2)" : "rgba(91, 157, 255, 0.2)",
+                      backgroundColor: selectedItem.ai_provider === "groq" ? "rgba(176, 155, 217, 0.13)" : "rgba(127, 166, 225, 0.13)",
                       color: selectedItem.ai_provider === "groq" ? "var(--ai)" : "var(--accent)"
                     }}>
                       {selectedItem.ai_provider.toUpperCase()}
@@ -2898,7 +2898,7 @@ function IntelligenceDashboardContent() {
                       <div style={{ display: "flex", flexDirection: "column", gap: "4px", width: "90%" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                           <span style={{
-                            backgroundColor: "rgba(91, 157, 255, 0.1)",
+                            backgroundColor: "rgba(127, 166, 225, 0.08)",
                             color: "var(--accent)",
                             padding: "2px 6px",
                             borderRadius: "4px",

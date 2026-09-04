@@ -149,8 +149,8 @@ function LivePriceToggle({ paused, onToggle, onRefreshAll, label, name }: {
           display: "inline-flex", alignItems: "center", gap: "5px",
           padding: "4px 10px", borderRadius: "6px", cursor: "pointer",
           fontSize: "10px", fontWeight: 700, letterSpacing: "0.3px",
-          background: paused ? "rgba(224, 163, 62, 0.12)" : "rgba(63, 191, 135, 0.12)",
-          border: `1px solid ${paused ? "rgba(224, 163, 62, 0.35)" : "rgba(63, 191, 135, 0.35)"}`,
+          background: paused ? "rgba(216, 174, 100, 0.09)" : "rgba(91, 190, 147, 0.09)",
+          border: `1px solid ${paused ? "rgba(216, 174, 100, 0.22)" : "rgba(91, 190, 147, 0.22)"}`,
           color: paused ? "var(--warning)" : "var(--positive)",
         }}
       >
@@ -1313,8 +1313,8 @@ export default function App() {
         style={{
           display: "flex", flexDirection: "column", gap: "1px",
           padding: "4px 8px", borderRadius: "6px", minWidth: "96px",
-          backgroundColor: "rgba(22, 27, 36, 0.5)",
-          border: `1px solid ${row.group === "commodity" ? "rgba(224, 163, 62, 0.18)" : "rgba(255,255,255,0.03)"}`,
+          backgroundColor: "rgba(33, 36, 43, 0.5)",
+          border: `1px solid ${row.group === "commodity" ? "rgba(216, 174, 100, 0.12)" : "rgba(255,255,255,0.03)"}`,
         }}>
         <span style={{
           fontSize: "8px", fontWeight: 700, letterSpacing: "0.4px",
@@ -1367,7 +1367,7 @@ export default function App() {
             color: "var(--on-accent)",
             fontWeight: "bold",
             fontSize: "18px",
-            boxShadow: "0 0 15px rgba(91, 157, 255,0.4)"
+            boxShadow: "0 0 15px rgba(127, 166, 225, 0.26)"
           }}>
             S
           </div>
@@ -1390,9 +1390,9 @@ export default function App() {
               fontSize: "11px",
               fontWeight: "600",
               borderRadius: "20px",
-              backgroundColor: "rgba(91, 157, 255,0.12)",
+              backgroundColor: "rgba(127, 166, 225, 0.09)",
               color: "var(--accent)",
-              border: "1px solid rgba(91, 157, 255,0.2)"
+              border: "1px solid rgba(127, 166, 225, 0.13)"
             }}>
               <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: "var(--accent)" }} className="animate-pulse"></span>
               Demo Feed Active
@@ -1407,9 +1407,9 @@ export default function App() {
                 fontSize: "11px",
                 fontWeight: "600",
                 borderRadius: "20px",
-                backgroundColor: "rgba(63, 191, 135,0.12)",
+                backgroundColor: "rgba(91, 190, 147, 0.09)",
                 color: "var(--positive-strong)",
-                border: "1px solid rgba(63, 191, 135,0.2)"
+                border: "1px solid rgba(91, 190, 147, 0.13)"
               }}>
                 <UserCheck size={13} />
                 Upstox Connected ({formatLastUpdated(authState.updated_at)})
@@ -1421,9 +1421,9 @@ export default function App() {
                   fontSize: "11px",
                   fontWeight: "600",
                   borderRadius: "6px",
-                  backgroundColor: "rgba(240, 115, 111, 0.1)",
+                  backgroundColor: "rgba(226, 141, 131, 0.08)",
                   color: "var(--negative-strong)",
-                  border: "1px solid rgba(240, 115, 111, 0.2)",
+                  border: "1px solid rgba(226, 141, 131, 0.13)",
                   transition: "all 0.2s"
                 }}
                 onMouseOver={(e) => {
@@ -1431,7 +1431,7 @@ export default function App() {
                   e.currentTarget.style.color = "var(--on-accent)";
                 }}
                 onMouseOut={(e) => {
-                  e.currentTarget.style.backgroundColor = "rgba(240, 115, 111, 0.1)";
+                  e.currentTarget.style.backgroundColor = "rgba(226, 141, 131, 0.08)";
                   e.currentTarget.style.color = "var(--negative-strong)";
                 }}
               >
@@ -1451,7 +1451,7 @@ export default function App() {
                 borderRadius: "8px",
                 backgroundColor: "var(--accent)",
                 color: "var(--on-accent)",
-                boxShadow: "0 4px 12px rgba(91, 157, 255,0.25)",
+                boxShadow: "0 4px 12px rgba(127, 166, 225, 0.16)",
                 transition: "background 0.2s"
               }}
               onMouseOver={(e) => e.currentTarget.style.backgroundColor = "var(--accent)"}
@@ -1466,7 +1466,7 @@ export default function App() {
       {/* Index, sector and commodity board */}
       <div style={{
         padding: "6px 24px 8px",
-        backgroundColor: "rgba(22, 27, 36, 0.4)",
+        backgroundColor: "rgba(33, 36, 43, 0.4)",
         borderBottom: "1px solid rgba(255, 255, 255, 0.05)",
         flexShrink: 0
       }}>
@@ -1517,11 +1517,11 @@ export default function App() {
           zIndex: 9999,
           padding: "12px 20px",
           borderRadius: "8px",
-          backgroundColor: toast.type === "success" ? "rgba(63, 191, 135, 0.95)" : "rgba(240, 115, 111, 0.95)",
+          backgroundColor: toast.type === "success" ? "rgba(91, 190, 147, 0.95)" : "rgba(226, 141, 131, 0.95)",
           color: "var(--text-primary)",
           fontWeight: "600",
           fontSize: "13px",
-          boxShadow: toast.type === "success" ? "0 4px 15px rgba(63, 191, 135, 0.4)" : "0 4px 15px rgba(240, 115, 111, 0.4)",
+          boxShadow: toast.type === "success" ? "0 4px 15px rgba(91, 190, 147, 0.26)" : "0 4px 15px rgba(226, 141, 131, 0.26)",
           display: "flex",
           alignItems: "center",
           gap: "10px",
@@ -2224,7 +2224,7 @@ export default function App() {
             left: 0,
             right: 0,
             bottom: 0,
-            backgroundColor: "rgba(10, 13, 18, 0.8)",
+            backgroundColor: "rgba(20, 23, 28, 0.8)",
             backdropFilter: "blur(20px)",
             WebkitBackdropFilter: "blur(20px)",
             zIndex: 10000,
@@ -2239,7 +2239,7 @@ export default function App() {
               width: "100%",
               maxWidth: "960px",
               maxHeight: "90vh",
-              background: "linear-gradient(135deg, rgba(28, 34, 45, 0.95) 0%, rgba(15, 19, 25, 0.98) 100%)",
+              background: "linear-gradient(135deg, rgba(40, 44, 52, 0.95) 0%, rgba(25, 28, 34, 0.98) 100%)",
               border: "1px solid rgba(255, 255, 255, 0.1)",
               borderRadius: "16px",
               boxShadow: "0 24px 60px rgba(0, 0, 0, 0.8)",
@@ -2256,7 +2256,7 @@ export default function App() {
                 justifyContent: "space-between",
                 padding: "16px 20px",
                 borderBottom: "1px solid rgba(255, 255, 255, 0.08)",
-                backgroundColor: "rgba(15, 19, 25, 0.4)",
+                backgroundColor: "rgba(25, 28, 34, 0.4)",
                 flexShrink: 0
               }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
@@ -2267,7 +2267,7 @@ export default function App() {
                     color: "var(--on-accent)",
                     fontWeight: "800",
                     fontSize: "16px",
-                    boxShadow: "0 4px 12px rgba(91, 157, 255,0.3)"
+                    boxShadow: "0 4px 12px rgba(127, 166, 225, 0.18)"
                   }}>
                     {symbol}
                   </div>
@@ -2301,9 +2301,9 @@ export default function App() {
                           fontSize: "11px",
                           fontWeight: "700",
                           borderRadius: "6px",
-                          backgroundColor: "rgba(240, 115, 111, 0.1)",
+                          backgroundColor: "rgba(226, 141, 131, 0.08)",
                           color: "var(--negative-strong)",
-                          border: "1px solid rgba(240, 115, 111, 0.25)"
+                          border: "1px solid rgba(226, 141, 131, 0.16)"
                         }}
                       >
                         Remove Watchlist
@@ -2318,7 +2318,7 @@ export default function App() {
                           borderRadius: "6px",
                           backgroundColor: "var(--accent)",
                           color: "var(--on-accent)",
-                          boxShadow: "0 4px 12px rgba(91, 157, 255,0.2)"
+                          boxShadow: "0 4px 12px rgba(127, 166, 225, 0.13)"
                         }}
                       >
                         Add Watchlist
@@ -2369,7 +2369,7 @@ export default function App() {
                     padding: "60px 24px",
                     border: "1px dashed var(--border-color)",
                     borderRadius: "12px",
-                    background: "rgba(28, 34, 45,0.1)",
+                    background: "rgba(40, 44, 52,0.1)",
                     color: "var(--text-secondary)",
                     fontSize: "13px"
                   }}>
@@ -2451,7 +2451,7 @@ export default function App() {
                     {/* AI & News Splits */}
                     <div className="details-split-grid">
                       {/* AI Commentary & Metrics Card */}
-                      <div className="info-card" style={{ background: "linear-gradient(135deg, rgba(28, 34, 45,0.4) 0%, rgba(91, 157, 255,0.03) 100%)", minHeight: "340px", display: "flex", flexDirection: "column" }}>
+                      <div className="info-card" style={{ background: "linear-gradient(135deg, rgba(40, 44, 52,0.4) 0%, rgba(127, 166, 225,0.03) 100%)", minHeight: "340px", display: "flex", flexDirection: "column" }}>
                         {/* Tab Headers */}
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "14px", borderBottom: "1px solid rgba(255,255,255,0.08)", paddingBottom: "8px", flexShrink: 0 }}>
                           <div style={{ display: "flex", gap: "16px" }}>
@@ -2556,20 +2556,20 @@ export default function App() {
                                       display: "inline-block",
                                       marginTop: "2px",
                                       backgroundColor: detail.analysis.recommendation === "BUY"
-                                        ? "rgba(63, 191, 135, 0.15)"
+                                        ? "rgba(91, 190, 147, 0.1)"
                                         : detail.analysis.recommendation === "SELL"
-                                          ? "rgba(240, 115, 111, 0.15)"
-                                          : "rgba(224, 163, 62, 0.15)",
+                                          ? "rgba(226, 141, 131, 0.1)"
+                                          : "rgba(216, 174, 100, 0.1)",
                                       color: detail.analysis.recommendation === "BUY"
                                         ? "var(--success-color)"
                                         : detail.analysis.recommendation === "SELL"
                                           ? "var(--danger-color)"
                                           : "var(--warning)",
                                       border: `1px solid ${detail.analysis.recommendation === "BUY"
-                                          ? "rgba(63, 191, 135, 0.3)"
+                                          ? "rgba(91, 190, 147, 0.18)"
                                           : detail.analysis.recommendation === "SELL"
-                                            ? "rgba(240, 115, 111, 0.3)"
-                                            : "rgba(224, 163, 62, 0.3)"
+                                            ? "rgba(226, 141, 131, 0.18)"
+                                            : "rgba(216, 174, 100, 0.18)"
                                         }`
                                     }}>
                                       {detail.analysis.recommendation}
@@ -2619,20 +2619,20 @@ export default function App() {
                                             padding: "2px 6px",
                                             borderRadius: "4px",
                                             backgroundColor: rec.recommendation === "BUY"
-                                              ? "rgba(63, 191, 135, 0.12)"
+                                              ? "rgba(91, 190, 147, 0.09)"
                                               : rec.recommendation === "SELL"
-                                                ? "rgba(240, 115, 111, 0.12)"
-                                                : "rgba(224, 163, 62, 0.12)",
+                                                ? "rgba(226, 141, 131, 0.09)"
+                                                : "rgba(216, 174, 100, 0.09)",
                                             color: rec.recommendation === "BUY"
                                               ? "var(--success-color)"
                                               : rec.recommendation === "SELL"
                                                 ? "var(--danger-color)"
                                                 : "var(--warning)",
                                             border: `1px solid ${rec.recommendation === "BUY"
-                                                ? "rgba(63, 191, 135, 0.2)"
+                                                ? "rgba(91, 190, 147, 0.13)"
                                                 : rec.recommendation === "SELL"
-                                                  ? "rgba(240, 115, 111, 0.2)"
-                                                  : "rgba(224, 163, 62, 0.2)"
+                                                  ? "rgba(226, 141, 131, 0.13)"
+                                                  : "rgba(216, 174, 100, 0.13)"
                                               }`
                                           }}>
                                             {rec.recommendation}
@@ -2713,8 +2713,8 @@ export default function App() {
                                           textAlign: "left"
                                         }}
                                         onMouseOver={(e) => {
-                                          e.currentTarget.style.backgroundColor = "rgba(91, 157, 255, 0.08)";
-                                          e.currentTarget.style.borderColor = "rgba(91, 157, 255, 0.2)";
+                                          e.currentTarget.style.backgroundColor = "rgba(127, 166, 225, 0.08)";
+                                          e.currentTarget.style.borderColor = "rgba(127, 166, 225, 0.13)";
                                         }}
                                         onMouseOut={(e) => {
                                           e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.03)";
@@ -2790,7 +2790,7 @@ export default function App() {
                                   <span style={{ fontSize: "10px", fontWeight: "700", color: "var(--text-muted)", marginRight: "4px" }}>ASKS</span>
                                 </span>
                               </div>
-                              <div style={{ width: "100%", height: "8px", backgroundColor: "rgba(240, 115, 111, 0.3)", borderRadius: "4px", overflow: "hidden", display: "flex" }}>
+                              <div style={{ width: "100%", height: "8px", backgroundColor: "rgba(226, 141, 131, 0.18)", borderRadius: "4px", overflow: "hidden", display: "flex" }}>
                                 <div style={{
                                   width: `${detail?.quote?.depth_buy_pct !== undefined ? detail.quote.depth_buy_pct : 50}%`,
                                   height: "100%",
@@ -2866,7 +2866,7 @@ export default function App() {
                                                   padding: "5px 6px",
                                                   fontSize: "10.5px",
                                                   borderRadius: "4px",
-                                                  background: `linear-gradient(to right, rgba(63, 191, 135, 0.08) ${pct}%, transparent ${pct}%)`,
+                                                  background: `linear-gradient(to right, rgba(91, 190, 147, 0.08) ${pct}%, transparent ${pct}%)`,
                                                   border: "1px solid rgba(255,255,255,0.01)"
                                                 }}
                                               >
@@ -2904,7 +2904,7 @@ export default function App() {
                                                   padding: "5px 6px",
                                                   fontSize: "10.5px",
                                                   borderRadius: "4px",
-                                                  background: `linear-gradient(to left, rgba(240, 115, 111, 0.08) ${pct}%, transparent ${pct}%)`,
+                                                  background: `linear-gradient(to left, rgba(226, 141, 131, 0.08) ${pct}%, transparent ${pct}%)`,
                                                   border: "1px solid rgba(255,255,255,0.01)"
                                                 }}
                                               >
@@ -2986,9 +2986,9 @@ export default function App() {
                                   fontSize: "10px",
                                   fontWeight: "600",
                                   borderRadius: "4px",
-                                  backgroundColor: "rgba(91, 157, 255,0.1)",
+                                  backgroundColor: "rgba(127, 166, 225, 0.08)",
                                   color: "var(--accent)",
-                                  border: "1px solid rgba(91, 157, 255,0.15)"
+                                  border: "1px solid rgba(127, 166, 225, 0.1)"
                                 }}
                               >
                                 Fetch Live News
@@ -3019,10 +3019,10 @@ export default function App() {
               top: hoveredAnalysisKey.y,
               left: hoveredAnalysisKey.x,
               width: "380px",
-              background: "linear-gradient(135deg, rgba(28, 34, 45, 0.98) 0%, rgba(15, 19, 25, 0.99) 100%)",
+              background: "linear-gradient(135deg, rgba(40, 44, 52, 0.98) 0%, rgba(25, 28, 34, 0.99) 100%)",
               border: "1px solid rgba(255, 255, 255, 0.12)",
               borderRadius: "12px",
-              boxShadow: "0 20px 50px rgba(0, 0, 0, 0.9), 0 0 30px rgba(91, 157, 255, 0.15)",
+              boxShadow: "0 20px 50px rgba(0, 0, 0, 0.9), 0 0 30px rgba(127, 166, 225, 0.1)",
               padding: "16px",
               zIndex: 10000,
               pointerEvents: "none",
@@ -3097,20 +3097,20 @@ export default function App() {
                         display: "inline-block",
                         marginTop: "1px",
                         backgroundColor: activeAnalysis.recommendation === "BUY"
-                          ? "rgba(63, 191, 135, 0.15)"
+                          ? "rgba(91, 190, 147, 0.1)"
                           : activeAnalysis.recommendation === "SELL"
-                            ? "rgba(240, 115, 111, 0.15)"
-                            : "rgba(224, 163, 62, 0.15)",
+                            ? "rgba(226, 141, 131, 0.1)"
+                            : "rgba(216, 174, 100, 0.1)",
                         color: activeAnalysis.recommendation === "BUY"
                           ? "var(--success-color)"
                           : activeAnalysis.recommendation === "SELL"
                             ? "var(--danger-color)"
                             : "var(--warning)",
                         border: `1px solid ${activeAnalysis.recommendation === "BUY"
-                            ? "rgba(63, 191, 135, 0.3)"
+                            ? "rgba(91, 190, 147, 0.18)"
                             : activeAnalysis.recommendation === "SELL"
-                              ? "rgba(240, 115, 111, 0.3)"
-                              : "rgba(224, 163, 62, 0.3)"
+                              ? "rgba(226, 141, 131, 0.18)"
+                              : "rgba(216, 174, 100, 0.18)"
                           }`
                       }}>
                         {activeAnalysis.recommendation}
@@ -3161,20 +3161,20 @@ export default function App() {
                               padding: "1px 4px",
                               borderRadius: "3px",
                               backgroundColor: rec.recommendation === "BUY"
-                                ? "rgba(63, 191, 135, 0.12)"
+                                ? "rgba(91, 190, 147, 0.09)"
                                 : rec.recommendation === "SELL"
-                                  ? "rgba(240, 115, 111, 0.12)"
-                                  : "rgba(224, 163, 62, 0.12)",
+                                  ? "rgba(226, 141, 131, 0.09)"
+                                  : "rgba(216, 174, 100, 0.09)",
                               color: rec.recommendation === "BUY"
                                 ? "var(--success-color)"
                                 : rec.recommendation === "SELL"
                                   ? "var(--danger-color)"
                                   : "var(--warning)",
                               border: `1px solid ${rec.recommendation === "BUY"
-                                  ? "rgba(63, 191, 135, 0.2)"
+                                  ? "rgba(91, 190, 147, 0.13)"
                                   : rec.recommendation === "SELL"
-                                    ? "rgba(240, 115, 111, 0.2)"
-                                    : "rgba(224, 163, 62, 0.2)"
+                                    ? "rgba(226, 141, 131, 0.13)"
+                                    : "rgba(216, 174, 100, 0.13)"
                                 }`
                             }}>
                               {rec.recommendation}
@@ -3271,10 +3271,10 @@ export default function App() {
               top: hoveredSentimentKey.y,
               left: hoveredSentimentKey.x,
               width: "360px",
-              background: "linear-gradient(135deg, rgba(28, 34, 45, 0.98) 0%, rgba(15, 19, 25, 0.99) 100%)",
+              background: "linear-gradient(135deg, rgba(40, 44, 52, 0.98) 0%, rgba(25, 28, 34, 0.99) 100%)",
               border: "1px solid rgba(255, 255, 255, 0.12)",
               borderRadius: "12px",
-              boxShadow: "0 20px 50px rgba(0, 0, 0, 0.9), 0 0 30px rgba(91, 157, 255, 0.15)",
+              boxShadow: "0 20px 50px rgba(0, 0, 0, 0.9), 0 0 30px rgba(127, 166, 225, 0.1)",
               padding: "16px",
               zIndex: 10000,
               pointerEvents: "none",
@@ -3308,7 +3308,7 @@ export default function App() {
                 <span style={{ fontSize: "18px", fontWeight: "800", color: "var(--positive)" }}>{compositeBuyPct}% <span style={{ fontSize: "9px", fontWeight: "700", color: "var(--text-muted)", marginLeft: "2px" }}>BUYERS</span></span>
                 <span style={{ fontSize: "18px", fontWeight: "800", color: "var(--negative)" }}>{compositeSellPct}% <span style={{ fontSize: "9px", fontWeight: "700", color: "var(--text-muted)", marginRight: "2px" }}>SELLERS</span></span>
               </div>
-              <div style={{ width: "100%", height: "6px", backgroundColor: "rgba(240, 115, 111, 0.3)", borderRadius: "3px", overflow: "hidden", display: "flex" }}>
+              <div style={{ width: "100%", height: "6px", backgroundColor: "rgba(226, 141, 131, 0.18)", borderRadius: "3px", overflow: "hidden", display: "flex" }}>
                 <div style={{ width: `${compositeBuyPct}%`, height: "100%", backgroundColor: "var(--positive)" }} />
               </div>
             </div>
@@ -3349,7 +3349,7 @@ export default function App() {
         zIndex: 1000,
         display: "flex",
         gap: "6px",
-        backgroundColor: "rgba(28, 34, 45, 0.95)",
+        backgroundColor: "rgba(40, 44, 52, 0.95)",
         backdropFilter: "blur(16px)",
         WebkitBackdropFilter: "blur(16px)",
         padding: "6px",
@@ -3368,7 +3368,7 @@ export default function App() {
             cursor: "pointer",
             backgroundColor: activeView === "tracker" ? "var(--accent)" : "transparent",
             color: activeView === "tracker" ? "var(--on-accent)" : "var(--text-secondary)",
-            boxShadow: activeView === "tracker" ? "0 2px 14px rgba(91, 157, 255, 0.5)" : "none",
+            boxShadow: activeView === "tracker" ? "0 2px 14px rgba(127, 166, 225, 0.34)" : "none",
             transition: "all 0.2s"
           }}
         >
@@ -3385,7 +3385,7 @@ export default function App() {
             cursor: "pointer",
             backgroundColor: activeView === "intelligence" ? "var(--accent)" : "transparent",
             color: activeView === "intelligence" ? "var(--on-accent)" : "var(--text-muted)",
-            boxShadow: activeView === "intelligence" ? "0 2px 10px rgba(91, 157, 255,0.4)" : "none",
+            boxShadow: activeView === "intelligence" ? "0 2px 10px rgba(127, 166, 225, 0.26)" : "none",
             transition: "all 0.2s"
           }}
         >
@@ -3402,7 +3402,7 @@ export default function App() {
             cursor: "pointer",
             backgroundColor: activeView === "trading" ? "var(--positive)" : "transparent",
             color: activeView === "trading" ? "var(--on-accent)" : "var(--text-muted)",
-            boxShadow: activeView === "trading" ? "0 2px 10px rgba(63, 191, 135,0.4)" : "none",
+            boxShadow: activeView === "trading" ? "0 2px 10px rgba(91, 190, 147, 0.26)" : "none",
             transition: "all 0.2s"
           }}
         >
