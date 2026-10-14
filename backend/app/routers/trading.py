@@ -65,6 +65,9 @@ class AutoTradingSettingsUpdate(BaseModel):
     custom_api_url: Optional[str] = None
     premium_openrouter_api_key: Optional[str] = None
     premium_openrouter_model: Optional[str] = None
+    premium_openrouter_enabled: Optional[bool] = None
+    free_openrouter_api_key: Optional[str] = None
+    free_openrouter_model: Optional[str] = None
 
 
 class DirectBuyRequest(BaseModel):
@@ -1128,9 +1131,29 @@ def reanalyse_pending_result(pending_id: int, body: ReanalyseRequest,
                     "quarterly figures to extract."),
         )
 
+    # A model picked by hand runs on the account that can pay for it: a
+    # ":free" model on the free key, anything else on the premium key. Say so
+    # now rather than queue a run that cannot succeed.
+    override = (body.model or "").strip() or None
+    if override:
+        from app.services.intel_config import get_intel_config
+        from app.services.openrouter_models import accounts
+        plan = accounts(get_intel_config().auto_trading_ai, override)
+        if plan.get("missing") == "premium":
+            raise HTTPException(
+                status_code=400,
+                detail=(f"{override} is a paid model and no premium OpenRouter key is set. "
+                        "Add it under AI settings, or pick a :free model."),
+            )
+        if plan.get("missing"):
+            raise HTTPException(
+                status_code=400,
+                detail="No OpenRouter key is set. Add the free or premium key under AI settings.",
+            )
+
     from app.services.results_router import run_ai_for_pending
     started = run_ai_for_pending(pending.id, config_id=pending.config_id,
-                                 model_override=(body.model or "").strip() or None)
+                                 model_override=override)
     if not started:
         raise HTTPException(status_code=409, detail="Could not queue the analysis")
 
@@ -1596,23 +1619,69 @@ def run_digest_now(
     }
 
 
+def _public_ai_settings(ai_cfg: dict) -> dict:
+    """
+    The settings as the screen may see them. Keys go out masked: the page is
+    served through a public tunnel and polled every few seconds, and a key it
+    only needs to recognise has no business being in every response.
+    """
+    import os
+    from app.services.openrouter_models import mask
+    out = dict(ai_cfg)
+    # The analyser also accepts each key from the environment; say so rather
+    # than report "no key" for an account that works.
+    env = {"premium_openrouter_api_key": "OPENROUTER_PREMIUM_API_KEY",
+           "free_openrouter_api_key": "OPENROUTER_API_KEY"}
+    for k, env_name in env.items():
+        out[k] = mask(ai_cfg.get(k, ""))
+        if not out[k] and os.getenv(env_name, "").strip():
+            out[k] = f"from .env ({env_name})"
+        out[k.replace("_api_key", "_key_set")] = bool(out[k])
+    return out
+
+
 @router.get("/settings")
 def get_auto_trading_settings():
-    """Get auto trading AI configuration."""
+    """Get auto trading AI configuration (API keys masked)."""
     from app.services.intel_config import get_intel_config
     cfg = get_intel_config()
-    return {"settings": cfg.auto_trading_ai}
+    return {"settings": _public_ai_settings(cfg.auto_trading_ai)}
 
 
 @router.post("/settings")
 def update_auto_trading_settings(body: AutoTradingSettingsUpdate):
-    """Save auto trading AI configuration (Custom REST API URL, OpenRouter key, Model)."""
+    """
+    Save auto trading AI configuration: gemcall URL, the premium and free
+    OpenRouter accounts, and the premium on/off switch. Fields left out are
+    unchanged, so the switch can be flipped on its own.
+    """
     from app.services.intel_config import get_intel_config
     cfg = get_intel_config()
     cfg.update_auto_trading_ai(
         custom_api_url=body.custom_api_url,
         premium_openrouter_api_key=body.premium_openrouter_api_key,
-        premium_openrouter_model=body.premium_openrouter_model
+        premium_openrouter_model=body.premium_openrouter_model,
+        premium_openrouter_enabled=body.premium_openrouter_enabled,
+        free_openrouter_api_key=body.free_openrouter_api_key,
+        free_openrouter_model=body.free_openrouter_model,
     )
-    return {"message": "Auto-trading AI settings updated successfully", "settings": cfg.auto_trading_ai}
+    return {"message": "Auto-trading AI settings updated successfully",
+            "settings": _public_ai_settings(cfg.auto_trading_ai)}
+
+
+@router.get("/openrouter/models")
+def openrouter_models_list(tier: str = Query("premium"), refresh: bool = False):
+    """
+    OpenRouter's live catalogue for one account: tier=free gives the free
+    models, tier=premium the paid ones, cheapest first, PDF readers first.
+    Empty (with a reason) when OpenRouter cannot be reached.
+    """
+    from app.services import openrouter_models
+    if tier not in ("free", "premium"):
+        raise HTTPException(status_code=400, detail="tier must be free or premium")
+    if refresh:
+        openrouter_models.list_models(force=True)
+    rows = openrouter_models.models_for(tier)
+    return {"tier": tier, "models": rows,
+            "reason": None if rows else "OpenRouter's model list could not be fetched"}
 

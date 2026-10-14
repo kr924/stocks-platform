@@ -350,7 +350,20 @@ class IntelConfig:
             # option on OpenRouter. anthropic/claude-3.5-sonnet was the previous
             # default and has since been retired from OpenRouter entirely.
             "premium_openrouter_model": "google/gemini-2.5-flash-lite",
+            # The switch in the app. ON: results are analysed on the premium
+            # account first. OFF: gemcall, then the free account; the premium
+            # key is never spent. See services/openrouter_models.py.
+            "premium_openrouter_enabled": True,
+            # A second OpenRouter account with no credit, for ":free" models.
+            # An empty model means: pick from the live catalogue.
+            "free_openrouter_api_key": "",
+            "free_openrouter_model": "",
         })
+        ai_cfg = dict(ai_cfg)
+        for k, v in (("premium_openrouter_enabled", True),
+                     ("free_openrouter_api_key", ""),
+                     ("free_openrouter_model", "")):
+            ai_cfg.setdefault(k, v)
         try:
             from app.database import SessionLocal, SystemSetting
             db = SessionLocal()
@@ -367,16 +380,30 @@ class IntelConfig:
             pass
         return ai_cfg
     
-    def update_auto_trading_ai(self, custom_api_url: str = None, premium_openrouter_api_key: str = None, premium_openrouter_model: str = None):
-        """Update auto_trading_ai settings in memory, YAML, and persistent database."""
+    def update_auto_trading_ai(self, custom_api_url: str = None, premium_openrouter_api_key: str = None,
+                               premium_openrouter_model: str = None, premium_openrouter_enabled: bool = None,
+                               free_openrouter_api_key: str = None, free_openrouter_model: str = None):
+        """
+        Update auto_trading_ai settings in memory, YAML, and persistent database.
+        None leaves a field as it is. A key that arrives masked ("••••abcd", as
+        the settings screen shows it) is the screen sending back what it was
+        shown, not a new key, and is ignored.
+        """
         import json
+        from app.services.openrouter_models import is_masked
         ai_cfg = dict(self.auto_trading_ai)
         if custom_api_url is not None:
             ai_cfg["custom_api_url"] = custom_api_url.strip()
-        if premium_openrouter_api_key is not None:
+        if premium_openrouter_api_key is not None and not is_masked(premium_openrouter_api_key):
             ai_cfg["premium_openrouter_api_key"] = premium_openrouter_api_key.strip()
         if premium_openrouter_model is not None:
             ai_cfg["premium_openrouter_model"] = premium_openrouter_model.strip()
+        if premium_openrouter_enabled is not None:
+            ai_cfg["premium_openrouter_enabled"] = bool(premium_openrouter_enabled)
+        if free_openrouter_api_key is not None and not is_masked(free_openrouter_api_key):
+            ai_cfg["free_openrouter_api_key"] = free_openrouter_api_key.strip()
+        if free_openrouter_model is not None:
+            ai_cfg["free_openrouter_model"] = free_openrouter_model.strip()
             
         self._config["auto_trading_ai"] = ai_cfg
 

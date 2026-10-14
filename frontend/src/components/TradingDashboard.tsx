@@ -1027,10 +1027,63 @@ interface UpcomingEarningsItem {
   returns_1y?: string;
 }
 
+/**
+ * Two OpenRouter accounts. With premium ON, results are analysed on the premium
+ * account first; OFF, gemcall then the free account, and the paid key is never
+ * spent. Keys come back from the server masked ("••••abcd") and are only sent
+ * when typed anew, so saving the form never round-trips a key.
+ */
 interface AutoTradingSettings {
   custom_api_url: string;
   premium_openrouter_api_key: string;
   premium_openrouter_model: string;
+  premium_openrouter_enabled: boolean;
+  premium_openrouter_key_set?: boolean;
+  free_openrouter_api_key: string;
+  free_openrouter_model: string;
+  free_openrouter_key_set?: boolean;
+}
+
+/** One model from OpenRouter's live catalogue (/api/trading/openrouter/models). */
+interface OrModel {
+  id: string;
+  name: string;
+  free: boolean;
+  reads_pdf: boolean;
+  context?: number | null;
+  prompt_per_m?: number | null;
+  completion_per_m?: number | null;
+}
+
+function orModelLabel(m: OrModel): string {
+  const price = m.free ? "free"
+    : m.prompt_per_m != null ? `$${m.prompt_per_m}/M in · $${m.completion_per_m ?? "?"}/M out` : "";
+  return `${m.name}${price ? ` — ${price}` : ""}${m.reads_pdf ? "" : " (text only)"}`;
+}
+
+/**
+ * Options for a model <select>: PDF readers first, the current value always
+ * present even if the catalogue does not list it (or could not be fetched).
+ */
+function OrModelOptions({ models, current }: { models: OrModel[]; current?: string }) {
+  const pdf = models.filter(m => m.reads_pdf);
+  const text = models.filter(m => !m.reads_pdf);
+  const listed = !current || models.some(m => m.id === current);
+  return (
+    <>
+      {!listed && <option value={current}>{current}</option>}
+      {pdf.length > 0 && (
+        <optgroup label="Reads the PDF itself">
+          {pdf.map(m => <option key={m.id} value={m.id}>{orModelLabel(m)}</option>)}
+        </optgroup>
+      )}
+      {text.length > 0 && (
+        <optgroup label="Text only — OpenRouter parses the PDF">
+          {text.map(m => <option key={m.id} value={m.id}>{orModelLabel(m)}</option>)}
+        </optgroup>
+      )}
+    </>
+  );
 }
 
 interface PollerStatus {
@@ -1088,10 +1141,18 @@ export function TradingDashboard() {
   const [aiSettings, setAiSettings] = useState<AutoTradingSettings>({
     custom_api_url: "http://localhost:11434/api/generate",
     premium_openrouter_api_key: "",
-    premium_openrouter_model: "anthropic/claude-3.5-sonnet",
+    premium_openrouter_model: "google/gemini-2.5-flash-lite",
+    premium_openrouter_enabled: true,
+    free_openrouter_api_key: "",
+    free_openrouter_model: "",
   });
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
+  // Keys typed into the settings form. undefined = leave the stored key alone,
+  // "" = remove it, anything else = replace it.
+  const [keyDrafts, setKeyDrafts] = useState<{ premium?: string; free?: string }>({});
+  const [orModels, setOrModels] = useState<{ premium: OrModel[]; free: OrModel[]; reason?: string | null }>({ premium: [], free: [] });
+  const [savingPremiumSwitch, setSavingPremiumSwitch] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -1976,23 +2037,75 @@ export function TradingDashboard() {
     }
   };
 
-  const handleSaveSettings = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSavingSettings(true);
+  /** Save some AI settings; fields left out stay as they are on the server. */
+  const postAiSettings = async (patch: Partial<AutoTradingSettings>): Promise<boolean> => {
     try {
       const res = await fetch(`${API_BASE}/api/trading/settings`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(aiSettings),
+        body: JSON.stringify(patch),
       });
-      if (res.ok) {
-        setShowSettingsModal(false);
-        fetchData();
-      }
+      if (!res.ok) return false;
+      const data = await res.json().catch(() => ({}));
+      if (data.settings) setAiSettings(prev => ({ ...prev, ...data.settings }));
+      return true;
     } catch (err) {
       console.error("Failed to save auto-trading settings:", err);
-    } finally {
-      setSavingSettings(false);
+      return false;
+    }
+  };
+
+  const loadOrModels = async (refresh = false) => {
+    try {
+      const q = refresh ? "&refresh=true" : "";
+      const [p, f] = await Promise.all([
+        fetch(`${API_BASE}/api/trading/openrouter/models?tier=premium${q}`).then(r => r.ok ? r.json() : null),
+        fetch(`${API_BASE}/api/trading/openrouter/models?tier=free${q}`).then(r => r.ok ? r.json() : null),
+      ]);
+      setOrModels({
+        premium: Array.isArray(p?.models) ? p.models : [],
+        free: Array.isArray(f?.models) ? f.models : [],
+        reason: p?.reason || f?.reason || null,
+      });
+    } catch (err) {
+      console.error("Failed to load OpenRouter models:", err);
+    }
+  };
+
+  useEffect(() => { loadOrModels(); }, []);
+
+  /** The Premium AI switch on Order Decisions: flips the default for new filings. */
+  const togglePremiumAi = async () => {
+    const next = !aiSettings.premium_openrouter_enabled;
+    if (next && !aiSettings.premium_openrouter_key_set) {
+      alert("No premium OpenRouter key is saved yet. Add it under AI settings first.");
+      setShowSettingsModal(true);
+      return;
+    }
+    setSavingPremiumSwitch(true);
+    await postAiSettings({ premium_openrouter_enabled: next });
+    setSavingPremiumSwitch(false);
+  };
+
+  const handleSaveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingSettings(true);
+    const patch: Partial<AutoTradingSettings> = {
+      custom_api_url: aiSettings.custom_api_url,
+      premium_openrouter_model: aiSettings.premium_openrouter_model,
+      premium_openrouter_enabled: aiSettings.premium_openrouter_enabled,
+      free_openrouter_model: aiSettings.free_openrouter_model,
+    };
+    if (keyDrafts.premium !== undefined) patch.premium_openrouter_api_key = keyDrafts.premium.trim();
+    if (keyDrafts.free !== undefined) patch.free_openrouter_api_key = keyDrafts.free.trim();
+    const ok = await postAiSettings(patch);
+    setSavingSettings(false);
+    if (ok) {
+      setKeyDrafts({});
+      setShowSettingsModal(false);
+      fetchData();
+    } else {
+      alert("Could not save the AI settings.");
     }
   };
 
@@ -2651,7 +2764,7 @@ export function TradingDashboard() {
             <AlertTriangle size={18} /> Order Decisions
             {" "}({visiblePendingResults.length}{pendingSearch.trim() ? ` of ${categoryCounts[pendingCategory]}` : ""})
           </h3>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px" }}>
             <input
               value={pendingSearch}
               onChange={e => setPendingSearch(e.target.value)}
@@ -2668,6 +2781,76 @@ export function TradingDashboard() {
                 Clear
               </button>
             )}
+
+            {/* Which OpenRouter account analyses new results. ON: the premium
+                account and the model picked here, ahead of gemcall. OFF:
+                gemcall, then the free account; the paid key is never spent. */}
+            {(() => {
+              const on = !!aiSettings.premium_openrouter_enabled;
+              const freeLabel = aiSettings.free_openrouter_model || "best free model";
+              return (
+                <div style={{
+                  display: "inline-flex", alignItems: "center", gap: "6px",
+                  padding: "3px 4px 3px 8px", borderRadius: "8px",
+                  background: on ? "var(--ai-bg)" : "transparent",
+                  border: `1px solid ${on ? "rgba(176, 155, 217, 0.35)" : "rgba(160, 168, 180, 0.18)"}`,
+                }}>
+                  <button
+                    type="button"
+                    onClick={togglePremiumAi}
+                    disabled={savingPremiumSwitch}
+                    role="switch"
+                    aria-checked={on}
+                    title={on
+                      ? "New results are analysed on the premium OpenRouter account. Click to switch to the free account."
+                      : `Premium is off: new results go to gemcall, then the free OpenRouter account (${freeLabel}). Click to use premium.`}
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: "6px",
+                      background: "none", border: "none", padding: 0,
+                      cursor: savingPremiumSwitch ? "wait" : "pointer",
+                      fontSize: "11px", fontWeight: 700,
+                      color: on ? "var(--ai)" : "var(--text-muted)",
+                    }}>
+                    <span style={{
+                      position: "relative", width: "26px", height: "14px", borderRadius: "7px",
+                      background: on ? "var(--ai)" : "rgba(160, 168, 180, 0.3)",
+                      transition: "background 0.15s",
+                    }}>
+                      <span style={{
+                        position: "absolute", top: "2px", left: on ? "14px" : "2px",
+                        width: "10px", height: "10px", borderRadius: "50%",
+                        background: "var(--bg-base)", transition: "left 0.15s",
+                      }} />
+                    </span>
+                    {on ? "PREMIUM AI" : "Free AI"}
+                  </button>
+                  {on ? (
+                    <select
+                      value={aiSettings.premium_openrouter_model}
+                      onChange={e => postAiSettings({ premium_openrouter_model: e.target.value })}
+                      title="Premium model new results are analysed with"
+                      style={{
+                        maxWidth: "190px", padding: "3px 6px", fontSize: "11px",
+                        background: "var(--bg-sunken)", border: "1px solid var(--border-default)",
+                        borderRadius: "5px", color: "var(--text-primary)",
+                      }}>
+                      <OrModelOptions models={orModels.premium} current={aiSettings.premium_openrouter_model} />
+                    </select>
+                  ) : (
+                    <span style={{ fontSize: "10px", color: "var(--text-faint)", maxWidth: "170px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {aiSettings.free_openrouter_key_set ? freeLabel : "no free key set"}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setShowSettingsModal(true)}
+                    title="AI settings: both OpenRouter accounts and gemcall"
+                    style={{ display: "inline-flex", background: "none", border: "none", padding: "2px", cursor: "pointer", color: "var(--text-muted)" }}>
+                    <Settings size={12} />
+                  </button>
+                </div>
+              );
+            })()}
 
             <button
               onClick={enableAlerts}
@@ -3500,7 +3683,28 @@ export function TradingDashboard() {
                               value={modelChoice}
                               onChange={e => setReanalyseModel(prev => ({ ...prev, [pending.id]: e.target.value }))}
                               style={{ padding: "5px 8px", fontSize: "11px", background: "var(--bg-sunken)", border: "1px solid var(--border-default)", borderRadius: "6px", color: "var(--text-primary)", maxWidth: "280px" }}>
-                              {AI_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                              <option value="">
+                                {aiSettings.premium_openrouter_enabled && aiSettings.premium_openrouter_key_set
+                                  ? `Default — premium (${aiSettings.premium_openrouter_model})`
+                                  : `Default — gemcall, then free (${aiSettings.free_openrouter_model || "best free"})`}
+                              </option>
+                              {orModels.premium.length > 0 || orModels.free.length > 0 ? (
+                                <>
+                                  {orModels.premium.length > 0 && (
+                                    <optgroup label="Premium account">
+                                      {orModels.premium.filter(m => m.reads_pdf).map(m => <option key={m.id} value={m.id}>{orModelLabel(m)}</option>)}
+                                    </optgroup>
+                                  )}
+                                  {orModels.free.length > 0 && (
+                                    <optgroup label="Free account">
+                                      {orModels.free.map(m => <option key={m.id} value={m.id}>{orModelLabel(m)}</option>)}
+                                    </optgroup>
+                                  )}
+                                </>
+                              ) : (
+                                AI_MODELS.filter(m => m.id && m.id !== "__custom__").map(m => <option key={m.id} value={m.id}>{m.label}</option>)
+                              )}
+                              <option value="__custom__">Other — type an id…</option>
                             </select>
                             {modelChoice === "__custom__" && (
                               <input
@@ -4168,13 +4372,15 @@ export function TradingDashboard() {
             border: "1px solid rgba(176, 155, 217, 0.18)",
             borderRadius: "16px",
             width: "100%",
-            maxWidth: "540px",
+            maxWidth: "560px",
+            maxHeight: "90vh",
+            overflowY: "auto",
             padding: "24px",
             boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.5)"
           }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "18px" }}>
               <h3 style={{ fontSize: "16px", fontWeight: "800", color: "var(--text-primary)", display: "flex", alignItems: "center", gap: "8px" }}>
-                <Settings size={18} className="text-purple-400" /> 2-Step AI Earnings Pipeline Settings
+                <Settings size={18} className="text-purple-400" /> AI Earnings Analysis Settings
               </h3>
               <button
                 onClick={() => setShowSettingsModal(false)}
@@ -4187,7 +4393,7 @@ export function TradingDashboard() {
             <form onSubmit={handleSaveSettings} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
               <div>
                 <label style={{ display: "block", fontSize: "12px", fontWeight: "700", color: "var(--text-secondary)", marginBottom: "6px" }}>
-                  Flow 1: Custom REST API Endpoint URL (POST /api/generate)
+                  gemcall: Custom REST API Endpoint URL (POST /api/generate)
                 </label>
                 <input
                   type="text"
@@ -4206,59 +4412,119 @@ export function TradingDashboard() {
                   }}
                 />
                 <span style={{ fontSize: "11px", color: "var(--text-faint)", marginTop: "4px", display: "block" }}>
-                  Primary REST endpoint called dynamically when an announcement is detected.
+                  Tried first when premium is off, and after premium when it is on.
                 </span>
               </div>
 
-              <div>
-                <label style={{ display: "block", fontSize: "12px", fontWeight: "700", color: "var(--text-secondary)", marginBottom: "6px" }}>
-                  Flow 2 (Fallback): Premium OpenRouter API Key
-                </label>
-                <input
-                  type="password"
-                  value={aiSettings.premium_openrouter_api_key}
-                  onChange={(e) => setAiSettings({ ...aiSettings, premium_openrouter_api_key: e.target.value })}
-                  placeholder="sk-or-v1-..."
-                  style={{
-                    width: "100%",
-                    padding: "10px 12px",
-                    borderRadius: "8px",
-                    backgroundColor: "var(--surface-2)",
-                    border: "1px solid rgba(255, 255, 255, 0.1)",
-                    color: "var(--text-primary)",
-                    fontSize: "12px",
-                    fontFamily: "monospace"
-                  }}
-                />
-                <span style={{ fontSize: "11px", color: "var(--text-faint)", marginTop: "4px", display: "block" }}>
-                  Dedicated key used if Custom REST API is unreachable or returns an error.
-                </span>
-              </div>
+              {(() => {
+                const inputStyle: React.CSSProperties = {
+                  width: "100%", padding: "9px 12px", borderRadius: "8px",
+                  backgroundColor: "var(--surface-2)", border: "1px solid rgba(255, 255, 255, 0.1)",
+                  color: "var(--text-primary)", fontSize: "12px",
+                };
+                const section: React.CSSProperties = {
+                  border: "1px solid rgba(255, 255, 255, 0.08)", borderRadius: "10px",
+                  padding: "12px", display: "flex", flexDirection: "column", gap: "10px",
+                };
+                const label: React.CSSProperties = { display: "block", fontSize: "11px", fontWeight: 700, color: "var(--text-secondary)", marginBottom: "5px" };
+                const hint: React.CSSProperties = { fontSize: "11px", color: "var(--text-faint)", marginTop: "4px", display: "block" };
+                const keyField = (tier: "premium" | "free") => {
+                  const stored = tier === "premium" ? aiSettings.premium_openrouter_api_key : aiSettings.free_openrouter_api_key;
+                  const isSet = tier === "premium" ? aiSettings.premium_openrouter_key_set : aiSettings.free_openrouter_key_set;
+                  const draft = keyDrafts[tier];
+                  return (
+                    <div>
+                      <label style={label}>API key</label>
+                      <div style={{ display: "flex", gap: "6px" }}>
+                        <input
+                          type="password"
+                          autoComplete="off"
+                          value={draft ?? ""}
+                          onChange={e => setKeyDrafts(prev => ({ ...prev, [tier]: e.target.value }))}
+                          placeholder={draft === "" && isSet ? "will be removed on save"
+                            : isSet ? `saved ${stored} — type to replace` : "sk-or-v1-..."}
+                          style={{ ...inputStyle, fontFamily: "monospace" }}
+                        />
+                        {isSet && draft === undefined && (
+                          <button type="button" onClick={() => setKeyDrafts(prev => ({ ...prev, [tier]: "" }))}
+                            style={{ padding: "0 10px", borderRadius: "8px", background: "transparent", border: "1px solid rgba(160, 168, 180, 0.2)", color: "var(--text-muted)", fontSize: "11px", cursor: "pointer" }}>
+                            Remove
+                          </button>
+                        )}
+                        {draft !== undefined && (
+                          <button type="button" onClick={() => setKeyDrafts(prev => { const n = { ...prev }; delete n[tier]; return n; })}
+                            style={{ padding: "0 10px", borderRadius: "8px", background: "transparent", border: "1px solid rgba(160, 168, 180, 0.2)", color: "var(--text-muted)", fontSize: "11px", cursor: "pointer" }}>
+                            Undo
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                };
+                const premiumOn = !!aiSettings.premium_openrouter_enabled;
+                return (
+                  <>
+                    <div style={section}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px" }}>
+                        <span style={{ fontSize: "12px", fontWeight: 800, color: "var(--ai)" }}>Premium OpenRouter account</span>
+                        <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "11px", fontWeight: 700, color: premiumOn ? "var(--ai)" : "var(--text-muted)", cursor: "pointer" }}>
+                          <input
+                            type="checkbox"
+                            checked={premiumOn}
+                            onChange={e => setAiSettings({ ...aiSettings, premium_openrouter_enabled: e.target.checked })}
+                          />
+                          {premiumOn ? "ON — analyse results with premium" : "OFF"}
+                        </label>
+                      </div>
+                      {keyField("premium")}
+                      <div>
+                        <label style={label}>Model</label>
+                        <select
+                          value={aiSettings.premium_openrouter_model}
+                          onChange={(e) => setAiSettings({ ...aiSettings, premium_openrouter_model: e.target.value })}
+                          style={inputStyle}>
+                          <OrModelOptions models={orModels.premium} current={aiSettings.premium_openrouter_model} />
+                        </select>
+                        <span style={hint}>
+                          ON: every new result is analysed here first, before gemcall. OFF: this key is never used,
+                          except when you pick a paid model for one filing with Re-analyse.
+                        </span>
+                      </div>
+                    </div>
 
-              <div>
-                <label style={{ display: "block", fontSize: "12px", fontWeight: "700", color: "var(--text-secondary)", marginBottom: "6px" }}>
-                  Flow 2 Model Selector (Premium Models)
-                </label>
-                <select
-                  value={aiSettings.premium_openrouter_model}
-                  onChange={(e) => setAiSettings({ ...aiSettings, premium_openrouter_model: e.target.value })}
-                  style={{
-                    width: "100%",
-                    padding: "10px 12px",
-                    borderRadius: "8px",
-                    backgroundColor: "var(--surface-2)",
-                    border: "1px solid rgba(255, 255, 255, 0.1)",
-                    color: "var(--text-primary)",
-                    fontSize: "12px"
-                  }}
-                >
-                  <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet (Anthropic)</option>
-                  <option value="deepseek/deepseek-r1">DeepSeek R1 (Reasoning Model)</option>
-                  <option value="openai/gpt-4o">GPT-4o (OpenAI)</option>
-                  <option value="google/gemini-2.5-flash">Gemini 2.5 Flash (Google)</option>
-                  <option value="meta-llama/llama-3.3-70b-instruct">Llama 3.3 70B (Meta)</option>
-                </select>
-              </div>
+                    <div style={section}>
+                      <span style={{ fontSize: "12px", fontWeight: 800, color: "var(--text-primary)" }}>Free OpenRouter account</span>
+                      {keyField("free")}
+                      <div>
+                        <label style={label}>Model</label>
+                        <select
+                          value={aiSettings.free_openrouter_model}
+                          onChange={(e) => setAiSettings({ ...aiSettings, free_openrouter_model: e.target.value })}
+                          style={inputStyle}>
+                          <option value="">Auto — best free model that reads PDFs</option>
+                          <OrModelOptions models={orModels.free} current={aiSettings.free_openrouter_model || undefined} />
+                        </select>
+                        <span style={hint}>
+                          Used when premium is off, or when premium and gemcall both fail. Only free models are tried
+                          on this key. Free models are rate-limited (about 50 a day on an account with no credit).
+                        </span>
+                      </div>
+                    </div>
+
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "11px", color: "var(--text-faint)" }}>
+                      <span>
+                        {orModels.reason
+                          ? orModels.reason
+                          : `${orModels.premium.length} premium · ${orModels.free.length} free models from OpenRouter`}
+                      </span>
+                      <button type="button" onClick={() => loadOrModels(true)}
+                        style={{ display: "inline-flex", alignItems: "center", gap: "4px", background: "none", border: "none", color: "var(--accent)", fontSize: "11px", cursor: "pointer" }}>
+                        <RefreshCw size={11} /> Refresh list
+                      </button>
+                    </div>
+                  </>
+                );
+              })()}
 
               <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "10px" }}>
                 <button

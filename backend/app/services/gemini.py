@@ -140,13 +140,26 @@ def call_openai(prompt: str, api_key: str) -> dict:
 
 
 def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url: str = None,
-                    pdf_engine: str = None) -> dict:
-    """Call OpenRouter API with dynamic model discovery and document URL attachment support."""
+                    pdf_engine: str = None, free_only: bool = False,
+                    fallbacks: list = None, report: dict = None) -> dict:
+    """
+    Call OpenRouter API with dynamic model discovery and document URL attachment support.
+
+    free_only: the key has no credit behind it. Only free models are tried
+    (`model` plus `fallbacks`), never openrouter/auto or the paid chain. A
+    model that reads PDFs gets the file itself; one that cannot goes through
+    OpenRouter's free "pdf-text" parser, never the paid OCR engine, unless
+    the caller chose an engine. A paid model on a free key fails anyway.
+
+    report: if given, gets "model" set to the model that actually answered.
+    """
     key = api_key.strip().rstrip(">").strip('"').strip("'").strip()
     if not key or key.startswith("YOUR_"):
         raise ValueError("Invalid or placeholder OpenRouter API key")
 
-    pdf_engine = pdf_engine or os.getenv("OPENROUTER_PDF_ENGINE", "native")
+    chosen_engine = pdf_engine
+    if not free_only:
+        pdf_engine = pdf_engine or os.getenv("OPENROUTER_PDF_ENGINE", "native")
 
     headers = {
         "Content-Type": "application/json",
@@ -159,12 +172,21 @@ def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url
     if model:
         models_to_try.append(model)
 
+    if free_only:
+        for fb in (fallbacks or []):
+            if fb and fb not in models_to_try:
+                models_to_try.append(fb)
+        if not models_to_try:
+            raise ValueError("No free OpenRouter model available to try")
+
     # An explicitly configured model is a deliberate choice. Falling through a
     # hundred free models behind it was not a fallback so much as a way to spend
     # several minutes discovering that rate-limited models cannot read a PDF.
     # A short curated chain covers a genuine outage instead.
-    if model:
-        for fallback in ("google/gemini-2.5-flash-lite", "openai/gpt-4o-mini"):
+    if free_only:
+        skip_free_discovery = True
+    elif model:
+        for fallback in (fallbacks or ("google/gemini-2.5-flash-lite", "openai/gpt-4o-mini")):
             if fallback != model:
                 models_to_try.append(fallback)
         models_to_try = models_to_try[:3]
@@ -201,7 +223,7 @@ def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url
     
     # openrouter/auto picks a model per request, so cost and output shape vary
     # run to run. Only reach for it when nothing was configured.
-    if "openrouter/auto" not in models_to_try and not model:
+    if "openrouter/auto" not in models_to_try and not model and not free_only:
         models_to_try.insert(0, "openrouter/auto")
         
     # OpenRouter takes the document as {"file": {"filename", "file_data"}}, and
@@ -240,12 +262,21 @@ def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url
             # exactly the request where structured output matters most.
             if use_json_format:
                 payload["response_format"] = {"type": "json_object"}
+            engine = pdf_engine
+            if free_only and not chosen_engine:
+                # Per model: one that reads PDFs gets the file itself; one that
+                # cannot gets OpenRouter's free text parser, never the paid OCR.
+                try:
+                    from app.services.openrouter_models import reads_pdf
+                    engine = "native" if reads_pdf(model_name) else "pdf-text"
+                except Exception:
+                    engine = "pdf-text"
             if has_attachment:
                 # "native" lets a document-capable model read the PDF itself,
                 # including scans, without a separate OCR pass. OpenRouter falls
                 # back to its own parser when the model cannot.
                 payload["plugins"] = [
-                    {"id": "file-parser", "pdf": {"engine": pdf_engine}}
+                    {"id": "file-parser", "pdf": {"engine": engine}}
                 ]
                 
             try:
@@ -259,7 +290,10 @@ def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url
                     raw_text = res.json()["choices"][0]["message"]["content"]
                     cleaned = clean_json_response(raw_text)
                     logger.info(f"✨ [OPENROUTER] Analysis successfully generated using model '{model_name}'!")
-                    return json.loads(cleaned)
+                    parsed = json.loads(cleaned)
+                    if report is not None:
+                        report["model"] = model_name
+                    return parsed
                 else:
                     last_err = f"Model {model_name} HTTP {res.status_code}: {res.text[:120]}"
             except Exception as e:

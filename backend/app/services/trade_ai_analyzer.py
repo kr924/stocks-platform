@@ -658,14 +658,15 @@ def _do_analyze_earnings_disclosure_2step(
     auto_ai_cfg = cfg.auto_trading_ai
     
     custom_url = auto_ai_cfg.get("custom_api_url", "http://localhost:3000/api/generate").strip()
-    openrouter_key = auto_ai_cfg.get("premium_openrouter_api_key", "").strip() or os.getenv("OPENROUTER_PREMIUM_API_KEY", "").strip() or os.getenv("OPENROUTER_API_KEY", "").strip()
-    openrouter_model = auto_ai_cfg.get("premium_openrouter_model", "google/gemini-2.5-flash-lite").strip()
+    # Two OpenRouter accounts, premium and free; which one runs, and whether
+    # before or after gemcall, is decided in openrouter_models.accounts().
     # A re-analysis can name its own model without disturbing the configured
     # default: the operator is asking "what would a stronger model make of this
     # filing", not changing what every future filing is analysed with.
+    from app.services import openrouter_models
+    plan = openrouter_models.accounts(auto_ai_cfg, model_override)
     if model_override and model_override.strip():
-        openrouter_model = model_override.strip()
-        logger.info(f"[AUTO AI] {symbol}: model overridden for this run -> {openrouter_model}")
+        logger.info(f"[AUTO AI] {symbol}: model overridden for this run -> {model_override.strip()}")
 
     company_name = ""
     try:
@@ -743,115 +744,162 @@ CRITICAL: Output ONLY raw JSON. No prose, no markdown fences, no preamble.
     used_flow = "custom_rest_api"
     used_provider = f"custom_api ({custom_url})"
 
-    # --- FLOW 1: gemcall / Custom REST API ---
-    is_ollama_endpoint = any(kw in custom_url.lower() for kw in ["11434", "ollama", "localhost:11434"])
-    local_llm_active = cfg.local_llm_enabled
+    def _gemcall():
+        result_raw = None
+        # --- gemcall / Custom REST API ---
+        is_ollama_endpoint = any(kw in custom_url.lower() for kw in ["11434", "ollama", "localhost:11434"])
+        local_llm_active = cfg.local_llm_enabled
 
-    if custom_url and (not is_ollama_endpoint or local_llm_active):
-        try:
-            logger.info(f"🔬 [AUTO AI FLOW 1]: Posting to Custom REST API: {custom_url} for #{symbol}")
-            print(f"🔬 [AUTO AI FLOW 1]: Posting to Custom REST API: {custom_url} for #{symbol}")
+        if custom_url and (not is_ollama_endpoint or local_llm_active):
+            try:
+                logger.info(f"🔬 [AUTO AI FLOW 1]: Posting to Custom REST API: {custom_url} for #{symbol}")
+                print(f"🔬 [AUTO AI FLOW 1]: Posting to Custom REST API: {custom_url} for #{symbol}")
 
-            # 1. Download & Base64 Encode PDF Attachment if URL is available
-            base64_pdf = None
-            if attachment_url:
-                try:
-                    from app.services.trade_nse_poller import _get_trade_nse_session
-                    session = _get_trade_nse_session().session
-                    headers_nse = {
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                        "Accept": "application/pdf,*/*",
-                        "Referer": "https://www.nseindia.com/companies-listing/corporate-filings/announcements"
-                    }
-                    from app.services import bse_http
-                    if bse_http.is_bse_url(attachment_url):
-                        # BSE refuses python-requests (403); impersonate Chrome.
-                        pdf_res = bse_http.get(attachment_url, headers={"Accept": "application/pdf,*/*", "Referer": "https://www.bseindia.com/"}, timeout=30)
+                # 1. Download & Base64 Encode PDF Attachment if URL is available
+                base64_pdf = None
+                if attachment_url:
+                    try:
+                        from app.services.trade_nse_poller import _get_trade_nse_session
+                        session = _get_trade_nse_session().session
+                        headers_nse = {
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                            "Accept": "application/pdf,*/*",
+                            "Referer": "https://www.nseindia.com/companies-listing/corporate-filings/announcements"
+                        }
+                        from app.services import bse_http
+                        if bse_http.is_bse_url(attachment_url):
+                            # BSE refuses python-requests (403); impersonate Chrome.
+                            pdf_res = bse_http.get(attachment_url, headers={"Accept": "application/pdf,*/*", "Referer": "https://www.bseindia.com/"}, timeout=30)
+                        else:
+                            pdf_res = session.get(attachment_url, headers=headers_nse, timeout=15)
+                        if pdf_res.status_code == 200 and len(pdf_res.content) > 100:
+                            base64_pdf = base64.b64encode(pdf_res.content).decode("utf-8")
+                            logger.info(f"✅ [FLOW 1 PDF]: Downloaded & Base64 encoded PDF ({len(pdf_res.content)} bytes) for #{symbol}")
+                            print(f"✅ [FLOW 1 PDF]: Downloaded & Base64 encoded PDF ({len(pdf_res.content)} bytes) for #{symbol}")
+                    except Exception as pdf_err:
+                        logger.warning(f"⚠️ [FLOW 1 PDF WARNING]: Could not download PDF for base64 encoding: {pdf_err}")
+                        print(f"⚠️ [FLOW 1 PDF WARNING]: Could not download PDF for base64 encoding: {pdf_err}")
+
+                # 2. Build Request Payload
+                #
+                # The generation budget must be sent in the BODY. `requests(timeout=)`
+                # only governs how long this client waits; gemcall reads its own
+                # budget from req.body.timeout and otherwise falls back to
+                # PAGE_TIMEOUT_MS (60s). That mismatch meant gemcall abandoned
+                # every PDF analysis at 60s while this side sat waiting for 180s,
+                # and the response came back empty.
+                gemcall_timeout_ms = 240000  # 4 min — Gemini needs 2-3 min on a PDF
+                payload = {"prompt": prompt, "timeout": gemcall_timeout_ms}
+                if base64_pdf:
+                    payload["images"] = [f"data:application/pdf;base64,{base64_pdf}"]
+
+                # 3. Post to gemcall / Custom REST API. The HTTP timeout must exceed
+                #    the generation budget or the client hangs up on a live run.
+                resp = requests.post(
+                    custom_url,
+                    json=payload,
+                    headers={"Content-Type": "application/json"},
+                    timeout=(gemcall_timeout_ms / 1000) + 60,
+                )
+                if resp.status_code == 200:
+                    try:
+                        resp_data = resp.json()
+                        if isinstance(resp_data, dict):
+                            result_raw = resp_data.get("json") or resp_data.get("response") or resp_data.get("text") or resp_data.get("content") or resp_data.get("result") or json.dumps(resp_data)
+                        else:
+                            result_raw = str(resp_data)
+                    except Exception:
+                        result_raw = resp.text
+
+                    # Validate that we actually got meaningful content back
+                    # Gemcall can return 200 with empty response if Playwright failed to extract
+                    if not result_raw or (isinstance(result_raw, str) and len(result_raw.strip()) < 20):
+                        logger.warning(f"⚠️ [AUTO AI FLOW 1 EMPTY]: Custom REST API returned 200 but response is empty/too short for #{symbol}. Falling back.")
+                        print(f"⚠️ [AUTO AI FLOW 1 EMPTY]: Custom REST API returned 200 but response is empty/too short for #{symbol}. Falling back.")
+                        result_raw = None
                     else:
-                        pdf_res = session.get(attachment_url, headers=headers_nse, timeout=15)
-                    if pdf_res.status_code == 200 and len(pdf_res.content) > 100:
-                        base64_pdf = base64.b64encode(pdf_res.content).decode("utf-8")
-                        logger.info(f"✅ [FLOW 1 PDF]: Downloaded & Base64 encoded PDF ({len(pdf_res.content)} bytes) for #{symbol}")
-                        print(f"✅ [FLOW 1 PDF]: Downloaded & Base64 encoded PDF ({len(pdf_res.content)} bytes) for #{symbol}")
-                except Exception as pdf_err:
-                    logger.warning(f"⚠️ [FLOW 1 PDF WARNING]: Could not download PDF for base64 encoding: {pdf_err}")
-                    print(f"⚠️ [FLOW 1 PDF WARNING]: Could not download PDF for base64 encoding: {pdf_err}")
-
-            # 2. Build Request Payload
-            #
-            # The generation budget must be sent in the BODY. `requests(timeout=)`
-            # only governs how long this client waits; gemcall reads its own
-            # budget from req.body.timeout and otherwise falls back to
-            # PAGE_TIMEOUT_MS (60s). That mismatch meant gemcall abandoned
-            # every PDF analysis at 60s while this side sat waiting for 180s,
-            # and the response came back empty.
-            gemcall_timeout_ms = 240000  # 4 min — Gemini needs 2-3 min on a PDF
-            payload = {"prompt": prompt, "timeout": gemcall_timeout_ms}
-            if base64_pdf:
-                payload["images"] = [f"data:application/pdf;base64,{base64_pdf}"]
-
-            # 3. Post to gemcall / Custom REST API. The HTTP timeout must exceed
-            #    the generation budget or the client hangs up on a live run.
-            resp = requests.post(
-                custom_url,
-                json=payload,
-                headers={"Content-Type": "application/json"},
-                timeout=(gemcall_timeout_ms / 1000) + 60,
-            )
-            if resp.status_code == 200:
-                try:
-                    resp_data = resp.json()
-                    if isinstance(resp_data, dict):
-                        result_raw = resp_data.get("json") or resp_data.get("response") or resp_data.get("text") or resp_data.get("content") or resp_data.get("result") or json.dumps(resp_data)
-                    else:
-                        result_raw = str(resp_data)
-                except Exception:
-                    result_raw = resp.text
-
-                # Validate that we actually got meaningful content back
-                # Gemcall can return 200 with empty response if Playwright failed to extract
-                if not result_raw or (isinstance(result_raw, str) and len(result_raw.strip()) < 20):
-                    logger.warning(f"⚠️ [AUTO AI FLOW 1 EMPTY]: Custom REST API returned 200 but response is empty/too short for #{symbol}. Falling back.")
-                    print(f"⚠️ [AUTO AI FLOW 1 EMPTY]: Custom REST API returned 200 but response is empty/too short for #{symbol}. Falling back.")
-                    result_raw = None
+                        logger.info(f"✅ [AUTO AI FLOW 1 SUCCESS]: Custom REST API responded for #{symbol} (len={len(str(result_raw))})")
+                        print(f"✅ [AUTO AI FLOW 1 SUCCESS]: Custom REST API responded for #{symbol} (len={len(str(result_raw))})")
                 else:
-                    used_flow = "custom_rest_api"
-                    used_provider = f"Custom REST API ({custom_url})"
-                    logger.info(f"✅ [AUTO AI FLOW 1 SUCCESS]: Custom REST API responded for #{symbol} (len={len(str(result_raw))})")
-                    print(f"✅ [AUTO AI FLOW 1 SUCCESS]: Custom REST API responded for #{symbol} (len={len(str(result_raw))})")
-            else:
-                logger.warning(f"⚠️ [AUTO AI FLOW 1 FAILED]: Status {resp.status_code} ({resp.text[:100]}). Triggering OpenRouter fallback.")
-                print(f"⚠️ [AUTO AI FLOW 1 FAILED]: Status {resp.status_code} ({resp.text[:100]}). Triggering OpenRouter fallback.")
+                    logger.warning(f"⚠️ [AUTO AI FLOW 1 FAILED]: Status {resp.status_code} ({resp.text[:100]}). Falling back.")
+                    print(f"⚠️ [AUTO AI FLOW 1 FAILED]: Status {resp.status_code} ({resp.text[:100]}). Falling back.")
+                    result_raw = None
+            except Exception as e:
+                logger.warning(f"⚠️ [AUTO AI FLOW 1 ERROR]: {e}. Falling back.")
+                print(f"⚠️ [AUTO AI FLOW 1 ERROR]: {e}. Falling back.")
                 result_raw = None
-        except Exception as e:
-            logger.warning(f"⚠️ [AUTO AI FLOW 1 ERROR]: {e}. Falling back to OpenRouter Premium.")
-            print(f"⚠️ [AUTO AI FLOW 1 ERROR]: {e}. Falling back to OpenRouter Premium.")
-            result_raw = None
-    elif is_ollama_endpoint and not local_llm_active:
-        logger.info(f"⏸️ [AUTO AI FLOW 1 SKIPPED]: Local Ollama is OFF during market hours (0% CPU). Falling back to Cloud LLM.")
-        print(f"⏸️ [AUTO AI FLOW 1 SKIPPED]: Local Ollama is OFF during market hours (0% CPU). Falling back to Cloud LLM.")
+        elif is_ollama_endpoint and not local_llm_active:
+            logger.info(f"⏸️ [AUTO AI FLOW 1 SKIPPED]: Local Ollama is OFF during market hours (0% CPU). Falling back to Cloud LLM.")
+            print(f"⏸️ [AUTO AI FLOW 1 SKIPPED]: Local Ollama is OFF during market hours (0% CPU). Falling back to Cloud LLM.")
 
-    # --- FLOW 2: OpenRouter Premium Fallback ---
-    if not result_raw:
-        used_flow = "openrouter_premium"
-        used_provider = f"OpenRouter Premium ({openrouter_model})"
+        return result_raw
+
+    def _openrouter(attempt):
+        tier, model = attempt["tier"], attempt["model"]
+        label = "Premium" if tier == "premium" else "Free"
+        report = {}
         try:
-            logger.info(f"🔬 [AUTO AI FLOW 2]: Calling Premium OpenRouter ({openrouter_model}) for #{symbol}")
-            print(f"🔬 [AUTO AI FLOW 2]: Calling Premium OpenRouter ({openrouter_model}) for #{symbol}")
-            if not openrouter_key:
-                logger.error("❌ [AUTO AI FLOW 2]: OpenRouter API Key is missing.")
-                print("❌ [AUTO AI FLOW 2]: OpenRouter API Key is missing.")
-            else:
-                or_res = call_openrouter(prompt, openrouter_key, model=openrouter_model, attachment_url=attachment_url)
-                if or_res and "analyses" in or_res and or_res["analyses"]:
-                    result_raw = json.dumps(or_res["analyses"][0])
-                elif or_res:
-                    result_raw = json.dumps(or_res)
-                logger.info(f"✅ [AUTO AI FLOW 2 SUCCESS]: OpenRouter ({openrouter_model}) responded for #{symbol}")
-                print(f"✅ [AUTO AI FLOW 2 SUCCESS]: OpenRouter ({openrouter_model}) responded for #{symbol}")
+            fallbacks = None
+            if tier == "free":
+                if not model:
+                    picks = openrouter_models.free_fallbacks(limit=3)
+                    model, fallbacks = (picks[0], picks[1:]) if picks else ("", [])
+                else:
+                    fallbacks = openrouter_models.free_fallbacks(exclude=model, limit=2)
+                if not model:
+                    logger.error(f"❌ [AUTO AI OPENROUTER FREE]: no free model configured and the catalogue is unreachable for #{symbol}")
+                    return None, None
+            logger.info(f"🔬 [AUTO AI OPENROUTER {label.upper()}]: Calling {model} for #{symbol}")
+            print(f"🔬 [AUTO AI OPENROUTER {label.upper()}]: Calling {model} for #{symbol}")
+            or_res = call_openrouter(prompt, attempt["key"], model=model,
+                                     attachment_url=attachment_url,
+                                     free_only=(tier == "free"), fallbacks=fallbacks,
+                                     report=report)
+            raw = None
+            if or_res and "analyses" in or_res and or_res["analyses"]:
+                raw = json.dumps(or_res["analyses"][0])
+            elif or_res:
+                raw = json.dumps(or_res)
+            answered = report.get("model") or model
+            if raw:
+                logger.info(f"✅ [AUTO AI OPENROUTER {label.upper()} SUCCESS]: {answered} responded for #{symbol}")
+                print(f"✅ [AUTO AI OPENROUTER {label.upper()} SUCCESS]: {answered} responded for #{symbol}")
+            return raw, f"OpenRouter {label} ({answered})"
         except Exception as e:
-            logger.error(f"❌ [AUTO AI FLOW 2 ERROR]: OpenRouter call failed: {e}")
-            print(f"❌ [AUTO AI FLOW 2 ERROR]: OpenRouter call failed: {e}")
+            logger.error(f"❌ [AUTO AI OPENROUTER {label.upper()} ERROR]: {model} failed for #{symbol}: {e}")
+            print(f"❌ [AUTO AI OPENROUTER {label.upper()} ERROR]: {model} failed for #{symbol}: {e}")
+            return None, None
+
+    # Premium ON: the premium account first. Then gemcall, then the free
+    # account. Premium OFF: gemcall, then free; the paid key is never touched.
+    for attempt in plan["before_gemcall"]:
+        result_raw, provider = _openrouter(attempt)
+        if result_raw:
+            used_flow, used_provider = f"openrouter_{attempt['tier']}", provider
+            break
+
+    if not result_raw and not plan["skip_gemcall"]:
+        result_raw = _gemcall()
+        if result_raw:
+            used_flow, used_provider = "custom_rest_api", f"Custom REST API ({custom_url})"
+
+    if not result_raw:
+        for attempt in plan["after_gemcall"]:
+            result_raw, provider = _openrouter(attempt)
+            if result_raw:
+                used_flow, used_provider = f"openrouter_{attempt['tier']}", provider
+                break
+
+    if not result_raw:
+        if plan.get("missing"):
+            logger.error(f"❌ [AUTO AI]: no {plan['missing']} OpenRouter key set for the model chosen for #{symbol}")
+        elif not plan["before_gemcall"] and not plan["after_gemcall"]:
+            logger.error(f"❌ [AUTO AI]: gemcall gave nothing and no OpenRouter key is usable for #{symbol} "
+                         "(premium off or empty, free key empty)")
+        tried = plan["after_gemcall"] or plan["before_gemcall"]
+        if tried:
+            used_flow = f"openrouter_{tried[-1]['tier']}"
+            used_provider = f"OpenRouter {tried[-1]['tier'].title()} ({tried[-1]['model'] or 'free pick'})"
 
     # --- Robust JSON Parsing ---
     parsed_json = _extract_json_from_llm(result_raw)

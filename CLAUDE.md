@@ -640,15 +640,40 @@ responses now re-check the origin.
 
 ## AI earnings analysis
 
-Two flows, in order:
+Three backends: **gemcall** (`custom_api_url`, a local Playwright service
+driving the Gemini web UI; lives at `C:\Users\koush\OneDrive\Desktop\gemcall`,
+**not in git**) and **two OpenRouter accounts**, premium and free. The order is
+decided by `services/openrouter_models.accounts()`:
 
-1. **gemcall** — `custom_api_url`, a local Playwright service driving the Gemini
-   web UI. Lives at `C:\Users\koush\OneDrive\Desktop\gemcall`, **not in git**.
-2. **OpenRouter** — `premium_openrouter_model`, currently
-   `google/gemini-2.5-flash-lite` (reads PDFs natively, JSON mode, cheapest
-   capable option ≈ $0.0011/filing).
+| Premium switch | order |
+|---|---|
+| **ON** (and a premium key) | premium model → gemcall → free account |
+| **OFF** | gemcall → free account. The premium key is never touched. |
+| Re-analyse with a model picked | that model alone, no gemcall: `:free` on the free key, anything else on the premium key whatever the switch says |
 
-Settings live in the SQLite `system_settings` table and override code defaults.
+- The switch and the premium model sit in the Order Decisions header; both
+  keys and both models are in AI settings. `premium_openrouter_enabled`
+  defaults to true, so a config saved before the switch existed behaves as it did.
+- **The free key only ever runs free models.** `call_openrouter(free_only=True)`
+  tries the chosen `:free` model plus two free fallbacks. It never uses
+  `openrouter/auto` or the paid chain. A free model that cannot read PDFs gets
+  OpenRouter's free `pdf-text` parser, not the paid OCR engine. That parser
+  has no OCR, so a scanned filing reads as empty on a text-only free model.
+- An empty free model means "pick from the live catalogue", PDF readers first.
+  The catalogue is `GET openrouter.ai/api/v1/models` (no key needed), cached 6h,
+  served at `/api/trading/openrouter/models?tier=free|premium`.
+- `flow_used` is `openrouter_premium` / `openrouter_free` / `custom_rest_api`;
+  `provider` names the model that actually answered, fallbacks included.
+- Env fallbacks: `OPENROUTER_PREMIUM_API_KEY` for premium, `OPENROUTER_API_KEY`
+  for **free**. It used to back the premium path and could spend; now it only
+  ever runs free models.
+- `GET /settings` returns keys **masked** (`••••abcd`): the page polls it every
+  few seconds through a public tunnel. A masked value posted back is ignored,
+  and the form sends a key only when one is typed (`""` removes it).
+
+Premium default `google/gemini-2.5-flash-lite` (reads PDFs natively, JSON mode,
+≈ $0.0011/filing). Settings live in the SQLite `system_settings` table
+(`auto_trading_ai`) and override code defaults.
 
 ### Guards — do not weaken these
 
@@ -758,8 +783,9 @@ repo (a stray `results_announcements.csv` in the root is a leftover, safe to del
 
 ## Open items
 
-- OpenRouter API key is **empty** — the fallback cannot run, so most analyses
-  return NA unless gemcall is up and logged in.
+- Both OpenRouter keys are **empty** until set in AI settings. Until then
+  nothing runs but gemcall, so most analyses return NA unless gemcall is up and
+  logged in.
 - gemcall needs `login-google.bat` then `start-all.bat` (login first, or it
   restarts into an unauthenticated session), and its `custom_api_url` is a quick
   tunnel that has already died — a named tunnel would end this.
