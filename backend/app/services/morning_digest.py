@@ -25,6 +25,8 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import PendingResultOrder, TradeAILog
+from app.services.result_compare import as_screener_shape as lfl_as_screener
+from app.services.result_compare import build as build_like_for_like
 from app.services.screener_quarters import (
     compare, fetch_latest_quarter, parse_ai_value, screener_all_positive,
     screener_signal,
@@ -192,22 +194,45 @@ def _build_rows(db: Session, pendings: List[PendingResultOrder],
                 except Exception:
                     db.rollback()
 
+        # Like-for-like: the filing's own quarter against the same quarter a
+        # year earlier and the quarter before, never Screener's "latest"
+        # quarter, which is routinely a different period from the filing.
+        # See services/result_compare.py.
+        extraction = None
+        if getattr(p, "extraction_json", None):
+            try:
+                extraction = json.loads(p.extraction_json)
+            except Exception:
+                extraction = None
+        if is_result_row:
+            lfl = build_like_for_like(db, p.symbol, p.event_time,
+                                      extraction=extraction, screener=screener)
+        else:
+            lfl = None
+
         comparison = []
-        for key in METRIC_ROWS:
+        for r in (lfl or {}).get("rows") or []:
+            key = r["key"]
             ai_cell = (ai_metrics.get(key) or {}).get("current_qtr", "NA")
             ai_num = parse_ai_value(ai_cell)
-            actual = (screener.get("metrics", {}).get(key) or {}).get("current_qtr")
-            actual_yoy = (screener.get("metrics", {}).get(key) or {}).get("yoy_change_pct")
-            actual_qoq = (screener.get("metrics", {}).get(key) or {}).get("qoq_change_pct")
             comparison.append({
-                "label": _ROW_LABELS[key],
+                "key": key,
+                "label": r["label"],
                 "ai_text": ai_cell,
                 "ai_num": ai_num,
-                "actual": actual,
-                "actual_yoy": actual_yoy,
-                "actual_qoq": actual_qoq,
+                # The filing quarter's figure (Screener's if published, else
+                # read off the filing), its two bases, and the changes. A
+                # missing base leaves the change None and says why in the note.
+                "actual": r["current"],
+                "year_ago": r["year_ago"],
+                "prev_qtr": r["prev_qtr"],
+                "actual_yoy": r["yoy_pct"],
+                "actual_qoq": r["qoq_pct"],
+                "current_note": r["current_note"],
+                "yoy_note": r["yoy_note"],
+                "qoq_note": r["qoq_note"],
                 "ai_yoy": (ai_metrics.get(key) or {}).get("yoy_change_pct", "NA"),
-                **compare(ai_num, actual),
+                **compare(ai_num, r["current"]),
             })
 
         # "not analysed" and "analysed but inconclusive" are different states and
@@ -224,8 +249,14 @@ def _build_rows(db: Session, pendings: List[PendingResultOrder],
             "pending": p,
             "log": log,
             "screener": screener,
-            "screener_signal": screener_signal(screener),
-            "all_positive": screener_all_positive(screener),
+            # The BUY/SELL read and the all-positive flag run on the
+            # like-for-like figures, so a September result is judged against
+            # last September — not against whatever quarter Screener last
+            # published.
+            "screener_signal": (screener_signal(lfl_as_screener(lfl)) if lfl
+                                else {"label": "NA", "tone": "na", "reason": "not a results filing"}),
+            "all_positive": screener_all_positive(lfl_as_screener(lfl)) if lfl else False,
+            "like_for_like": lfl,
             "comparison": comparison,
             "validation": validation,
             "analysed": analysed,
@@ -300,6 +331,7 @@ def render_html(rows: List[dict], for_date: str) -> str:
         sig = r["screener_signal"]
         sig_cls = "b-pos" if sig["tone"] == "pos" else "b-neg" if sig["tone"] == "neg" else "b-na"
 
+        lfl = r.get("like_for_like") or {}
         body = []
         for c in r["comparison"]:
             if c["match"] is True:
@@ -315,16 +347,23 @@ def render_html(rows: List[dict], for_date: str) -> str:
                 ai_disp = '<span class="na">NA</span>'
             else:
                 ai_disp = e(str(ai_txt))
+            cur = _fmt(c["actual"]) if c["actual"] is not None else '<span class="na">n/a</span>'
+            ya = _fmt(c["year_ago"]) if c.get("year_ago") is not None else '<span class="na">n/a</span>'
+            pq = _fmt(c["prev_qtr"]) if c.get("prev_qtr") is not None else '<span class="na">n/a</span>'
             body.append(
                 f"<tr><td>{e(c['label'])}</td>"
+                f"<td>{cur}</td>"
+                f"<td>{ya}</td>"
+                f"<td>{_pct_cell(c.get('actual_yoy'), c.get('yoy_note'))}</td>"
+                f"<td>{pq}</td>"
+                f"<td>{_pct_cell(c.get('actual_qoq'), c.get('qoq_note'))}</td>"
                 f"<td>{ai_disp}</td>"
-                f"<td>{_fmt(c['actual'])}</td>"
                 f"<td>{verdict_cell}</td>"
-                f"<td>{e(str(c['ai_yoy']))}</td>"
-                f"<td>{('%.1f%%' % c['actual_yoy']) if c['actual_yoy'] is not None else '<span class=na>NA</span>'}</td>"
-                f"<td>{('%.1f%%' % c['actual_qoq']) if c.get('actual_qoq') is not None else '<span class=na>NA</span>'}</td>"
                 f"</tr>"
             )
+        q, yq, qq = lfl.get("quarter") or "this qtr", lfl.get("yoy_quarter") or "year ago", lfl.get("qoq_quarter") or "prev qtr"
+        cur_src = {"screener": "Screener", "filing": "filing"}.get(lfl.get("current_source") or "", "")
+        lfl_note = (f'<div class="src na">{e(lfl["message"])}</div>' if lfl.get("message") else "")
 
         src = (f'<a href="{e(sc["source_url"])}" target="_blank">screener.in</a> · '
                f'quarter {e(sc.get("quarter") or "?")}' if sc.get("ok")
@@ -336,8 +375,8 @@ def render_html(rows: List[dict], for_date: str) -> str:
     <span class="sym">{e(p.symbol)}</span>
     <span class="co">{e(p.company_name or '')}</span>
     <span class="badge {cls}" title="{e(badge_title)}">{e(verdict)}</span>
-    <span class="badge {sig_cls}" title="{e('Mechanical read of Screener year-on-year figures: ' + sig['reason'])}">
-      SCREENER {e(sig['label'])}
+    <span class="badge {sig_cls}" title="{e('Mechanical read of this quarter against the same quarter last year: ' + sig['reason'])}">
+      YoY {e(sig['label'])}
     </span>
     <span class="ref">{e(p.tracking_ref or '')}</span>
   </div>
@@ -352,13 +391,15 @@ def render_html(rows: List[dict], for_date: str) -> str:
   </div>
   <table>
     <thead><tr>
-      <th></th><th>Our AI</th><th>Screener (₹ Cr)</th><th>Variance</th>
-      <th>AI YoY</th><th title="Against the same quarter last year">Screener YoY</th>
-      <th title="Against the previous quarter — sequential momentum">Screener QoQ</th>
+      <th></th><th title="{e('Source: ' + (cur_src or 'none'))}">{e(q)}{(' · ' + e(cur_src)) if cur_src else ''}</th>
+      <th title="Screener, same quarter last year">{e(yq)}</th><th>YoY</th>
+      <th title="Screener, previous quarter">{e(qq)}</th><th>QoQ</th>
+      <th>Our AI</th><th>AI vs {e(q)}</th>
     </tr></thead>
     <tbody>{''.join(body)}</tbody>
   </table>
-  <div class="src">{src} · <b>Screener read</b> {e(sig['reason'])}</div>
+  {lfl_note}
+  <div class="src">{src} · <b>Read</b> {e(sig['reason'])}</div>
 </div>""")
 
     content = "".join(cards) if cards else '<div class="empty">No results were filed after yesterday\'s cutoff.</div>'
@@ -374,14 +415,29 @@ def render_html(rows: List[dict], for_date: str) -> str:
  {sum(1 for r in rows if r['analysed'])} analysed intraday ·
  {sum(1 for r in rows if not r['analysed'])} filed outside market hours (Screener only)</div>
 <div class="legend">
-  <span><b style="color:var(--pos)">match</b> within 2% of Screener</span>
-  <span><b style="color:var(--neg)">±n%</b> our figure differs by that much</span>
+  <span>Each filing is compared with the <b>same quarter last year</b> (YoY) and the <b>quarter before</b> (QoQ) on Screener — never with a different quarter</span>
+  <span><b style="color:var(--na)">n/a</b> Screener has no figure for that quarter, so no change is shown</span>
+  <span><b style="color:var(--pos)">match</b> our AI within 2% of the quarter's figure</span>
   <span><b style="color:var(--na)">—</b> one side missing, so no comparison is possible</span>
   <span><b style="color:var(--na)">not analysed</b> filed outside 09:00-15:30; no AI is run on those</span>
-  <span>All Screener values in ₹ crore, consolidated where available</span>
+  <span>All values in ₹ crore, consolidated where available. Expenses include interest and depreciation, as filed</span>
 </div>
 {content}
 </body></html>"""
+
+
+def _lfl_header(lfl: Optional[dict]) -> Optional[dict]:
+    """The like-for-like comparison minus its rows (those are `comparison`)."""
+    if not lfl:
+        return None
+    return {k: v for k, v in lfl.items() if k != "rows"}
+
+
+def _pct_cell(v, note) -> str:
+    if v is not None:
+        cls = "ok" if v > 0 else "bad" if v < 0 else ""
+        return f'<span class="{cls}">{v:+.1f}%</span>'
+    return f'<span class="na" title="{html.escape(note or "")}">n/a</span>'
 
 
 def serialize_digest_rows(rows: List[dict]) -> List[dict]:
@@ -420,6 +476,7 @@ def serialize_digest_rows(rows: List[dict]) -> List[dict]:
                 "error": r["screener"].get("error"),
             },
             "comparison": r["comparison"],
+            "like_for_like": _lfl_header(r.get("like_for_like")),
             "validation": r.get("validation"),
             "ai_summary": log.ai_summary if log else None,
             "future_growth_outlook": log.future_growth_outlook if log else None,

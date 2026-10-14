@@ -805,6 +805,7 @@ def _serialize_pending(p: PendingResultOrder, ai_log: Optional[TradeAILog] = Non
         "screener_signal": None,
         "all_positive": False,
         "comparison": None,
+        "like_for_like": None,
     }
 
 
@@ -845,6 +846,7 @@ def _attach_screener(db: Session, pendings: list, serialized: list) -> int:
         item["screener_signal"] = c.get("screener_signal")
         item["all_positive"] = c.get("all_positive")
         item["comparison"] = c.get("comparison")
+        item["like_for_like"] = c.get("like_for_like")
         if not (c.get("screener") or {}).get("ok"):
             missing += 1
     return missing

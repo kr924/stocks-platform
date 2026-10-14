@@ -202,7 +202,7 @@ def _confidence(row: dict, comparisons: list) -> dict:
         # all there is, and on its own it is worth about two thirds.
         tier = "UNVERIFIED" if clean else "UNVERIFIED_FLAGGED"
         pct = 70 if clean else 40
-        why = ("Read cleanly, but Screener has no figures for this quarter to check it against."
+        why = ("Read cleanly; Screener has no figures for this quarter yet to check it against."
                if clean else
                "Read with validation warnings and nothing to check it against.")
     elif corroborated and clean:
@@ -268,6 +268,20 @@ def _extract_job(pending_id: int) -> None:
                 screener = json.loads(pending.screener_json)
             except Exception:
                 screener = None
+        if screener is None:
+            # Fetched here, once, and kept on the row: the year-ago and
+            # previous-quarter figures the panel compares this filing with are
+            # in the same Screener page, and are stored per quarter as a side
+            # effect of the fetch.
+            try:
+                from app.services.screener_quarters import fetch_latest_quarter
+                screener = fetch_latest_quarter(pending.symbol, cache_only=False)
+                if screener.get("ok"):
+                    pending.screener_json = json.dumps(screener)
+                    db.commit()
+            except Exception as e:
+                db.rollback()
+                logger.debug(f"[EXTRACT] Screener fetch failed for {pending.symbol}: {e}")
         result = extract_from_filing(pending.attachment_url, pending.symbol,
                                      screener=screener)
         pending = db.query(PendingResultOrder).filter(
@@ -348,11 +362,32 @@ def extract_from_filing(attachment_url: str, symbol: str,
             logger.debug(f"[EXTRACT] Screener unavailable for {symbol}: {e}")
     screener = screener or {}
 
-    s_metrics = (screener or {}).get("metrics") or {}
+    # Check the reading against Screener's figure for the *same quarter* the
+    # filing covers — never Screener's latest, which is routinely a different
+    # period (HDB Financial's Sep 2026 filing was once scored against Mar 2025
+    # and reported as "disagrees"). Until Screener publishes the quarter there
+    # is nothing to check against, which is UNVERIFIED, not CHECK.
+    from app.services.result_compare import comparable, screener_figures
+    filing_q = row.get("quarter") or ""
+    scr_same_q = {}
+    if filing_q:
+        db = None
+        try:
+            from app.database import SessionLocal
+            db = SessionLocal()
+            scr_same_q = screener_figures(db, symbol, [filing_q], screener).get(filing_q) or {}
+        except Exception as e:
+            logger.debug(f"[EXTRACT] Screener same-quarter lookup failed for {symbol}: {e}")
+        finally:
+            if db is not None:
+                db.close()
+
     comparisons = []
     for metric in _SCORED:
         pdf_v = row.get(metric)
-        scr_v = (s_metrics.get(metric) or {}).get("current_qtr")
+        # Expenses as filed include finance cost and depreciation; Screener's
+        # do not, so its figure is put on the filed basis before comparing.
+        scr_v = comparable(scr_same_q, metric)
         gap = _pct_gap(pdf_v, scr_v)
         comparisons.append({
             "metric": metric,
@@ -364,18 +399,17 @@ def extract_from_filing(attachment_url: str, symbol: str,
     # Reported but not scored — Screener's Operating Profit is not a P&L EBITDA.
     comparisons.append({
         "metric": "ebitda", "pdf": row.get("ebitda"),
-        "screener": (s_metrics.get("ebitda") or {}).get("current_qtr"),
+        "screener": comparable(scr_same_q, "ebitda"),
         "gap_pct": None, "agrees": None,
         "note": "not scored — Screener's Operating Profit is its own construct, "
                 "not a P&L-derived EBITDA",
     })
 
     confidence = _confidence(row, comparisons)
-    covers_latest = bool(row.get("quarter") and screener.get("quarter")
-                         and row["quarter"].lower() == (screener["quarter"] or "").lower())
-    if not covers_latest and row.get("quarter") and screener.get("quarter"):
-        confidence["reason"] += (f" Note the filing covers {row['quarter']} where Screener's "
-                                 f"latest is {screener['quarter']}.")
+    covers_latest = bool(scr_same_q)
+    if not covers_latest and filing_q:
+        confidence["reason"] += (f" Screener has not published {filing_q} yet, so the "
+                                 f"figures are checked by the extractor alone.")
 
     return {
         "ok": row.get("status") in ("OK", "OK_WARN", "REVIEW"),
@@ -389,7 +423,9 @@ def extract_from_filing(attachment_url: str, symbol: str,
         "qoq_quarter": row.get("qoq_quarter") or "",
         "yoy_quarter": row.get("yoy_quarter") or "",
         "covers_screener_quarter": covers_latest,
-        "screener_quarter": screener.get("quarter") or "",
+        # The quarter the check above was made against: the filing's own when
+        # Screener has published it, otherwise none.
+        "screener_quarter": filing_q if covers_latest else "",
         "metrics": {m: {
             "current_qtr": row.get(m),
             "prev_qtr": row.get(m + "_prev_q"),

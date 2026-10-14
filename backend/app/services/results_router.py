@@ -352,6 +352,17 @@ def route_financial_result(db: Session, ann, event, dedup_key: str):
         logger.error(f"Failed to create PendingResultOrder for {symbol}: {e}")
         return
 
+    # Read the filing's own figures straight away, intraday or not. Unlike the
+    # earnings AI this costs nothing but local CPU, and it is what the panel's
+    # "vs same quarter last year" table and the 08:00 digest compare against
+    # Screener's year-ago and previous quarters. Background, single worker.
+    if pending.attachment_url:
+        try:
+            from app.services.results_extractor import run_extraction_async
+            run_extraction_async(pending.id)
+        except Exception as e:
+            logger.debug(f"Auto-extraction not queued for {symbol}: {e}")
+
     # Push the order screen to the UI regardless — the row is still visible in
     # the app, it simply does not alert or analyse until the morning.
     sse_manager.broadcast("pending_result_order", {

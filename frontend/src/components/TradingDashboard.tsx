@@ -33,6 +33,20 @@ const API_BASE = import.meta.env.VITE_API_BASE || (window.location.hostname === 
  * A financial result that landed for a stock with no armed config.
  * The user is prompted to place an order; AI analysis follows.
  */
+// This filing's quarter against the same quarter last year and the quarter
+// before, on Screener. Never against a different quarter.
+interface LikeForLike {
+  quarter: string;
+  quarter_source: string;      // "filing" | "announcement date"
+  yoy_quarter: string;
+  qoq_quarter: string;
+  current_source: string;      // "screener" | "filing" | ""
+  yoy_available: boolean;
+  qoq_available: boolean;
+  current_available: boolean;
+  message: string;
+}
+
 interface DigestCompany {
   symbol: string;
   company_name: string | null;
@@ -48,10 +62,16 @@ interface DigestCompany {
   attachment_url: string | null;
   screener: { ok: boolean; quarter: string | null; source_url: string | null; error: string | null };
   comparison: {
+    key?: string;
     label: string; ai_text: string; actual: number | null;
     ai_yoy: string; actual_yoy: number | null; actual_qoq: number | null;
+    // Screener's same quarter last year and previous quarter — the bases of
+    // the YoY / QoQ above. Null when Screener has no figure for that quarter.
+    year_ago?: number | null; prev_qtr?: number | null;
+    current_note?: string; yoy_note?: string; qoq_note?: string;
     match: boolean | null; diff_pct: number | null;
   }[];
+  like_for_like?: LikeForLike | null;
   ai_summary: string | null;
   future_growth_outlook: string | null;
   future_projected_numbers: string | null;
@@ -118,6 +138,7 @@ interface PendingResult {
   screener_signal?: { label: string; tone: string; reason: string } | null;
   all_positive?: boolean;
   comparison?: DigestCompany["comparison"] | null;
+  like_for_like?: LikeForLike | null;
   // The filed PDF read independently of the AI, with its confidence.
   extraction?: Extraction | null;
   // The close recorded for this trade date, where one is on file. Live quotes
@@ -584,16 +605,29 @@ function ValidationNotice({ v }: { v: TradeAILog["validation"] }) {
  * were rendering the same PendingResultOrder rows, and a second copy of this
  * table is a second place for the columns to drift.
  */
-function ScreenerComparison({ rows, quarter, analysed }: {
-  rows: DigestCompany["comparison"]; quarter?: string | null; analysed: boolean;
+function ScreenerComparison({ rows, lfl, analysed }: {
+  rows: DigestCompany["comparison"]; lfl?: LikeForLike | null; analysed: boolean;
 }) {
   if (!rows || rows.length === 0) return null;
   const na = (v: any) => !v || String(v).toUpperCase() === "NA";
-  const head = ["", "Our AI", `Screener${quarter ? ` (${quarter})` : ""}`, "Variance",
-                "AI YoY", "Screener YoY", "Screener QoQ"];
+  const fmt = (v: number | null | undefined) =>
+    v == null ? null : v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const pctColor = (v: number | null | undefined) =>
+    v == null ? "var(--text-faint)" : v > 0 ? "var(--positive)" : v < 0 ? "var(--negative)" : "var(--text-secondary)";
+  const pct = (v: number | null | undefined) => v == null ? null : `${v > 0 ? "+" : ""}${v.toFixed(2)}%`;
+  const q = lfl?.quarter || "This quarter";
+  const src = lfl?.current_source === "screener" ? "Screener" : lfl?.current_source === "filing" ? "filing" : "";
+  const head = ["", `${q}${src ? ` (${src})` : ""}`,
+                `${lfl?.yoy_quarter || "Year ago"} (Screener)`, "YoY %",
+                `${lfl?.qoq_quarter || "Prev qtr"} (Screener)`, "QoQ %",
+                "Our AI", `AI vs ${q}`];
+  const cell = { padding: "4px 8px", textAlign: "right" as const, whiteSpace: "nowrap" as const };
+  const missing = (title?: string) => (
+    <span title={title || "numbers not available"} style={{ color: "var(--text-faint)", fontStyle: "italic" }}>n/a</span>
+  );
   return (
     <div style={{ overflowX: "auto" }}>
-      <table style={{ borderCollapse: "collapse", fontSize: "11px", width: "100%", minWidth: "560px" }}>
+      <table style={{ borderCollapse: "collapse", fontSize: "11px", width: "100%", minWidth: "640px" }}>
         <thead>
           <tr>
             {head.map((h, i) => (
@@ -605,21 +639,16 @@ function ScreenerComparison({ rows, quarter, analysed }: {
           {rows.map((row, ri) => (
             <tr key={ri}>
               <td style={{ padding: "4px 8px", fontWeight: 600, color: "var(--text-primary)", whiteSpace: "nowrap" }}>{row.label}</td>
-              <td style={{ padding: "4px 8px", textAlign: "right", color: !analysed || na(row.ai_text) ? "var(--text-faint)" : "var(--text-primary)", fontStyle: !analysed || na(row.ai_text) ? "italic" : "normal", whiteSpace: "nowrap" }}>
+              <td style={{ ...cell, color: "var(--text-primary)" }}>{fmt(row.actual) ?? missing(row.current_note)}</td>
+              <td style={{ ...cell, color: "var(--text-secondary)" }}>{fmt(row.year_ago) ?? missing(row.yoy_note)}</td>
+              <td style={{ ...cell, fontWeight: 700, color: pctColor(row.actual_yoy) }}>{pct(row.actual_yoy) ?? missing(row.yoy_note)}</td>
+              <td style={{ ...cell, color: "var(--text-secondary)" }}>{fmt(row.prev_qtr) ?? missing(row.qoq_note)}</td>
+              <td style={{ ...cell, fontWeight: 700, color: pctColor(row.actual_qoq) }}>{pct(row.actual_qoq) ?? missing(row.qoq_note)}</td>
+              <td style={{ ...cell, color: !analysed || na(row.ai_text) ? "var(--text-faint)" : "var(--text-primary)", fontStyle: !analysed || na(row.ai_text) ? "italic" : "normal" }}>
                 {!analysed ? "not analysed" : (row.ai_text || "NA")}
               </td>
-              <td style={{ padding: "4px 8px", textAlign: "right", color: row.actual === null ? "var(--text-faint)" : "var(--text-primary)", whiteSpace: "nowrap" }}>
-                {row.actual === null ? "—" : row.actual.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </td>
-              <td style={{ padding: "4px 8px", textAlign: "right", whiteSpace: "nowrap", color: row.match === true ? "var(--positive)" : row.match === false ? "var(--negative)" : "var(--text-faint)" }}>
+              <td style={{ ...cell, color: row.match === true ? "var(--positive)" : row.match === false ? "var(--negative)" : "var(--text-faint)" }}>
                 {row.match === true ? "match" : row.match === false ? `${row.diff_pct! > 0 ? "+" : ""}${row.diff_pct}%` : "—"}
-              </td>
-              <td style={{ padding: "4px 8px", textAlign: "right", color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{analysed ? (row.ai_yoy || "NA") : "—"}</td>
-              <td style={{ padding: "4px 8px", textAlign: "right", whiteSpace: "nowrap", color: row.actual_yoy === null ? "var(--text-faint)" : row.actual_yoy > 0 ? "var(--positive)" : row.actual_yoy < 0 ? "var(--negative)" : "var(--text-secondary)" }}>
-                {row.actual_yoy === null ? "—" : `${row.actual_yoy > 0 ? "+" : ""}${row.actual_yoy.toFixed(2)}%`}
-              </td>
-              <td style={{ padding: "4px 8px", textAlign: "right", whiteSpace: "nowrap", color: row.actual_qoq == null ? "var(--text-faint)" : row.actual_qoq > 0 ? "var(--positive)" : row.actual_qoq < 0 ? "var(--negative)" : "var(--text-secondary)" }}>
-                {row.actual_qoq == null ? "—" : `${row.actual_qoq > 0 ? "+" : ""}${row.actual_qoq.toFixed(2)}%`}
               </td>
             </tr>
           ))}
@@ -2745,7 +2774,9 @@ export function TradingDashboard() {
             // Screener lookup and no earnings AI — asking would spend a
             // premium call to be told there are no numbers in an order win.
             const isResult = categoryOf(pending) === "results";
-            const tab = resultTab[pending.id] || "ai";
+            // The filing's own figures are read automatically for every result;
+            // the AI runs only intraday. Open on whichever actually has a reading.
+            const tab = resultTab[pending.id] || (pending.ai_status === "done" && ai ? "ai" : "ocr");
             const modelChoice = reanalyseModel[pending.id] ?? "";
             const reanalysing = !!actionLoading[`reanalyse_${pending.id}`];
             return (
@@ -3174,10 +3205,11 @@ export function TradingDashboard() {
                                   </div>
                                 )}
 
-                                {ex.quarter && !ex.covers_screener_quarter && ex.screener_quarter && (
+                                {ex.quarter && ex.screener_quarter && ex.screener_quarter !== ex.quarter && (
                                   <div style={{ fontSize: "10px", color: "var(--warning)", marginBottom: "8px" }}>
-                                    The filing covers {ex.quarter}; Screener's latest is {ex.screener_quarter}.
-                                    The two describe different periods, so the gaps below are not errors.
+                                    Read before the like-for-like check: the filing covers {ex.quarter} but was
+                                    checked against Screener's {ex.screener_quarter}. Use "Read again" to re-check
+                                    against {ex.quarter} only.
                                   </div>
                                 )}
 
@@ -3186,7 +3218,7 @@ export function TradingDashboard() {
                                     <table style={{ borderCollapse: "collapse", fontSize: "11px", width: "100%", minWidth: "440px" }}>
                                       <thead>
                                         <tr>
-                                          {["", `From the filing${ex.quarter ? ` (${ex.quarter})` : ""}`, "Screener", "Gap", ""].map((h, i) => (
+                                          {["", `From the filing${ex.quarter ? ` (${ex.quarter})` : ""}`, `Screener${ex.screener_quarter ? ` (${ex.screener_quarter})` : " (not published yet)"}`, "Gap", ""].map((h, i) => (
                                             <th key={i} style={{ textAlign: i === 0 || i === 4 ? "left" : "right",
                                                                  padding: "4px 8px", color: "var(--text-muted)", fontWeight: 600,
                                                                  fontSize: "10px", borderBottom: "1px solid var(--border-subtle)",
@@ -3281,15 +3313,25 @@ export function TradingDashboard() {
                             </div>
                           ) : null}
 
-                          {/* Screener's own figures for the quarter, beside
-                              ours. This is what the Results Digest showed in a
-                              second list of these same rows. */}
+                        </>
+                      )}
+                      {/* Like-for-like, under both tabs: this filing's quarter
+                          against the same quarter last year and the quarter
+                          before, on Screener. Figures come from the filing
+                          read (OCR tab) until Screener publishes the quarter. */}
                           {Array.isArray(pending.comparison) && pending.comparison.length > 0 && (
                             <div style={{ marginTop: "12px", paddingTop: "10px", borderTop: "1px solid var(--border-subtle)" }}>
                               <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--info)", marginBottom: "6px", letterSpacing: "0.4px" }}>
-                                SCREENER COMPARISON
+                                {pending.like_for_like?.quarter
+                                  ? `${pending.like_for_like.quarter} VS SAME QUARTER LAST YEAR`
+                                  : "VS SAME QUARTER LAST YEAR"}
                               </div>
-                              {!pending.screener?.ok && (
+                              {pending.like_for_like?.message && (
+                                <div style={{ fontSize: "10px", color: "var(--warning)", marginBottom: "6px" }}>
+                                  {pending.like_for_like.message}
+                                </div>
+                              )}
+                              {!pending.like_for_like?.message && !pending.screener?.ok && (
                                 <div style={{ fontSize: "10px", color: "var(--text-muted)", marginBottom: "6px" }}>
                                   {pending.screener?.error === "not fetched yet"
                                     ? "Screener figures still being fetched — refresh shortly."
@@ -3298,7 +3340,7 @@ export function TradingDashboard() {
                               )}
                               <ScreenerComparison
                                 rows={pending.comparison}
-                                quarter={pending.screener?.quarter}
+                                lfl={pending.like_for_like}
                                 analysed={pending.ai_status === "done" && !!ai}
                               />
                               {pending.screener?.source_url && (
@@ -3308,8 +3350,6 @@ export function TradingDashboard() {
                               )}
                             </div>
                           )}
-                        </>
-                      )}
                     </div>
                     </CardBoundary>
                   )}

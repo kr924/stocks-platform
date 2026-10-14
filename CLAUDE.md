@@ -189,7 +189,7 @@ Alerts and AI analysis run only while the market is open, **09:00 to 15:30 IST**
 on a working day. Anything outside that — pre-open, post-close, or a weekend —
 gets **no alert and no AI analysis**, because there is no session left to trade
 into. Those are marked `deferred`, stay visible in the app, and are reported in
-the 08:00 digest from Screener's figures only.
+the 08:00 digest from the filing read and Screener's like-for-like quarters.
 
 A filing between 08:00 and 09:00 therefore waits for the *next* morning's
 digest: it is past the current digest's window but before the AI opens.
@@ -311,6 +311,38 @@ been broken silently:
   be acted on; a past day shows its history, minus anything dismissed.
 
 ---
+
+## Like-for-like: a quarter against the same quarter last year
+
+`services/result_compare.py`. Every results prompt, the panel's table and the
+08:00 digest compare **the filing's own quarter** with Screener's **same quarter
+a year earlier** (YoY) and **the quarter before** (QoQ). Never with Screener's
+"latest" quarter: on 14 Oct 2026 HDB Financial's Sep 2026 filing was shown
+beside Screener's Mar 2025 figures and growth rates, and the digest's BUY/SELL
+read was computed from them.
+
+- **Quarter**: the extractor's reading of the statement's column headings,
+  accepted if it is the quarter the announcement date implies or the one before
+  (late filer); otherwise the extractor read the wrong column and its figures
+  are not used. Unread filings fall back to the date (October → September).
+- **Current figure**: Screener's for that exact quarter once published (one
+  source, one basis for both sides), else the filing's.
+- **Bases**: Screener's year-ago and previous quarter, from the row's snapshot
+  or the `screener_quarters` store. **Never substituted** — a missing base is
+  shown as `n/a` / "numbers not available", because a growth rate against the
+  wrong quarter looks exactly like a real one. Bases under ₹1 Cr are refused.
+- **Definitions follow the filing**: expenses = Screener Expenses + Interest +
+  Depreciation (filed totals include both); EBITDA = Screener Operating Profit
+  (banks/NBFCs have none → n/a).
+- The digest's YoY BUY/SELL read (`screener_signal`) and `all_positive` run on
+  these figures via `as_screener_shape`.
+
+**The filing is read automatically** the moment a results prompt is created,
+intraday or not (`route_financial_result` → `run_extraction_async`). It is local
+CPU, unlike the AI. The job fetches Screener first and keeps it on the row. The
+extractor's own Screener check now also compares against the filing's quarter
+only; until Screener publishes it the read is UNVERIFIED, not CHECK. Single
+worker: on a heavy afternoon a scanned filing can queue behind others.
 
 ## Reading figures out of the filed PDF
 

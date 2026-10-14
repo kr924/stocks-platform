@@ -334,7 +334,7 @@ def _company_block(r: dict, st: dict) -> list:
         scolour = ("#1a7f4f" if sig.get("tone") == "pos"
                    else "#c23934" if sig.get("tone") == "neg" else "#8b95a6")
         flow.append(Paragraph(
-            f'<b>Screener read:</b> <font color="{scolour}"><b>{_safe(sig.get("label", "NA"))}</b></font>'
+            f'<b>YoY read:</b> <font color="{scolour}"><b>{_safe(sig.get("label", "NA"))}</b></font>'
             f'&nbsp;&nbsp;<font color="#8b95a6">{_safe(sig.get("reason", ""))}</font>',
             st["meta"]))
     # Prices, when the caller supplied them. The 08:00 digest runs before there
@@ -360,8 +360,14 @@ def _company_block(r: dict, st: dict) -> list:
         return flow
 
     sc = r.get("screener") or {}
-    head = ["", "Our AI", f"Screener ({sc.get('quarter') or 'latest qtr'})", "Variance",
-            "AI YoY", "Scr YoY", "Scr QoQ"]
+    lfl = r.get("like_for_like") or {}
+    q = lfl.get("quarter") or "This qtr"
+    src = {"screener": "Scr", "filing": "filing"}.get(lfl.get("current_source") or "", "")
+    # The filing's own quarter against the same quarter last year and the one
+    # before — never against whatever quarter Screener last published.
+    head = ["", f"{q}" + (f" ({src})" if src else ""),
+            lfl.get("yoy_quarter") or "Year ago", "YoY",
+            lfl.get("qoq_quarter") or "Prev qtr", "QoQ", "Our AI", "AI vs qtr"]
     data = [head]
     styles = [
         ("BACKGROUND", (0, 0), (-1, 0), _HEAD_BG),
@@ -375,6 +381,9 @@ def _company_block(r: dict, st: dict) -> list:
         ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
         ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
     ]
+
+    def pct_cell(v):
+        return f"{v:+.1f}%" if v is not None else "n/a"
 
     for i, c in enumerate(r.get("comparison", []), start=1):
         ai_txt = c.get("ai_text")
@@ -393,18 +402,29 @@ def _company_block(r: dict, st: dict) -> list:
             var, vcol = "-", _NA
 
         data.append([
-            _safe(c["label"]), ai_cell, _num(c.get("actual")), var,
-            _safe(c.get("ai_yoy") or "NA") if analysed else "-",
-            f"{c['actual_yoy']:.1f}%" if c.get("actual_yoy") is not None else "-",
-            f"{c['actual_qoq']:.1f}%" if c.get("actual_qoq") is not None else "-",
+            _safe(c["label"]),
+            _num(c.get("actual")) if c.get("actual") is not None else "n/a",
+            _num(c.get("year_ago")) if c.get("year_ago") is not None else "n/a",
+            pct_cell(c.get("actual_yoy")),
+            _num(c.get("prev_qtr")) if c.get("prev_qtr") is not None else "n/a",
+            pct_cell(c.get("actual_qoq")),
+            ai_cell, var,
         ])
-        styles.append(("TEXTCOLOR", (3, i), (3, i), vcol))
+        for col, v in ((3, c.get("actual_yoy")), (5, c.get("actual_qoq"))):
+            styles.append(("TEXTCOLOR", (col, i), (col, i),
+                           _NA if v is None else _POS if v > 0 else _NEG if v < 0 else _MUTED))
+        for col, v in ((1, c.get("actual")), (2, c.get("year_ago")), (4, c.get("prev_qtr"))):
+            if v is None:
+                styles.append(("TEXTCOLOR", (col, i), (col, i), _NA))
+        styles.append(("TEXTCOLOR", (7, i), (7, i), vcol))
         if ai_cell in ("not analysed", "NA"):
-            styles.append(("TEXTCOLOR", (1, i), (1, i), _NA))
+            styles.append(("TEXTCOLOR", (6, i), (6, i), _NA))
 
-    table = Table(data, colWidths=[24 * mm, 31 * mm, 31 * mm, 18 * mm, 19 * mm, 19 * mm, 19 * mm])
+    table = Table(data, colWidths=[24 * mm, 26 * mm, 19 * mm, 15 * mm, 19 * mm, 15 * mm, 27 * mm, 16 * mm])
     table.setStyle(TableStyle(styles))
     flow.append(table)
+    if lfl.get("message"):
+        flow.append(Paragraph(_safe(lfl["message"]), st["small"]))
 
     if sc.get("source_url"):
         flow.append(Paragraph(f'Screener: {sc["source_url"]}', st["small"]))
