@@ -673,6 +673,47 @@ function ScreenerComparison({ rows, lfl, view }: {
 
 
 /**
+ * A number box you can actually clear and retype.
+ *
+ * The forms used `parseInt(value) || 1` straight into state, so deleting the
+ * "1" produced an empty string, which parsed to NaN, which snapped back to 1
+ * before the next key — the arrows were the only way to change it. Stop-loss
+ * was worse: typing "0.5" passes through "0.", which parses to 0 and reset to 2.
+ * The text being typed lives here; the parent only hears about a valid value,
+ * and leaving the box invalid puts the last valid one back.
+ */
+function NumberField({ value, onValue, min, max, step, integer, style, required }: {
+  value: number; onValue: (n: number) => void;
+  min?: number; max?: number; step?: number | string; integer?: boolean;
+  style?: React.CSSProperties; required?: boolean;
+}) {
+  const [text, setText] = useState(String(value ?? ""));
+  const last = useRef(value);
+  useEffect(() => {
+    // Follow changes made from outside (a form reset, a new prompt selected).
+    if (value !== last.current) {
+      last.current = value;
+      setText(String(value ?? ""));
+    }
+  }, [value]);
+  const parse = (t: string) => (integer ? parseInt(t, 10) : parseFloat(t));
+  const ok = (n: number) => !isNaN(n) && (min == null || n >= min) && (max == null || n <= max);
+  return (
+    <input type="number" inputMode={integer ? "numeric" : "decimal"}
+      min={min} max={max} step={step} required={required} value={text}
+      onChange={e => {
+        const t = e.target.value;
+        setText(t);
+        const n = parse(t);
+        if (ok(n)) { last.current = n; onValue(n); }
+      }}
+      onBlur={() => { if (!ok(parse(text))) setText(String(last.current ?? "")); }}
+      style={style} />
+  );
+}
+
+
+/**
  * One suggestion card: a verdict, a line of reasoning, and the positives and
  * negatives behind it. Used twice, side by side — the rules applied to the
  * figures, and the AI's reading of the whole filing.
@@ -2819,7 +2860,14 @@ export function TradingDashboard() {
             selected filing at once, with nothing to expand. Arrow keys move
             through the list. Stacks on a narrow screen. */}
         <style>{`
-          .od-split{display:grid;grid-template-columns:minmax(260px,340px) minmax(0,1fr);gap:12px;height:min(78vh,860px)}
+          .od-split{display:grid;grid-template-columns:minmax(330px,430px) minmax(0,1fr);gap:12px;height:min(78vh,860px)}
+          .od-grid{display:grid;grid-template-columns:28px repeat(4,minmax(0,1fr)) 54px;column-gap:6px;row-gap:3px;align-items:center;font-size:10.5px}
+          .od-grid .src{font-size:9.5px;font-weight:800;letter-spacing:.3px;color:var(--text-muted)}
+          .od-grid .n{text-align:right;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+          .od-grid .call{text-align:center;justify-self:end;min-width:44px}
+          .od-head{position:sticky;top:0;z-index:1;background:rgba(27,30,37,.97);padding:6px 10px 6px 13px;border-bottom:1px solid rgba(255,255,255,.08)}
+          .od-head span{font-size:9px;font-weight:700;letter-spacing:.3px;color:var(--text-faint);text-align:right}
+          .od-sum{font-size:10.5px;color:var(--text-muted);line-height:1.4;margin-top:4px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
           .od-list{overflow-y:auto;border:1px solid rgba(216,174,100,.16);border-radius:10px;background:rgba(20,23,28,.45);outline:none}
           .od-list:focus-visible{box-shadow:0 0 0 2px rgba(216,174,100,.35)}
           .od-detail{overflow-y:auto;min-width:0;padding-right:4px;scroll-behavior:smooth}
@@ -2847,6 +2895,16 @@ export function TradingDashboard() {
               if (e.key === "ArrowDown" || e.key === "j") { e.preventDefault(); moveSelection(1); }
               if (e.key === "ArrowUp" || e.key === "k") { e.preventDefault(); moveSelection(-1); }
             }}>
+            {pendingCategory === "results" && (
+              <div className="od-head od-grid">
+                <span />
+                <span title="Revenue vs the same quarter last year">Rev YoY</span>
+                <span title="Revenue vs the previous quarter">Rev QoQ</span>
+                <span title="Profit after tax vs the same quarter last year">PAT YoY</span>
+                <span title="Profit after tax vs the previous quarter">PAT QoQ</span>
+                <span style={{ textAlign: "center" }}>Call</span>
+              </div>
+            )}
             {visiblePendingResults.map(p => {
               const q = marketQuotesMap[p.symbol.toUpperCase()] || {};
               const base = p.price_at_announcement;
@@ -2858,15 +2916,28 @@ export function TradingDashboard() {
               const hhmm = when && !isNaN(when.getTime())
                 ? `${String(when.getHours()).padStart(2, "0")}:${String(when.getMinutes()).padStart(2, "0")}` : "";
               const rows = Array.isArray(p.comparison) ? p.comparison : [];
-              const yoyOf = (k: string) => {
-                const r = rows.find(x => x.key === k || x.label === (k === "pat" ? "Profit (PAT)" : "Revenue"));
-                return r ? r.actual_yoy : null;
+              const rowOf = (k: string) =>
+                rows.find(x => x.key === k || x.label === (k === "pat" ? "Profit (PAT)" : "Revenue"));
+              const val = (k: string, f: "actual_yoy" | "actual_qoq" | "ai_yoy_pct" | "ai_qoq_pct") => {
+                const r = rowOf(k) as any;
+                return r && typeof r[f] === "number" ? (r[f] as number) : null;
               };
-              const rev = yoyOf("revenue"), pat = yoyOf("pat");
               const pctTxt = (v: number | null | undefined) => v == null ? "n/a" : `${v > 0 ? "+" : ""}${v.toFixed(1)}%`;
               const pctCol = (v: number | null | undefined) => v == null ? "var(--text-faint)" : v > 0 ? "var(--positive)" : v < 0 ? "var(--negative)" : "var(--text-muted)";
-              const sig = p.screener_signal;
-              const aiSug = p.ai_status === "done" && p.ai_analysis ? (p.ai_analysis.ai_suggestion || "NA") : null;
+              const toneCol = (tone: string) => tone === "pos" ? "var(--positive)" : tone === "neg" ? "var(--negative)" : "var(--text-muted)";
+              const toneBg = (tone: string) => tone === "pos" ? "rgba(91,190,147,.10)" : tone === "neg" ? "rgba(226,141,131,.10)" : "rgba(255,255,255,.05)";
+              const labelTone = (l: string) => { const u = (l || "").toUpperCase();
+                return u.includes("BUY") || u.includes("BEAT") ? "pos" : u.includes("SELL") || u.includes("MISS") ? "neg" : "na"; };
+              const nr = p.like_for_like?.numbers_read;
+              const ocrLabel = nr?.label || p.screener_signal?.label || "NA";
+              const ocrTone = nr?.tone || p.screener_signal?.tone || "na";
+              const ocrWhy = nr?.reason || p.screener_signal?.reason || "";
+              const aiDone = p.ai_status === "done" && !!p.ai_analysis;
+              const aiSug = aiDone ? (p.ai_analysis!.ai_suggestion || "NA") : null;
+              const aiSummary = aiDone && p.ai_analysis!.ai_summary && !/^AI analysis pending/i.test(p.ai_analysis!.ai_summary)
+                ? p.ai_analysis!.ai_summary : "";
+              const aiState = aiDone ? "" : p.ai_status === "failed" ? "AI failed"
+                : p.deferred ? "not analysed — after cutoff" : "AI running…";
               const isRes = categoryOf(p) === "results";
               const sel = selectedPending?.id === p.id;
               return (
@@ -2884,31 +2955,50 @@ export function TradingDashboard() {
                       {move == null ? "—" : `${move > 0 ? "+" : ""}${move.toFixed(1)}%`}
                     </span>
                   </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "3px", fontSize: "10px", color: "var(--text-muted)" }}>
+                  <div style={{ marginTop: "2px", fontSize: "10px", color: "var(--text-muted)", display: "flex", gap: "6px" }}>
                     <span>{hhmm}</span>
-                    {isRes ? (
-                      <>
-                        <span>Rev <b style={{ color: pctCol(rev) }}>{pctTxt(rev)}</b></span>
-                        <span>PAT <b style={{ color: pctCol(pat) }}>{pctTxt(pat)}</b></span>
-                      </>
-                    ) : (
+                    {!isRes && (
                       <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {(p.kind || "").replace(/_/g, " ")}
                       </span>
                     )}
-                    <span style={{ marginLeft: "auto", display: "flex", gap: "4px" }}>
-                      {isRes && sig && (
-                        <span className="od-chip" title={sig.reason}
-                          style={{ color: sig.tone === "pos" ? "var(--positive)" : sig.tone === "neg" ? "var(--negative)" : "var(--text-muted)",
-                                   background: sig.tone === "pos" ? "rgba(91,190,147,.10)" : sig.tone === "neg" ? "rgba(226,141,131,.10)" : "rgba(255,255,255,.05)" }}>
-                          YoY {sig.label}
-                        </span>
-                      )}
-                      {aiSug && aiSug !== "NA" && (
-                        <span className="od-chip" style={{ color: "var(--ai)", background: "var(--ai-bg)" }}>AI {aiSug}</span>
-                      )}
-                    </span>
                   </div>
+                  {isRes && (
+                    <>
+                      {/* Two readings of the same quarter, one line each:
+                          revenue and profit against the same quarter last year
+                          and the quarter before, then the call. */}
+                      <div className="od-grid" style={{ marginTop: "4px" }}>
+                        <span className="src">OCR</span>
+                        {(["revenue", "pat"] as const).flatMap(k =>
+                          (["actual_yoy", "actual_qoq"] as const).map(f => {
+                            const v = val(k, f);
+                            return <span key={`o${k}${f}`} className="n" style={{ color: pctCol(v) }}>{pctTxt(v)}</span>;
+                          }))}
+                        <span className="od-chip call" title={ocrWhy}
+                          style={{ color: toneCol(ocrTone), background: toneBg(ocrTone) }}>{ocrLabel}</span>
+
+                        <span className="src" style={{ color: "var(--ai)" }}>AI</span>
+                        {aiDone ? (
+                          <>
+                            {(["revenue", "pat"] as const).flatMap(k =>
+                              (["ai_yoy_pct", "ai_qoq_pct"] as const).map(f => {
+                                const v = val(k, f);
+                                return <span key={`a${k}${f}`} className="n" style={{ color: pctCol(v) }}>{pctTxt(v)}</span>;
+                              }))}
+                            <span className="od-chip call"
+                              style={{ color: toneCol(labelTone(aiSug || "")), background: toneBg(labelTone(aiSug || "")) }}>{aiSug}</span>
+                          </>
+                        ) : (
+                          <>
+                            <span style={{ gridColumn: "2 / 6", color: "var(--text-faint)", fontStyle: "italic" }}>{aiState}</span>
+                            <span className="od-chip call" style={{ color: "var(--text-faint)", background: "rgba(255,255,255,.04)" }}>—</span>
+                          </>
+                        )}
+                      </div>
+                      {aiSummary && <div className="od-sum" title={aiSummary}>{aiSummary}</div>}
+                    </>
+                  )}
                 </button>
               );
             })}
@@ -3067,8 +3157,8 @@ export function TradingDashboard() {
                 <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: "10px" }}>
                   <label style={{ fontSize: "10px", color: "var(--text-muted)" }}>
                     QTY
-                    <input type="number" min={1} value={form.quantity}
-                      onChange={e => updateResultForm(pending.id, { quantity: parseInt(e.target.value) || 1 })}
+                    <NumberField integer min={1} value={form.quantity}
+                      onValue={n => updateResultForm(pending.id, { quantity: n })}
                       style={{ display: "block", width: "70px", marginTop: "3px", padding: "6px 8px", background: "rgba(20, 23, 28,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "12px" }} />
                   </label>
                   <label style={{ fontSize: "10px", color: "var(--text-muted)" }}>
@@ -3090,8 +3180,8 @@ export function TradingDashboard() {
                   )}
                   <label style={{ fontSize: "10px", color: "var(--text-muted)" }}>
                     SL %
-                    <input type="number" step="0.5" min={0.5} value={form.stoploss_pct}
-                      onChange={e => updateResultForm(pending.id, { stoploss_pct: parseFloat(e.target.value) || 2 })}
+                    <NumberField step="0.5" min={0.5} value={form.stoploss_pct}
+                      onValue={n => updateResultForm(pending.id, { stoploss_pct: n })}
                       style={{ display: "block", width: "70px", marginTop: "3px", padding: "6px 8px", background: "rgba(20, 23, 28,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "12px" }} />
                   </label>
                   <label style={{ fontSize: "10px", color: "var(--text-muted)" }}>
@@ -4337,8 +4427,8 @@ export function TradingDashboard() {
           </label>
           <label style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 700 }}>
             QTY
-            <input type="number" min={1} value={buyForm.quantity}
-              onChange={e => setBuyForm(p => ({ ...p, quantity: parseInt(e.target.value) || 1 }))}
+            <NumberField integer min={1} value={buyForm.quantity}
+              onValue={n => setBuyForm(p => ({ ...p, quantity: n }))}
               style={{ display: "block", width: "80px", marginTop: "4px", padding: "8px 10px", background: "var(--bg-sunken)", border: "1px solid var(--border-default)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "13px" }} />
           </label>
           <label style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 700 }}>
@@ -4360,8 +4450,8 @@ export function TradingDashboard() {
           )}
           <label style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 700 }}>
             SL %
-            <input type="number" step="0.5" min={0.5} value={buyForm.stoploss_pct}
-              onChange={e => setBuyForm(p => ({ ...p, stoploss_pct: parseFloat(e.target.value) || 2 }))}
+            <NumberField step="0.5" min={0.5} value={buyForm.stoploss_pct}
+              onValue={n => setBuyForm(p => ({ ...p, stoploss_pct: n }))}
               style={{ display: "block", width: "80px", marginTop: "4px", padding: "8px 10px", background: "var(--bg-sunken)", border: "1px solid var(--border-default)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "13px" }} />
           </label>
           <label style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 700 }}>
@@ -4482,11 +4572,11 @@ export function TradingDashboard() {
           {/* Quantity */}
           <div>
             <label style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "600", display: "block", marginBottom: "4px" }}>Quantity *</label>
-            <input
-              type="number"
-              min="1"
+            <NumberField
+              integer
+              min={1}
               value={formData.quantity}
-              onChange={(e) => setFormData(prev => ({ ...prev, quantity: parseInt(e.target.value) || 1 }))}
+              onValue={n => setFormData(prev => ({ ...prev, quantity: n }))}
               required
               style={{
                 width: "100%",
@@ -4503,13 +4593,12 @@ export function TradingDashboard() {
           {/* Stoploss % */}
           <div>
             <label style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "600", display: "block", marginBottom: "4px" }}>Stoploss % *</label>
-            <input
-              type="number"
+            <NumberField
               step="0.5"
-              min="0.5"
-              max="20"
+              min={0.5}
+              max={20}
               value={formData.stoploss_pct}
-              onChange={(e) => setFormData(prev => ({ ...prev, stoploss_pct: parseFloat(e.target.value) || 2.0 }))}
+              onValue={n => setFormData(prev => ({ ...prev, stoploss_pct: n }))}
               required
               style={{
                 width: "100%",

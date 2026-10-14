@@ -294,9 +294,10 @@ Enforced server-side too — `_attach_screener` skips non-results and
 `/reanalyse` refuses them with a reason.
 
 **A list beside one open pane, not a stack of collapsible cards.** The left
-column lists every filing for the day in a line or two — symbol, exchange,
-time, revenue and PAT YoY, the YoY verdict, AI verdict, move since the result —
-and scrolls on its own (↑/↓ or j/k move through it). The right pane shows the
+column lists every filing for the day — symbol, exchange, time, move since the
+result, then two lines under one sticky header: **OCR** and **AI**, each with
+revenue YoY / QoQ, PAT YoY / QoQ and its call, and the AI summary clamped to
+two lines — and scrolls on its own (↑/↓ or j/k move through it). The right pane shows the
 selected filing in full: prices, order form, the like-for-like table and both
 suggestion cards, nothing to expand. It replaced a 560 px scroll box of cards,
 each with its own collapsible analysis — a scroll inside a scroll, and a click
@@ -589,6 +590,11 @@ unmounts the React tree and leaves a blank screen. Twice a block replacement
 bounded by two symbols swallowed a component defined between them and shipped.
 Run `npx tsc --noEmit -p tsconfig.app.json` and grep for TS2304/TS2552; the file
 carries pre-existing errors, so grep those codes rather than expecting silence.
+
+**Number inputs go through `NumberField`.** `parseInt(value) || 1` straight
+into state made a quantity impossible to clear (empty → NaN → 1 before the next
+key) and a stop-loss of 0.5 impossible to type ("0." → 0 → 2). The field keeps
+the typed text locally and only reports valid values.
 
 **An error boundary does not cover an inline IIFE in JSX.** React evaluates
 element children as arguments during the *parent's* render, before the boundary
