@@ -11,30 +11,28 @@ anything in the results pipeline.
 
 ## Deploy
 
-**Pushing to `main` is the deploy.** `ops/auto_deploy.sh` runs every 5 minutes
-on the VM under the `stocks-auto-deploy` systemd timer. When `origin/main` has
-moved since the last successful deploy it fast-forwards the checkout, builds
-the image beside the running container, swaps it in, and health-checks `/` and
-`/api/trading/poller/status`. Unhealthy within 2 minutes → the previous image
-and commit are restored and that commit is not retried until `main` moves
-again. Outcomes go to Telegram.
-
-- It **never deploys Mon–Fri 09:00–15:35 IST** — a restart mid-session drops
-  announcement polling and armed-target matching. A push during the session
-  goes live at ~15:35. `bash ops/auto_deploy.sh --force` on the VM overrides.
-- It **refuses** if tracked files on the VM were edited by hand, or if `main`
-  is not a fast-forward of the VM checkout. Fix on the VM, then it resumes.
-- State lives in `~/.stocks-deploy/` (`deployed`, `failed`); the log is
-  `~/stocks/deploy.log`. `bash ops/auto_deploy.sh --status` shows both.
-
-One-time install (already done if `systemctl list-timers | grep stocks` shows it):
+There is no CI and nothing deploys on its own. Push to `main`, then run the
+deploy script on the VM:
 
 ```bash
 ssh -i ~/.ssh/oci_key ubuntu@129.159.23.190
-cd ~/stocks && git pull origin main && sudo bash ops/install_auto_deploy.sh
+bash ~/stocks/ops/deploy.sh
 ```
 
-Manual deploy, if the timer is ever removed (`--uninstall`):
+`ops/deploy.sh` fetches `origin/main`, fast-forwards the checkout, builds the
+image beside the running container, swaps it in, and health-checks `/` and
+`/api/trading/poller/status`. Unhealthy within 2 minutes → the previous image
+and commit are restored. The outcome is printed and sent to Telegram.
+
+- It **refuses Mon–Fri 09:00–15:35 IST** — a restart mid-session drops
+  announcement polling and armed-target matching. `--force` overrides, and
+  also retries a commit that was rolled back.
+- It **refuses** if tracked files on the VM were edited by hand, or if `main`
+  is not a fast-forward of the VM checkout.
+- State lives in `~/.stocks-deploy/` (`deployed`, `failed`); the log is
+  `~/stocks/deploy.log`. `bash ~/stocks/ops/deploy.sh --status` shows both.
+
+The same steps by hand, if the script is ever unusable:
 
 ```bash
 cd ~/stocks && git pull origin main

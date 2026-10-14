@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
 #
-# Deploy whatever is on origin/main, outside market hours, with a rollback.
+# Deploy whatever is on origin/main, with a health check and a rollback.
 #
-# Run every 5 minutes by the stocks-auto-deploy systemd timer (installed by
-# ops/install_auto_deploy.sh). Pushing to main is the deploy; nobody needs to
-# SSH in. Each run:
+# Run by hand on the VM — nothing runs it automatically:
 #
-#   1. Skips Mon–Fri 09:00–15:35 IST. A restart mid-session drops the 2-second
-#      announcement cycle and armed-target matching for a minute or more, and a
-#      bad build discovered at 11:00 is a missed result. --force overrides.
-#   2. Fetches origin/main. Nothing new since the last successful deploy → exit.
+#   ssh -i ~/.ssh/oci_key ubuntu@129.159.23.190
+#   bash ~/stocks/ops/deploy.sh
+#
+# Each run:
+#
+#   1. Fetches origin/main. Already deployed → says so and stops.
+#   2. Refuses Mon–Fri 09:00–15:35 IST unless --force: a restart mid-session
+#      drops the 2-second announcement cycle and armed-target matching for a
+#      minute or more.
 #   3. Refuses if tracked files on the VM were edited by hand — fast-forwarding
 #      over them would either fail or silently ship them.
 #   4. Fast-forwards the checkout and builds the image under a candidate tag.
@@ -17,14 +20,14 @@
 #      failed build costs nothing.
 #   5. Swaps the container (same docker run line as ops/retunnel.sh), then
 #      health-checks it. If it does not answer within ~2 minutes the previous
-#      image and commit are restored, and that commit is not retried until
-#      main moves again — otherwise a broken push would redeploy every 5 min.
-#   6. Reports success / rollback / refusal to Telegram, once per event.
+#      image and commit are restored.
+#   6. Reports the outcome on screen and to Telegram.
 #
 # Usage:
-#   bash ops/auto_deploy.sh            # what the timer runs
-#   bash ops/auto_deploy.sh --force    # deploy now, even during market hours
-#   bash ops/auto_deploy.sh --status   # what is deployed, what is pending
+#   bash ops/deploy.sh            # deploy main if it is new
+#   bash ops/deploy.sh --force    # also during market hours, or retry a commit
+#                                 # that was rolled back
+#   bash ops/deploy.sh --status   # what is deployed, what is pending
 #
 set -uo pipefail
 
@@ -33,7 +36,7 @@ ENV_FILE="$STOCKS/backend/.env"
 DB_FILE="$STOCKS/backend/market_tracker.db"
 STATE_DIR="$HOME/.stocks-deploy"
 LOG="$STOCKS/deploy.log"          # *.log is gitignored
-LOCK="/tmp/stocks-auto-deploy.lock"
+LOCK="/tmp/stocks-deploy.lock"
 IMAGE="stocks-app"
 CONTAINER="stocks-app"
 BRANCH="main"
@@ -59,12 +62,8 @@ env_value() {
 }
 
 notify() {
-    # Telegram, once per distinct message (the timer runs every 5 minutes).
-    local msg="$1" key
-    key=$(printf '%s' "$msg" | sha1sum | cut -c1-12)
-    [[ "$(cat "$STATE_DIR/last_notice" 2>/dev/null)" == "$key" ]] && return 0
-    echo "$key" > "$STATE_DIR/last_notice"
-    local token chat
+    # Telegram. Best effort: no token or chat id in .env means no message.
+    local msg="$1" token chat
     token=$(env_value TELEGRAM_BOT_TOKEN)
     chat=$(env_value TELEGRAM_CHAT_ID)
     [[ -n "$token" && -n "$chat" ]] || return 0
@@ -92,7 +91,7 @@ run_container() {
 cd "$STOCKS" || { echo "no repo at $STOCKS"; exit 1; }
 
 exec 9> "$LOCK"
-flock -n 9 || exit 0     # a deploy is already running
+flock -n 9 || { echo "Another deploy is already running."; exit 1; }
 
 deployed=$(cat "$STATE_DIR/deployed" 2>/dev/null || echo "")
 failed=$(cat "$STATE_DIR/failed" 2>/dev/null || echo "")
@@ -113,32 +112,40 @@ if [[ "${STATUS:-0}" == "1" ]]; then
     exit 0
 fi
 
-[[ "$target" == "$deployed" ]] && exit 0
+if [[ "$target" == "$deployed" ]]; then
+    echo "Already deployed: $(git log --oneline -1 "$target"). Nothing to do."
+    exit 0
+fi
 if [[ "$target" == "$failed" && "$FORCE" == "0" ]]; then
-    exit 0     # already tried and rolled back; wait for a new commit
+    echo "$short was deployed before and rolled back (see $LOG)."
+    echo "Push a fix, or retry it anyway with: bash ops/deploy.sh --force"
+    exit 1
 fi
 
 # ── 1. Market hours ──────────────────────────────────────────────────────────
 dow=$(TZ=Asia/Kolkata date +%u)            # 1=Mon … 7=Sun
 hhmm=$((10#$(TZ=Asia/Kolkata date +%H%M)))
 if [[ "$FORCE" == "0" && "$dow" -le 5 && "$hhmm" -ge 900 && "$hhmm" -lt 1535 ]]; then
-    exit 0     # market open; the next run after 15:35 picks it up
+    echo "Market hours (Mon-Fri 09:00-15:35 IST) — not deploying $short now."
+    echo "Run again after 15:35, or deploy anyway with: bash ops/deploy.sh --force"
+    exit 1
 fi
 
 # ── 2. Refuse to deploy over hand edits ──────────────────────────────────────
 if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
     log "REFUSED $short: tracked files edited on the VM:"
     git status --porcelain --untracked-files=no | tee -a "$LOG"
-    notify "⚠️ Auto-deploy of $short refused: files in ~/stocks were edited on the VM. Run 'git status' there, then 'git stash' or 'git checkout -- .'."
+    notify "⚠️ Deploy of $short refused: files in ~/stocks were edited on the VM. Run 'git status' there, then 'git stash' or 'git checkout -- .'."
     exit 1
 fi
 
 previous=$(git rev-parse HEAD)
+echo "Building the new image — this takes a few minutes; the app keeps running meanwhile."
 log "Deploying $short ($(git log --format=%s -1 "$target")) over $(git rev-parse --short "$previous")"
 
 if ! git merge -q --ff-only "$target" 2>> "$LOG"; then
     log "REFUSED $short: main is not a fast-forward of the VM checkout"
-    notify "⚠️ Auto-deploy of $short refused: main is not a fast-forward of the VM checkout. Someone rewrote history or committed on the VM."
+    notify "⚠️ Deploy of $short refused: main is not a fast-forward of the VM checkout. Someone rewrote history or committed on the VM."
     exit 1
 fi
 
@@ -147,7 +154,7 @@ if ! sudo docker build -q -t "$IMAGE:candidate" . >> "$LOG" 2>&1; then
     log "BUILD FAILED for $short — still running $(git rev-parse --short "$previous")"
     git reset -q --hard "$previous"
     echo "$target" > "$STATE_DIR/failed"
-    notify "❌ Auto-deploy of $short failed to build. The previous version is still running. Last lines: $(tail -n 5 "$LOG" | tr '\n' ' ' | cut -c1-500)"
+    notify "❌ Deploy of $short failed to build. The previous version is still running. Last lines: $(tail -n 5 "$LOG" | tr '\n' ' ' | cut -c1-500)"
     exit 1
 fi
 
