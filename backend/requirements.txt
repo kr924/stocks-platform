@@ -34,3 +34,7 @@ pytesseract==0.3.13
 # reporting 'no OCR engine reached it' while both engines showed as
 # loaded — with the slow engine silently carrying the whole cascade.
 pandas==2.2.3
+# BSE (Akamai) refuses python-requests by its TLS fingerprint: every
+# api.bseindia.com call from the VM was 403 from 23 Sep 2026, browser headers
+# or not. curl_cffi impersonating Chrome is answered 200. app/services/bse_http.py.
+curl_cffi>=0.7,<1.0

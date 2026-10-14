@@ -75,6 +75,10 @@ def _headers_for(url: str) -> dict:
 
 
 def _download(url: str) -> Optional[bytes]:
+    from app.services import bse_http
+    if bse_http.is_bse_url(url):
+        data = bse_http.download(url, _MAX_PDF_BYTES, timeout=_TOTAL_BUDGET_SECONDS)
+        return data if data and b"%PDF-" in data[:1024] else None
     started = time.monotonic()
     try:
         with requests.get(url, headers=_headers_for(url), stream=True,

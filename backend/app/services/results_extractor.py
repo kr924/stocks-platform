@@ -118,6 +118,16 @@ def _download(url: str) -> Optional[str]:
     """Fetch the filing to a temp file, or None. Never raises."""
     if not url or not url.lower().startswith(("http://", "https://")):
         return None
+    from app.services import bse_http
+    if bse_http.is_bse_url(url):
+        # BSE refuses python-requests (403); fetch through the Chrome-impersonating client.
+        data = bse_http.download(url, _MAX_PDF_BYTES, timeout=_DOWNLOAD_TIMEOUT)
+        if not data:
+            return None
+        fd, path = tempfile.mkstemp(suffix=".pdf", prefix="filing_")
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        return path
     try:
         with requests.get(url, timeout=_DOWNLOAD_TIMEOUT, stream=True, headers={
             "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "

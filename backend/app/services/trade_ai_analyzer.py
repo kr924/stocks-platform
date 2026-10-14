@@ -754,7 +754,12 @@ CRITICAL: Output ONLY raw JSON. No prose, no markdown fences, no preamble.
                         "Accept": "application/pdf,*/*",
                         "Referer": "https://www.nseindia.com/companies-listing/corporate-filings/announcements"
                     }
-                    pdf_res = session.get(attachment_url, headers=headers_nse, timeout=15)
+                    from app.services import bse_http
+                    if bse_http.is_bse_url(attachment_url):
+                        # BSE refuses python-requests (403); impersonate Chrome.
+                        pdf_res = bse_http.get(attachment_url, headers={"Accept": "application/pdf,*/*", "Referer": "https://www.bseindia.com/"}, timeout=30)
+                    else:
+                        pdf_res = session.get(attachment_url, headers=headers_nse, timeout=15)
                     if pdf_res.status_code == 200 and len(pdf_res.content) > 100:
                         base64_pdf = base64.b64encode(pdf_res.content).decode("utf-8")
                         logger.info(f"✅ [FLOW 1 PDF]: Downloaded & Base64 encoded PDF ({len(pdf_res.content)} bytes) for #{symbol}")

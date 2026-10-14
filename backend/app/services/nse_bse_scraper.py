@@ -279,9 +279,11 @@ class BSESession:
     PROXY_COOLDOWN_SECONDS = 300
 
     def __init__(self):
-        self.session = requests.Session()
+        # Chrome-impersonating session: BSE refuses python-requests' TLS
+        # fingerprint outright (403 from 23 Sep 2026). See services/bse_http.py.
+        from app.services import bse_http
         self.config = get_intel_config()
-        self.session.headers.update({
+        self.session = bse_http.new_session({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "application/json, text/plain, */*",
             "Referer": "https://www.bseindia.com/",

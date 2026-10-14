@@ -28,7 +28,6 @@ import time
 from datetime import datetime, timedelta, timezone, date
 from typing import Dict, Iterable, List, Optional, Set
 
-import requests
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
@@ -57,11 +56,10 @@ def ist_today() -> date:
 
 # ─── 1. BSE Forthcoming Results ─────────────────────────────────────────────
 
-def _bse_session() -> requests.Session:
-    s = requests.Session()
-    s.headers.update({
-        "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                       "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"),
+def _bse_session():
+    # Chrome-impersonating: BSE answers python-requests with 403. bse_http.py.
+    from app.services import bse_http
+    s = bse_http.new_session({
         "Accept": "application/json, text/plain, */*",
         "Referer": "https://www.bseindia.com/",
         "Origin": "https://www.bseindia.com",

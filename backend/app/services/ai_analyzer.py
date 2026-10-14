@@ -307,7 +307,12 @@ def extract_pdf_text_from_url(pdf_url: str, max_pages: int = 3) -> str:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Referer": "https://www.nseindia.com/"
         }
-        res = requests.get(pdf_url, headers=headers, timeout=8)
+        from app.services import bse_http
+        if bse_http.is_bse_url(pdf_url):
+            # BSE refuses python-requests (403); impersonate Chrome.
+            res = bse_http.get(pdf_url, headers={"Referer": "https://www.bseindia.com/"}, timeout=20)
+        else:
+            res = requests.get(pdf_url, headers=headers, timeout=8)
         if res.status_code != 200 or len(res.content) < 500:
             return ""
         

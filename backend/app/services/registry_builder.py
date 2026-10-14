@@ -139,7 +139,9 @@ def fetch_bse_scrips() -> List[dict]:
     a weekly job with no latency budget to defend, so the extra hop buys nothing
     and risks quietly emptying the registry.
     """
-    resp = requests.get(BSE_SCRIPS_URL, headers=_BSE_HEADERS, timeout=FETCH_TIMEOUT)
+    # Chrome-impersonating: BSE answers python-requests with 403. bse_http.py.
+    from app.services import bse_http
+    resp = bse_http.get(BSE_SCRIPS_URL, headers=_BSE_HEADERS, timeout=FETCH_TIMEOUT)
     resp.raise_for_status()
     try:
         data = resp.json()

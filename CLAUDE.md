@@ -561,6 +561,19 @@ re-reading a past day must never mean re-fetching it. The digest file is named
 for the morning it ran, which is a different set from "results announced on
 <date>" — do not use it as a lookup key.
 
+**BSE refuses python-requests by its TLS fingerprint.** From 23 Sep 2026 every
+call from the VM to `api.bseindia.com` was 403 "Access Denied" (Akamai): the
+announcement feed, the results calendar and the scrip list. The BSE half of the
+platform went silent for three weeks while NSE kept flowing, so a company that
+filed on BSE first was caught only when its NSE copy arrived. `curl` with full
+Chrome headers was still 403; `curl_cffi` impersonating Chrome's handshake was
+200. Every BSE request now goes through `services/bse_http.py`, which also
+leaves the User-Agent to the impersonation — a hand-set UA that disagrees with
+the handshake is itself a bot signal. The Cloudflare-worker proxy
+(`bse_proxy_url`) is no help: it forwards to the retired `AnnGetData` whatever
+path it is given, and BSE denies that too. If BSE goes quiet again, check
+`docker logs stocks-app | grep "BSE API error"` before anything else.
+
 **A "success-shaped failure" is the dangerous kind.** The BSE proxy returned
 HTTP 200 "No Record Found!" for every query and starved the feed silently. Empty
 responses now re-check the origin.
@@ -697,10 +710,12 @@ repo (a stray `results_announcements.csv` in the root is a leftover, safe to del
   the numbers. An OpenRouter key is the cheap fix (~$0.0011/filing).
 - **Secrets are baked into the Docker image** — see the `.env` note above. Wants
   a `.dockerignore` and `load_dotenv(override=False)`.
-- **BSE's results calendar is reachable after all** — `Corpforthresults/w`
-  (see "The results calendar is both exchanges"). Not yet verified from the VM;
-  check `docker logs stocks-app | grep "BSE results calendar"` after deploy.
-  BSE intimations from the announcement feed are still read as a fallback.
+- **The weekly symbol-registry rebuild has probably failed every Sunday since
+  23 Sep** — its BSE scrip-list fetch hit the same 403, and a rebuild is
+  all-or-nothing. It now goes through `bse_http`; check
+  `SELECT value FROM system_settings WHERE key='symbol_registry_last_result'`
+  after the next Sunday, or run `python ops/build_symbol_registry.py` in the
+  container.
 - **A named Cloudflare tunnel** would end the URL rotation for good. Needs a
   Cloudflare account with a domain; the server side is quick once that exists.
 - **Rotated scans still defeat the extractor.** The cascade now finds the right
