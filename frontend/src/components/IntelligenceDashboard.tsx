@@ -2569,6 +2569,16 @@ function IntelligenceDashboardContent() {
                           <span style={{ fontWeight: "700", color: "var(--text-primary)", fontSize: "13px" }}>
                             {earn.symbol}
                           </span>
+                          {Array.isArray(earn.exchanges) && earn.exchanges.map((ex: string) => (
+                            <span key={ex} title={`On ${ex}'s results calendar`} style={{
+                              fontSize: "9px",
+                              fontWeight: "700",
+                              color: ex === "NSE" ? "var(--accent)" : "var(--ai)",
+                              backgroundColor: ex === "NSE" ? "rgba(127, 166, 225, 0.1)" : "rgba(176, 155, 217, 0.1)",
+                              padding: "1px 4px",
+                              borderRadius: "3px"
+                            }}>{ex}</span>
+                          ))}
                           {ret1y !== "N/A" && (
                             <span style={{
                               fontSize: "10px",

@@ -896,6 +896,10 @@ function VerdictBadge({ verdict }: { verdict?: string | null }) {
 interface UpcomingEarningsItem {
   id: number;
   symbol: string;
+  company_name?: string;
+  // Which exchange calendars list this meeting: "NSE", "BSE" or both.
+  exchanges?: string[];
+  instrument_key?: string;
   title?: string;
   meeting_date: string;
   display_date?: string;
@@ -3567,12 +3571,26 @@ export function TradingDashboard() {
                         >
                           {item.symbol}
                         </span>
+                        {Array.isArray(item.exchanges) && item.exchanges.length > 0 && (
+                          <div style={{ display: "flex", gap: "3px", marginTop: "3px" }}>
+                            {item.exchanges.map((ex) => (
+                              <span key={ex} title={`On ${ex}'s results calendar`} style={{
+                                fontSize: "9px",
+                                fontWeight: "700",
+                                color: ex === "NSE" ? "var(--accent)" : "var(--ai)",
+                                background: ex === "NSE" ? "rgba(127, 166, 225, 0.1)" : "rgba(176, 155, 217, 0.1)",
+                                padding: "1px 4px",
+                                borderRadius: "3px"
+                              }}>{ex}</span>
+                            ))}
+                          </div>
+                        )}
                       </td>
 
                       {/* 2. COMPANY */}
                       <td style={{ padding: "10px 12px", color: "var(--text-muted)", fontSize: "11px", maxWidth: "160px" }}>
                         <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {item.title || item.symbol}
+                          {item.company_name || item.title || item.symbol}
                         </div>
                       </td>
 

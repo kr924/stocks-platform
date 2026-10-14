@@ -348,9 +348,48 @@ def _broadcast_event(event: MarketEvent):
     })
 
 
+def _announcement_hash(ann: Announcement) -> str:
+    return event_hash(ann.exchange, "announcement", f"{ann.symbol}:{ann.title}", ann.event_time.isoformat())
+
+
+def _find_existing(db: Session, ann: Announcement) -> Optional[MarketEvent]:
+    """The stored copy of this filing, if we have seen it before."""
+    return db.query(MarketEvent).filter(MarketEvent.event_hash == _announcement_hash(ann)).first()
+
+
+def _is_routed_result(event: MarketEvent) -> bool:
+    return event.category in ("financial_results", "impact_news") or event.ai_provider == "auto_trading"
+
+
+def _body_changed(event: MarketEvent, ann: Announcement) -> bool:
+    """
+    Has the exchange filled in (or rewritten) this filing's body since we stored it?
+
+    NSE publishes "Outcome of Board Meeting" with an empty description and fills
+    it minutes later. The body is not part of the event hash, so the later copy
+    used to be dropped as a duplicate and the stored row kept its empty body for
+    good — which left `recheck_late_bodies` re-reading the same empty text.
+    """
+    new_body = (ann.description or "").strip()
+    old_body = (event.description or "").strip()
+    return bool(new_body) and new_body != old_body and new_body != (ann.title or "").strip()
+
+
+def _refresh_body(db: Session, event: MarketEvent, ann: Announcement) -> bool:
+    try:
+        event.description = ann.description
+        event.raw_data = json.dumps(ann.raw, default=str)
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        logger.debug(f"Could not refresh body for {ann.symbol}: {e}")
+        return False
+
+
 def _store_announcement(db: Session, ann: Announcement, classification: dict) -> Optional[MarketEvent]:
     """Persist one announcement as a MarketEvent. Returns the event, or None if duplicate."""
-    h = event_hash(ann.exchange, "announcement", f"{ann.symbol}:{ann.title}", ann.event_time.isoformat())
+    h = _announcement_hash(ann)
     if is_duplicate_event(db, h):
         return None
 
@@ -376,6 +415,133 @@ def _store_announcement(db: Session, ann: Announcement, classification: dict) ->
         db.rollback()
         logger.warning(f"Failed to save {ann.exchange} announcement {ann.symbol}: {e}")
         return None
+
+
+def _identifiers_of(ann: Announcement) -> List[str]:
+    return [i for i in (ann.symbol, ann.nse_symbol, ann.bse_scrip_id, ann.scrip_code, ann.isin) if i]
+
+
+def promote_to_result(db: Session, ann: Announcement, event: MarketEvent, channel: str,
+                      evidence: str = "subject") -> bool:
+    """
+    Route an already-stored filing as a financial result.
+
+    Used when the evidence arrives after the filing was first stored: the PDF's
+    first page confirmed it, or the exchange filled in the body later. Goes
+    through the same gates as a filing recognised on sight, in the same order:
+
+      1. cross-exchange dedup claim — if the other exchange (or the other
+         channel) already captured this result, nothing happens;
+      2. the trading engine, so an armed target buys on the first filing;
+      3. results routing — the order prompt, alert and AI.
+
+    Returns True if this filing became the captured result.
+    """
+    key = _claim_result_key(db, ann, channel)
+    if not key:
+        return False
+
+    try:
+        from app.services.trade_nse_poller import handle_announcements
+        handle_announcements([ann], assume_result=True)
+    except Exception as e:
+        logger.error(f"Trading engine dispatch failed for promoted {ann.symbol}: {e}")
+
+    try:
+        from app.services.results_router import route_financial_result
+        route_financial_result(db, ann, event, key)
+        if evidence != "subject":
+            event.ai_summary = (event.ai_summary or "") + f" Recognised from the {evidence.replace('_', ' ')}."
+            db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Financial-results routing failed for promoted {ann.symbol}: {e}")
+
+    _broadcast_event(event)
+    logger.info(
+        f"📄 [RESULT via {evidence.upper()}] {ann.symbol} on {ann.exchange.upper()} — "
+        f"'{(ann.title or '')[:60]}'"
+    )
+    return True
+
+
+def _maybe_probe_pdf(db: Session, ann: Announcement, event: MarketEvent) -> bool:
+    """
+    A company due to report today filed something that does not say what it is:
+    read the first page of its PDF in the background. True if a probe was queued.
+    """
+    if not ann.url:
+        return False
+    try:
+        from app.services.announcement_classifier import could_carry_result
+        if not could_carry_result(ann.title, ann.description, ann.category_name):
+            return False
+        from app.services.results_calendar import expects_results_today
+        if not expects_results_today(db, _identifiers_of(ann)):
+            return False
+        from app.services.results_pdf_probe import schedule_probe
+        return schedule_probe(ann, event.id)
+    except Exception as e:
+        logger.debug(f"PDF probe not scheduled for {ann.symbol}: {e}")
+        return False
+
+
+def reconsider_event(db: Session, ann: Announcement, event: MarketEvent) -> str:
+    """
+    Ask the results question again of a stored, not-yet-routed filing.
+
+    `ann` must carry the filing's current body. Returns "result" if it was routed
+    now, "duplicate" if it is a result another filing already captured,
+    "probe" if a PDF read was queued, else "no".
+    """
+    if _is_routed_result(event):
+        return "no"
+    cls = classify(ann.title, ann.description, ann.category_name)
+    if cls["is_financial_result"]:
+        routed = promote_to_result(db, ann, event, cls["channel"], evidence="late_body")
+        return "result" if routed else "duplicate"
+    if _maybe_probe_pdf(db, ann, event):
+        return "probe"
+    return "no"
+
+
+def announcement_from_event(db: Session, event: MarketEvent) -> Optional[Announcement]:
+    """
+    Rebuild the normalised Announcement for a stored event from its raw JSON, so
+    every identifier, the BSE subcategory and the attachment name come back —
+    not just the symbol and title. The stored body and time win over the raw
+    copy, which may predate a refreshed body.
+    """
+    try:
+        raw = json.loads(event.raw_data or "{}")
+    except Exception:
+        raw = {}
+    ann = None
+    try:
+        if event.source == "nse" and raw:
+            ann = _normalize_nse(raw)
+        elif event.source == "bse" and raw:
+            ann = _normalize_bse(raw, db)
+    except Exception as e:
+        logger.debug(f"Could not re-normalise event {event.id}: {e}")
+    if ann is None:
+        ann = Announcement(
+            exchange=event.source or "",
+            symbol=event.symbol or "",
+            title=event.title or "",
+            description=event.description or "",
+            url=event.url or "",
+            pdf_filename=(event.url or "").rsplit("/", 1)[-1],
+            company_name=event.company_name or "",
+            raw=raw,
+        )
+    if event.description:
+        ann.description = event.description
+    if event.event_time:
+        ann.event_time = event.event_time
+    if event.symbol:
+        ann.symbol = event.symbol
+    return ann
 
 
 # ─── Main poll cycle ────────────────────────────────────────────────────────
@@ -440,8 +606,11 @@ def poll_exchange_announcements(db: Session) -> Dict[str, int]:
     # ── 2. Publish snapshot + hand to the trading engine first (lowest latency) ──
     _publish_snapshot(announcements, raw_nse)
     try:
+        # Both exchanges. A company files wherever it files first, and an armed
+        # target should buy on that filing — the engine claims the target
+        # atomically, so the twin on the other exchange cannot buy again.
         from app.services.trade_nse_poller import handle_announcements
-        handle_announcements(raw_nse)
+        handle_announcements(announcements)
     except Exception as e:
         logger.error(f"Trading engine dispatch failed: {e}")
 
@@ -463,7 +632,23 @@ def poll_exchange_announcements(db: Session) -> Dict[str, int]:
     # ── 4. Persist and route ──
     for ann, cls in classified:
         try:
+            existing = _find_existing(db, ann)
+
             if cls["is_financial_result"]:
+                if existing is not None:
+                    # Seen before. Either it was routed already (the normal case
+                    # on every cycle after the first), or it was stored as
+                    # ordinary news and has only now become a result because the
+                    # exchange filled in its body.
+                    if _is_routed_result(existing) or not _body_changed(existing, ann):
+                        continue
+                    _refresh_body(db, existing, ann)
+                    if promote_to_result(db, ann, existing, cls["channel"], evidence="late_body"):
+                        stats["results"] += 1
+                    else:
+                        stats["result_duplicates"] += 1
+                    continue
+
                 key = _claim_result_key(db, ann, cls["channel"])
                 if not key:
                     stats["result_duplicates"] += 1
@@ -485,8 +670,28 @@ def poll_exchange_announcements(db: Session) -> Dict[str, int]:
                 _broadcast_event(event)
                 stats["results"] += 1
             else:
+                if existing is not None:
+                    # Keep the stored body current so the late-body recheck reads
+                    # what the exchange says now, not what it said at first sight.
+                    if not _is_routed_result(existing) and _body_changed(existing, ann):
+                        if _refresh_body(db, existing, ann):
+                            reconsider_event(db, ann, existing)
+                    continue
+
                 event = _store_announcement(db, ann, cls)
                 if not event:
+                    continue
+
+                # A company due to report today has filed something that does
+                # not say what it is — "Outcome of the board meeting is
+                # attached." The results are usually on page one of the PDF, so
+                # read it in the background rather than wait for a wordier copy
+                # on the other exchange. Skips impact routing: on a results day a
+                # vague outcome is the result far more often than it is news.
+                if _maybe_probe_pdf(db, ann, event):
+                    stats["pdf_probes"] = stats.get("pdf_probes", 0) + 1
+                    _broadcast_event(event)
+                    stats["general"] += 1
                     continue
 
                 # Good news big enough to act on takes the auto-trading path
@@ -528,7 +733,8 @@ def poll_exchange_announcements(db: Session) -> Dict[str, int]:
         logger.info(
             f"Exchange hub: {stats['fetched']} fetched → "
             f"{stats['results']} results, {stats.get('impact', 0)} impact, {stats['general']} general, "
-            f"{stats['result_duplicates']} cross-channel duplicates suppressed"
+            f"{stats['result_duplicates']} cross-channel duplicates suppressed, "
+            f"{stats.get('pdf_probes', 0)} PDFs queued for a first-page read"
         )
 
     return stats

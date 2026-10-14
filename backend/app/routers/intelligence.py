@@ -761,115 +761,38 @@ def get_upcoming_earnings(db: Session = Depends(get_db)):
     from datetime import datetime, timedelta
     from sqlalchemy import or_, and_, desc
 
-    today = datetime.utcnow().date()
+    # One calendar from both exchanges: NSE's board-meeting API, BSE's
+    # Forthcoming Results list, and the BSE intimations read out of the
+    # announcement feed. Merged per company in services/results_calendar.py,
+    # which the exchange hub also asks "does this company report today?".
+    from app.services.results_calendar import collect_results_calendar, ist_today
+
+    today = ist_today()
     end_date = today + timedelta(days=30)
-    
-    # NSE publishes a board-meeting calendar; BSE does not expose one we can
-    # reach, but it files an intimation per meeting through the announcement
-    # feed we already read. Both are needed: measured against what actually
-    # filed, NSE's calendar covered 99% of NSE filers and 25% of BSE ones, and
-    # BSE-only companies are two thirds of everything that reports.
-    bms = db.query(MarketEvent).filter(
-        or_(
-            (MarketEvent.event_type == "board_meeting"),
-            (MarketEvent.category == "earnings"),
-            (MarketEvent.category == "board_meeting"),
-            and_(MarketEvent.source == "bse",
-                 MarketEvent.raw_data.like('%"SUBCATNAME": "Board Meeting%')),
-        )
-    ).all()
-    
-    def parse_date(date_str):
-        if not date_str:
-            return None
-        date_str = str(date_str).strip()
-        for fmt in ('%d-%b-%Y', '%d-%m-%Y', '%Y-%m-%d', '%d/%m/%Y', '%b %d, %Y'):
-            try:
-                return datetime.strptime(date_str, fmt).date()
-            except ValueError:
-                pass
-        m = re.search(r'(\d{1,2})[-/\s]+([A-Za-z]{3})[-/\s]+(\d{2,4})', date_str)
-        if m:
-            try:
-                day, month_str, year = m.groups()
-                if len(year) == 2:
-                    year = '20' + year
-                return datetime.strptime(f'{day}-{month_str}-{year}', '%d-%b-%Y').date()
-            except Exception:
-                pass
-        return None
 
     upcoming = []
-    seen = set()
+    for row in collect_results_calendar(db, today, end_date):
+        m_date = row["meeting_date"]
+        exchanges = sorted(row["exchanges"], key=lambda e: (e != "NSE", e))
+        upcoming.append({
+            "id": row["id"],
+            "symbol": row["symbol"],
+            "company_name": row["company_name"],
+            "exchanges": exchanges,
+            "date": m_date.isoformat(),
+            "meeting_date": m_date.isoformat(),
+            "display_date": m_date.strftime("%d %b %Y"),
+            "purpose": row["purpose"],
+            "title": row["title"],
+            "description": row["description"],
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            "ltp": 0.0,
+            "prev_close": 0.0,
+            "day_high": 0.0,
+            "change_pct": 0.0
+        })
 
-    for bm in bms:
-        symbol = bm.symbol
-        if not symbol:
-            continue
-        symbol = symbol.strip().upper()
-        # Rows stored before both exchanges shared an identity may still carry a
-        # BSE scrip code where a ticker belongs.
-        try:
-            from app.services import symbol_registry
-            rec = symbol_registry.resolve(nse_symbol=symbol, scrip_id=symbol,
-                                          scrip_cd=symbol if symbol.isdigit() else "")
-            symbol = (rec.get("nse_symbol") or rec.get("symbol") or symbol).upper()
-        except Exception:
-            pass
-        raw = {}
-        if bm.raw_data:
-            try:
-                raw = json.loads(bm.raw_data)
-            except Exception:
-                pass
-
-        m_date_str = raw.get("bm_date", raw.get("meetingDate", raw.get("bm_dt", "")))
-        m_date = parse_date(m_date_str)
-        if not m_date and bm.source == "bse":
-            # BSE states the date in prose, not a field.
-            from app.services.nse_bse_scraper import extract_meeting_date
-            m_date = extract_meeting_date(
-                " ".join(str(raw.get(k) or "") for k in ("HEADLINE", "NEWSSUB"))
-                + " " + (bm.title or "") + " " + (bm.description or "")
-            )
-        if not m_date:
-            if bm.event_time and bm.event_time.date() >= (today - timedelta(days=1)):
-                m_date = bm.event_time.date()
-            else:
-                continue
-
-        # Filter strictly to earnings disclosures on or after today (clearing old past dates)
-        if m_date >= today and m_date <= end_date:
-            # Keyed on the company alone. NSE and BSE announce the same meeting
-            # separately and occasionally disagree by a day, which as a
-            # (symbol, date) key produced two rows for one meeting. Events are
-            # ordered by date, so the first seen is the nearest.
-            if symbol not in seen:
-                seen.add(symbol)
-                purpose = raw.get("bm_purpose", raw.get("purpose", bm.title or "Financial Results"))
-                purpose_lower = str(purpose).lower()
-                is_earnings = any(k in purpose_lower for k in [
-                    "financial", "result", "quarterly", "audited", "unaudited", "q1", "q2", "q3", "q4", "earning", "profit", "loss"
-                ])
-                if not is_earnings:
-                    continue
-                upcoming.append({
-                    "id": bm.id,
-                    "symbol": symbol,
-                    "date": m_date.isoformat(),
-                    "meeting_date": m_date.isoformat(),
-                    "display_date": m_date.strftime("%d %b %Y"),
-                    "purpose": purpose,
-                    "title": bm.title or f"{symbol}: Board Meeting",
-                    "description": bm.description or purpose,
-                    "created_at": bm.created_at.isoformat() if bm.created_at else None,
-                    "ltp": 0.0,
-                    "prev_close": 0.0,
-                    "day_high": 0.0,
-                    "change_pct": 0.0
-                })
-
-    upcoming.sort(key=lambda x: x["date"])
+    upcoming.sort(key=lambda x: (x["date"], x["symbol"]))
 
     # ── Live Upstox Market Feed 1-Day Intraday Quote Enrichment ──
     try:

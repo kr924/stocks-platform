@@ -213,6 +213,92 @@ def is_financial_result(title: str, description: str = "", category_name: str = 
     return False, None
 
 
+# ─── Results hiding inside the attachment ───────────────────────────────────
+
+# Subjects that say nothing at all about what was filed. BSE wraps most filings
+# in "Announcement under Regulation 30 (LODR)"; NSE uses "Updates" and
+# "General Updates". Only these and board-meeting outcomes are worth opening
+# the PDF for — a dividend, a record date or a press release is already named.
+_GENERIC_SUBJECT = re.compile(
+    r"announcement\s+under\s+regulation\s+30"
+    r"|^\s*(?:general\s+)?updates?\s*$"
+    r"|financial\s+result\s+updates?"
+    r"|company\s+update"
+    r"|^\s*outcome\s*$",
+    re.IGNORECASE,
+)
+
+
+def could_carry_result(title: str, description: str = "", category_name: str = "") -> bool:
+    """
+    Could this filing be a result that its own text does not admit to?
+
+    Asked only of filings `is_financial_result` has already said no to, and only
+    for companies whose results calendar says they report today. On 14 Oct 2026
+    Elecon filed "Board Meeting Outcome for Outcome Of Board Meeting" with the
+    body "Outcome of the board meeting is attached." on BSE at 13:16; the
+    results were on page one of the PDF, and NSE's wordier copy three minutes
+    later is what the platform caught.
+
+    True for board-meeting outcomes and boilerplate subjects that survive the
+    same forward-looking, hard-negative and non-result-subcategory gates the
+    result check applies. The PDF is then the evidence.
+    """
+    subject = (title or "").strip()
+    cat = (category_name or "").strip().lower()
+    subject_text = f"{subject} {cat}".strip()
+    if not subject_text:
+        return False
+    if _FORWARD_LOOKING.search(subject_text):
+        return False
+    if _RESULT_NEGATIVE.search(subject_text):
+        return False
+    if any(nr in cat for nr in _NON_RESULT_SUBCATEGORIES):
+        return False
+    if _BOARD_OUTCOME.search(subject_text) or cat.startswith("board meeting") \
+            or cat.startswith("outcome of board meeting"):
+        return True
+    return bool(_GENERIC_SUBJECT.search(subject) or _GENERIC_SUBJECT.search(cat))
+
+
+# The page has to say the results were approved or are enclosed. An intimation
+# says "to consider and approve the financial results" and is the opposite.
+_PDF_DONE = re.compile(
+    r"\bapproved\b|took\s+on\s+record|taken\s+on\s+record|considered\s+and\s+approved"
+    r"|enclos(?:ed|ing)|attached|herewith|submitted|submitting",
+    re.IGNORECASE,
+)
+_PDF_FUTURE = re.compile(
+    r"(?:is|are|will\s+be)\s+scheduled|will\s+be\s+held|to\s+be\s+held"
+    r"|to\s+consider\s+and\s+approve|intimation\s+of\s+(?:the\s+)?board\s+meeting",
+    re.IGNORECASE,
+)
+
+
+def pdf_text_confirms_result(page_text: str) -> bool:
+    """
+    Does the first page of a filing show quarterly results were approved?
+
+    The body of a filing is never enough on its own elsewhere in this module,
+    because a body mentioning results is too common. Page one of an outcome
+    letter is different: it lists what the board approved, item by item. It
+    still has to read as done ("approved", "enclosed"), not as an agenda, and
+    the year-end audited set is still excluded exactly as gate 4 excludes it.
+    """
+    text = re.sub(r"\s+", " ", page_text or "")
+    if not text or not _RESULT_POSITIVE.search(text):
+        return False
+    if _AUDITED_ONLY.search(text) and not _UNAUDITED.search(text):
+        return False
+    if not _PDF_DONE.search(text):
+        return False
+    # An agenda that also says "enclosed" is still an agenda unless it also says
+    # something was approved.
+    if _PDF_FUTURE.search(text) and not re.search(r"\bapproved\b|took\s+on\s+record|taken\s+on\s+record", text, re.I):
+        return False
+    return True
+
+
 # ─── Priority-1 / Priority-2 / Priority-3 classification ────────────────────
 
 # (category, priority, compiled pattern) — evaluated in order, first match wins.

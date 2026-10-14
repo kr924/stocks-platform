@@ -136,81 +136,168 @@ def _get_armed_configs() -> List:
         return []
 
 
-def _check_match(announcement: dict, armed_configs: list) -> Optional[dict]:
+def _config_identifiers(symbol: str) -> set:
     """
-    Match an NSE announcement against an armed config.
+    Every identifier an armed target can be recognised by.
+
+    A target is armed under one symbol, but the same company arrives from NSE
+    as a ticker and from BSE as a scrip code / scrip id. The registry maps them
+    onto each other, so a BSE filing matches a target armed as "ELECON" and an
+    NSE filing matches one armed as "505700".
+    """
+    symbol = (symbol or "").strip().upper()
+    ids = {symbol} if symbol else set()
+    try:
+        from app.services import symbol_registry
+        rec = symbol_registry.resolve(
+            nse_symbol=symbol, scrip_id=symbol,
+            scrip_cd=symbol if symbol.isdigit() else "",
+        )
+        for k in ("symbol", "nse_symbol", "bse_scrip_id", "bse_scrip_cd", "isin"):
+            v = rec.get(k)
+            if v:
+                ids.add(str(v).strip().upper())
+    except Exception:
+        pass
+    return ids
+
+
+def _announcement_identifiers(ann) -> set:
+    return {
+        str(v).strip().upper()
+        for v in (ann.symbol, ann.nse_symbol, ann.bse_scrip_id, ann.scrip_code, ann.isin)
+        if v
+    }
+
+
+def _check_match(ann, armed_configs: list, assume_result: bool = False) -> Optional[dict]:
+    """
+    Match a normalised announcement (either exchange) against armed configs.
 
     Auto-trading fires on *financial results only*. The previous implementation
     fell through to "any announcement for an armed symbol", which meant a routine
     compliance filing or a trading-window notice could place a live order. The
-    shared classifier (news_fetching_strategy.md) now makes that call, so the
-    trading engine and the intelligence feed agree on what counts as a result.
+    shared classifier (news_fetching_strategy.md) makes that call, with the BSE
+    subcategory included, so the trading engine and the intelligence feed agree
+    on what counts as a result.
+
+    `assume_result` is for filings already proven to be results by other means —
+    the first page of their PDF, or a body the exchange filled in later.
     """
     from app.services.announcement_classifier import is_financial_result
 
-    subject = str(
-        announcement.get("desc") or announcement.get("subject") or announcement.get("an_desc") or ""
-    ).strip()
-    details = str(
-        announcement.get("attchmntText") or announcement.get("details") or announcement.get("desc") or ""
-    ).strip()
-    ann_symbol = str(
-        announcement.get("symbol") or announcement.get("sm_name") or ""
-    ).strip().upper()
-
-    if not ann_symbol:
+    ann_ids = _announcement_identifiers(ann)
+    if not ann_ids:
         return None
 
-    matching = [c for c in armed_configs if c["symbol"].upper().strip() == ann_symbol]
+    matching = [c for c in armed_configs if c["identifiers"] & ann_ids]
     if not matching:
         return None
 
-    is_result, channel = is_financial_result(subject, details)
-    if not is_result:
-        logger.debug(
-            f"⏭️ [TRADE POLLER]: '{subject[:70]}' for {ann_symbol} is not a financial result — no trigger."
-        )
-        return None
+    if assume_result:
+        channel = "confirmed"
+    else:
+        is_result, channel = is_financial_result(ann.title, ann.description, ann.category_name)
+        if not is_result:
+            logger.debug(
+                f"⏭️ [TRADE POLLER]: '{(ann.title or '')[:70]}' for {ann.symbol} "
+                f"({ann.exchange.upper()}) is not a financial result — no trigger."
+            )
+            return None
 
     config = matching[0]
-    # An explicit trigger_subject still narrows the match when the user set one.
     trigger = (config.get("trigger_subject") or "").lower().strip()
-    if trigger and trigger not in f"{subject} {details}".lower():
+    if trigger and trigger not in f"{ann.title} {ann.description}".lower():
         # Subject-specific arm that this filing does not satisfy; the result is
         # still a result, so let it through on the results channel it arrived on.
         logger.debug(
-            f"[TRADE POLLER]: {ann_symbol} result matched via channel '{channel}' "
+            f"[TRADE POLLER]: {ann.symbol} result matched via channel '{channel}' "
             f"(configured trigger '{trigger}' not present)."
         )
     return config
 
 
-def _is_recent_announcement(announcement: dict, max_age_minutes: int = 480) -> bool:
-    """Check if the announcement is from today's trading session."""
-    date_str = str(
-        announcement.get("an_dt") or
-        announcement.get("bcastDate") or
-        announcement.get("broadcastDate") or
-        announcement.get("date") or ""
-    ).strip()
-    if not date_str:
-        return True  # If no date, assume it's recent
+def _is_recent(ann, max_age_minutes: int = 30) -> bool:
+    """
+    Is this filing from today's session (IST), or within `max_age_minutes`?
 
+    Same rule as before both exchanges were matched — any filing from today
+    counts — now read off the normalised UTC event_time rather than NSE's
+    an_dt string, which BSE does not have.
+    """
+    when = getattr(ann, "event_time", None)
+    if not when:
+        return True
     try:
-        from dateutil import parser
-        parsed = parser.parse(date_str)
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=IST)
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
         now = datetime.now(IST)
-        
-        # Accept any announcement from today
-        if parsed.astimezone(IST).date() == now.date():
+        if when.astimezone(IST).date() == now.date():
             return True
-            
-        age = now - parsed.astimezone(IST)
-        return age.total_seconds() < max_age_minutes * 60
+        return (now - when.astimezone(IST)).total_seconds() < max_age_minutes * 60
     except Exception:
         return True
+
+
+def _claim_config(config_id: int) -> bool:
+    """
+    Atomically move one armed target to 'triggered'. True for exactly one caller.
+
+    This is what makes "only the first filing buys". The same result reaches us
+    up to four times — the board outcome and the results PDF, on each of NSE and
+    BSE — sometimes inside one fetch, sometimes minutes apart, sometimes from the
+    PDF-probe thread while the hub is mid-cycle. The guard used to be an
+    in-memory set keyed on (symbol, subject, date), which two exchanges with
+    different subjects passed straight through. A conditional UPDATE in the
+    database is the one place every path agrees on.
+    """
+    try:
+        from app.database import SessionLocal, TradeConfig
+        db = SessionLocal()
+        try:
+            n = db.query(TradeConfig).filter(
+                TradeConfig.id == config_id,
+                TradeConfig.status == "armed",
+            ).update(
+                {"status": "triggered", "triggered_at": datetime.utcnow()},
+                synchronize_session=False,
+            )
+            db.commit()
+            return n == 1
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"[TRADE POLLER]: Could not claim config {config_id}: {e}")
+        return False
+
+
+def _to_announcement(item):
+    """Accept a normalised Announcement, or a raw NSE dict from the watchdog path."""
+    if hasattr(item, "exchange") and hasattr(item, "title"):
+        return item
+    if isinstance(item, dict):
+        try:
+            from app.services.exchange_hub import _normalize_nse
+            return _normalize_nse(item)
+        except Exception as e:
+            logger.debug(f"[TRADE POLLER]: could not normalise NSE row: {e}")
+    return None
+
+
+def _trade_payload(ann) -> dict:
+    """The fields _execute_trade and the earnings AI read, from either exchange."""
+    return {
+        "exchange": ann.exchange,
+        "symbol": ann.symbol,
+        "desc": ann.title,
+        "subject": ann.title,
+        "attchmntText": ann.description,
+        "description": ann.description,
+        # A full URL on both exchanges once normalised, so the AI does not
+        # mistake a BSE attachment for an NSE archive path.
+        "attchmntFile": ann.url,
+        "an_dt": ann.event_time.isoformat() if getattr(ann, "event_time", None) else "",
+    }
 
 
 _offmarket_interval_minutes = 45.0
@@ -226,22 +313,25 @@ def _is_high_speed_polling_hours() -> bool:
     return start_time <= now <= end_time
 
 
-# Track already-triggered event hashes to avoid duplicate triggers
-_triggered_hashes = set()
-
-
-def handle_announcements(announcements: list) -> int:
+def handle_announcements(announcements: list, assume_result: bool = False) -> int:
     """
-    Match a freshly fetched announcement batch against armed configs.
+    Match a freshly fetched announcement batch — NSE and BSE — against armed configs.
 
     Called synchronously by the exchange hub the instant data lands, so the
     trading engine sees a filing on the same fetch that feeds the intelligence
-    pipeline — no second HTTP round-trip and no extra latency.
+    pipeline — no second HTTP round-trip and no extra latency. Also called by
+    the PDF probe and the late-body path with `assume_result=True` once a
+    filing has been proven to be a result.
+
+    The earliest filing in the batch is considered first, and each target is
+    claimed atomically before an order is scheduled, so the first filing of a
+    result buys and every later copy — the other exchange, the other channel —
+    finds the target already triggered.
 
     Safe to call from a worker thread: trade execution is scheduled back onto the
     main event loop. Returns the number of triggers fired.
     """
-    global _last_poll_status, _triggered_hashes
+    global _last_poll_status
 
     if not announcements:
         return 0
@@ -254,34 +344,51 @@ def handle_announcements(announcements: list) -> int:
     if not armed:
         return 0
 
-    triggers = 0
-    for ann in announcements:
-        if not isinstance(ann, dict):
-            continue
+    for c in armed:
+        c["identifiers"] = _config_identifiers(c["symbol"])
 
-        matched_config = _check_match(ann, armed)
+    batch = [a for a in (_to_announcement(x) for x in announcements) if a is not None]
+    batch.sort(key=lambda a: getattr(a, "event_time", None) or datetime.utcnow())
+
+    triggers = 0
+    for ann in batch:
+        if not armed:
+            break
+
+        matched_config = _check_match(ann, armed, assume_result=assume_result)
         if not matched_config:
             continue
 
-        if not _is_recent_announcement(ann, max_age_minutes=30):
+        if not _is_recent(ann, max_age_minutes=30):
             continue
 
-        subject = str(ann.get("desc") or ann.get("subject") or "")
-        ann_date = str(ann.get("an_dt") or ann.get("bcastDate") or "")
-        evt_hash = f"{matched_config['symbol']}:{subject[:100]}:{ann_date}"
-        if evt_hash in _triggered_hashes:
+        if not _claim_config(matched_config["id"]):
+            # Another filing — usually the same result on the other exchange —
+            # already triggered this target.
+            armed = [c for c in armed if c["id"] != matched_config["id"]]
+            logger.info(
+                f"[TRADE POLLER]: {matched_config['symbol']} already triggered — "
+                f"{ann.exchange.upper()} copy '{(ann.title or '')[:60]}' ignored."
+            )
             continue
-        _triggered_hashes.add(evt_hash)
+        armed = [c for c in armed if c["id"] != matched_config["id"]]
 
         # ========== TRIGGER! ==========
         logger.info(
-            f"⚡ [TRADE TRIGGER]: {matched_config['symbol']} — '{subject[:80]}' → "
-            f"Placing {matched_config['order_type']} {matched_config['broker'].upper()} order!"
+            f"⚡ [TRADE TRIGGER]: {matched_config['symbol']} — {ann.exchange.upper()} "
+            f"'{(ann.title or '')[:80]}' → Placing {matched_config['order_type']} "
+            f"{matched_config['broker'].upper()} order!"
         )
         _last_poll_status["triggers_total"] += 1
+        _last_poll_status["last_trigger"] = {
+            "symbol": matched_config["symbol"],
+            "exchange": ann.exchange,
+            "title": (ann.title or "")[:200],
+            "at": datetime.now(IST).isoformat(),
+        }
         triggers += 1
 
-        _schedule_trade(matched_config, ann)
+        _schedule_trade(matched_config, _trade_payload(ann))
 
     return triggers
 
@@ -487,7 +594,7 @@ async def _execute_trade(config: dict, announcement: dict):
             summary=f"{'Bought' if result.success else 'Failed'} {config['quantity']}x {symbol} via {config['broker'].upper()}\n"
                     f"Price: ₹{result.price or 'N/A'}\n"
                     f"Order ID: {result.broker_order_id or 'N/A'}\n"
-                    f"Trigger: {subject[:100]}\n"
+                    f"Trigger: [{str(announcement.get('exchange') or 'nse').upper()}] {subject[:100]}\n"
                     f"Message: {result.message}",
             provider=config["broker"].upper(),
             alert_type=f"⚡ TRADE EXECUTION"

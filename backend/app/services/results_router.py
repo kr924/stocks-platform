@@ -20,7 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.database import MarketEvent, PendingResultOrder, TradeConfig
@@ -100,13 +100,25 @@ def _resolve_instrument_key(symbol: str) -> str:
 
 
 def _is_armed(db: Session, symbol: str) -> bool:
-    """Is there an armed trade config for this symbol today?"""
+    """
+    Does the trading engine own this symbol's result today?
+
+    True while the target is armed *and* once it has triggered. The engine runs
+    before routing and claims the target by moving it to 'triggered' — so
+    asking only for 'armed' here, after the engine has already bought, raised a
+    second order prompt for the very filing that just bought.
+    """
     if not symbol:
         return False
     today_ist = datetime.now(IST).strftime("%Y-%m-%d")
+    try:
+        from app.services.trade_nse_poller import _config_identifiers
+        wanted = _config_identifiers(symbol)
+    except Exception:
+        wanted = {symbol.upper()}
     return db.query(TradeConfig).filter(
-        TradeConfig.symbol == symbol.upper(),
-        TradeConfig.status == "armed",
+        TradeConfig.symbol.in_(list(wanted)),
+        TradeConfig.status.in_(["armed", "triggered"]),
         TradeConfig.is_active == True,
         TradeConfig.purchase_date == today_ist,
     ).first() is not None
@@ -731,42 +743,54 @@ def recheck_late_bodies(db: Session, hours: int = 6) -> int:
     later the body reads "has submitted to the Exchange, the financial results
     for the quarter ended Jun 30, 2026", and the same rules now say result.
 
-    94 filings were sitting in exactly that state. Rather than backfill the
-    classification and pretend we knew, this re-asks the question while the news
-    is still fresh enough to act on, and routes properly if the answer changed.
+    Rather than backfill the classification and pretend we knew, this re-asks
+    the question while the news is still fresh enough to act on, and routes
+    properly if the answer changed. The hub now does the same the moment it sees
+    a body change; this is the safety net for anything it missed (a restart, a
+    cycle that errored).
+
+    What changed, and why:
+
+    - **The stored body is kept current.** The hub used to drop the later copy
+      as a duplicate (the body is not part of the event hash), so this function
+      kept re-reading the empty body it was written to replace.
+    - **The BSE subcategory is used.** It was passed as "", and on BSE the
+      subcategory ("Outcome of Board Meeting", "Financial Results") carries the
+      subject — the subject itself is often Regulation 30 boilerplate.
+    - **The real dedup claim is used.** It routed under its own `late:` key,
+      which collides with nothing, so a late body whose twin on the other
+      exchange had already been captured could raise a second prompt.
+    - **Armed targets are offered it.** A result recognised late never reached
+      the trading engine at all; now it does, and the engine's atomic claim
+      keeps it to one buy.
+    - **Companies reporting today get their PDF read** if the text still says
+      nothing, in case the hub never got to it.
     """
-    from app.services.announcement_classifier import classify
+    from app.services.exchange_hub import announcement_from_event, reconsider_event
 
     since = datetime.utcnow() - timedelta(hours=hours)
     candidates = db.query(MarketEvent).filter(
         MarketEvent.source.in_(["nse", "bse"]),
+        MarketEvent.event_type == "announcement",
         MarketEvent.created_at >= since,
         MarketEvent.category != "financial_results",
         MarketEvent.category != "impact_news",
-        MarketEvent.description.isnot(None),
+        or_(MarketEvent.ai_provider.is_(None), MarketEvent.ai_provider != "auto_trading"),
     ).all()
 
     routed = 0
     for event in candidates:
         try:
-            cls = classify(event.title or "", event.description or "", "")
-            if not cls["is_financial_result"]:
+            ann = announcement_from_event(db, event)
+            if ann is None:
                 continue
-
-            ann = type("LateAnn", (), {
-                "symbol": event.symbol, "company_name": event.company_name,
-                "exchange": event.source, "title": event.title or "",
-                "description": event.description or "", "url": event.url,
-                "event_time": event.event_time, "isin": None,
-                "category_name": "",
-            })()
-            key = f"late:{(event.symbol or '').upper()}:{event.event_hash[:16]}"
-            route_financial_result(db, ann, event, key)
-            routed += 1
-            logger.info(
-                f"🔁 [LATE BODY] {event.symbol} became a result once its description "
-                f"arrived — '{(event.title or '')[:50]}'"
-            )
+            outcome = reconsider_event(db, ann, event)
+            if outcome == "result":
+                routed += 1
+                logger.info(
+                    f"🔁 [LATE BODY] {event.symbol} ({(event.source or '').upper()}) became a "
+                    f"result once its description arrived — '{(event.title or '')[:50]}'"
+                )
         except Exception as e:
             db.rollback()
             logger.debug(f"Late-body recheck failed for {event.symbol}: {e}")

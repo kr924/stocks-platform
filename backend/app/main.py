@@ -553,6 +553,14 @@ def _run_other_nse_bse_scraper():
         try:
             fetch_bulk_block_deals(db)
             fetch_board_meetings(db)
+            # BSE's own results calendar, so the view and the hub's "reports
+            # today" check cover BSE filers, not only NSE's. Self-throttled to
+            # every 30 minutes.
+            try:
+                from app.services.results_calendar import fetch_bse_results_calendar
+                fetch_bse_results_calendar(db)
+            except Exception as cal_err:
+                logger.error(f"BSE results calendar error: {cal_err}")
             fetch_insider_trading(db)
             fetch_financial_results(db)
         finally:

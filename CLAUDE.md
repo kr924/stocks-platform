@@ -39,7 +39,7 @@ endpoints. One fetch per cycle (NSE and BSE concurrently), fanned out in latency
 order:
 
 1. **Trading engine** — `trade_nse_poller.handle_announcements()`, armed-target
-   matching. Must stay first.
+   matching, on **both exchanges**. Must stay first.
 2. **Results routing** — `results_router.route_financial_result()`.
 3. **Intelligence feed** — news-impact classification, persisted as MarketEvent.
 
@@ -102,12 +102,64 @@ suppresses the second and later prompts within 30 days. It reads `market_events`
 not the prompts — prompts are purged after 72h and cannot answer a question
 about the last month.
 
+### Arming buys on the first filing, on either exchange
+
+The engine is handed every normalised announcement, NSE and BSE, earliest
+first. A target armed as `ELECON` matches BSE's `505700` and the other way
+round (`_config_identifiers` via the registry). Before a trade is scheduled the
+target is claimed with a conditional `UPDATE ... WHERE status='armed'`
+(`_claim_config`); exactly one caller wins, so the board outcome, the results
+PDF and the other exchange's copy cannot buy a second time — even when they
+arrive in the same fetch or from the PDF-probe thread. The old guard was an
+in-memory set keyed on the subject, which two exchanges' different subjects
+walked straight through. `_is_armed` counts `triggered` as armed so routing
+does not raise an order prompt for the filing that just bought.
+
+### Results hiding in the PDF
+
+On 14 Oct 2026 Elecon filed on BSE at 13:16:30: subject "Board Meeting Outcome
+for Outcome Of Board Meeting", body "Outcome of the board meeting is
+attached." Nothing to classify, so it went in as news; NSE's copy at 13:19:48
+said "financial results" in its body and became the prompt. The results were
+on page one of BSE's PDF.
+
+Now, for a company **on today's results calendar** (either exchange), a filing
+that `could_carry_result` (board outcome or Reg-30 boilerplate that survives
+the forward-looking / hard-negative / non-result-subcategory gates) is queued
+for `results_pdf_probe`: download (<=40 MB, 45 s budget — outcome PDFs bundle
+the full results, Elecon's was 11 MB), read page one's text layer, Tesseract if
+it has none, and `pdf_text_confirms_result` decides — results language,
+done-not-agenda wording, and the same audited-only exclusion as gate 4. A
+confirmed filing goes through `exchange_hub.promote_to_result`: dedup claim ->
+trading engine -> routing, the same order as a filing recognised on sight. Two
+workers; one probe per filing per process. Companies not reporting today are
+never probed.
+
+### The results calendar is both exchanges
+
+`services/results_calendar.py` adds BSE's Forthcoming Results list
+(`api.bseindia.com/BseIndiaAPI/api/Corpforthresults/w`, ~400 rows, one month
+ahead) as `board_meeting` events, every 30 minutes from the slow scraper. It is
+called **directly** — the worker proxy is pinned to the announcements endpoint
+and would answer this URL's query with announcements. `collect_results_calendar`
+merges NSE's calendar, BSE's calendar and BSE intimations into one row per
+company with an `exchanges` list; the view and the hub's "reports today" check
+both read it. The window and the results-purpose test now run *before* picking
+a row per company — a fundraising meeting loaded first used to hide the same
+company's results meeting.
+
 ### NSE fills in the body after the subject
 
 NSE publishes `Outcome of Board Meeting` with an empty description and fills it
 minutes later, so a filing can *become* a result after we first saw it. 94 rows
-sat in that state. `recheck_late_bodies()` re-asks the question every 2 minutes
-for the last 6 hours. Do not backfill the classification instead — that claims
+sat in that state. The body is not part of the event hash, so the filled-in copy
+used to be dropped as a duplicate and the stored row kept its empty body — the
+recheck was re-reading text that could never change. The hub now refreshes the
+stored body when it changes and re-asks at once (`reconsider_event`);
+`recheck_late_bodies()` every 2 minutes over 6 hours is the safety net. It
+rebuilds the full announcement from `raw_data` (so the BSE subcategory, scrip
+code and ISIN count), claims through the real cross-exchange dedup instead of
+its own `late:` key, and offers the result to armed targets. Do not backfill the classification instead — that claims
 knowledge we did not have at the decision moment and inflates any backtest.
 
 ### The 09:00-15:30 window
@@ -624,11 +676,10 @@ repo (a stray `results_announcements.csv` in the root is a leftover, safe to del
   the numbers. An OpenRouter key is the cheap fix (~$0.0011/filing).
 - **Secrets are baked into the Docker image** — see the `.env` note above. Wants
   a `.dockerignore` and `load_dotenv(override=False)`.
-- **The earnings calendar is NSE-heavy.** BSE has no board-meeting API we can
-  reach (every path redirects), so BSE meetings are read from the announcement
-  feed's "Board Meeting" subcategory, where the date exists only in prose and
-  parses 85% of the time. Coverage of actual filers was 99% NSE / 25% BSE before
-  this; the next results season is the real test.
+- **BSE's results calendar is reachable after all** — `Corpforthresults/w`
+  (see "The results calendar is both exchanges"). Not yet verified from the VM;
+  check `docker logs stocks-app | grep "BSE results calendar"` after deploy.
+  BSE intimations from the announcement feed are still read as a fallback.
 - **A named Cloudflare tunnel** would end the URL rotation for good. Needs a
   Cloudflare account with a domain; the server side is quick once that exists.
 - **Rotated scans still defeat the extractor.** The cascade now finds the right
