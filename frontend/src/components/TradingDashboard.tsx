@@ -1011,7 +1011,9 @@ export function TradingDashboard() {
   const [pendingSearch, setPendingSearch] = useState("");
   // AI detail is collapsed by default: on a heavy results day this panel carries
   // 170+ cards, and a five-row metric table on each buries the order controls.
-  const [expandedResults, setExpandedResults] = useState<Record<number, boolean>>({});
+  // Order Decisions is a list beside one open detail pane. The selected id is
+  // kept across refreshes so a new filing landing does not move the view.
+  const [selectedResultId, setSelectedResultId] = useState<number | null>(null);
   const [pendingCategory, setPendingCategory] = useState<PromptCategory>("results");
   // Per-card: which extraction tab is showing, and which model a re-analysis
   // would use. Keyed by prompt id so opening one card does not reset another.
@@ -1566,6 +1568,18 @@ export function TradingDashboard() {
       (p.tracking_ref || "").toLowerCase().includes(q)
     );
   }, [livePendingResults, pendingCategory, pendingSearch]);
+
+  const selectedPending = useMemo(
+    () => visiblePendingResults.find(p => p.id === selectedResultId) || visiblePendingResults[0] || null,
+    [visiblePendingResults, selectedResultId]);
+
+  const moveSelection = (step: number) => {
+    if (visiblePendingResults.length === 0) return;
+    const at = Math.max(0, visiblePendingResults.findIndex(p => p.id === selectedPending?.id));
+    const next = visiblePendingResults[Math.min(visiblePendingResults.length - 1, Math.max(0, at + step))];
+    setSelectedResultId(next.id);
+    try { document.getElementById(`od-row-${next.id}`)?.scrollIntoView({ block: "nearest" }); } catch { /* ignore */ }
+  };
 
   /**
    * Today's filings grouped by the hour they were announced, each symbol
@@ -2799,25 +2813,114 @@ export function TradingDashboard() {
           </div>
         )}
 
-        {/* Capped height: a heavy results day can produce hundreds of prompts,
-            and the panel must not push the rest of the dashboard off-screen. */}
-        <div style={{
-          display: "flex", flexDirection: "column", gap: "12px",
-          maxHeight: "560px", overflowY: "auto", paddingRight: "6px",
-        }}>
-          {visiblePendingResults.length === 0 && (
-            <div style={{ padding: "18px", textAlign: "center", color: "var(--text-muted)", fontSize: "12px" }}>
-              {pendingSearch.trim()
-                ? `No ${CATEGORY_LABEL[pendingCategory].toLowerCase()} match "${pendingSearch}".`
-                : `No ${CATEGORY_LABEL[pendingCategory].toLowerCase()} awaiting a decision on this date.`}
-            </div>
-          )}
-          {visiblePendingResults.map(pending => {
+        {/* A list beside one open detail pane. The list is the at-a-glance
+            view — every filing on one line or two, its YoY numbers and move —
+            and scrolls on its own; the pane shows everything about the
+            selected filing at once, with nothing to expand. Arrow keys move
+            through the list. Stacks on a narrow screen. */}
+        <style>{`
+          .od-split{display:grid;grid-template-columns:minmax(260px,340px) minmax(0,1fr);gap:12px;height:min(78vh,860px)}
+          .od-list{overflow-y:auto;border:1px solid rgba(216,174,100,.16);border-radius:10px;background:rgba(20,23,28,.45);outline:none}
+          .od-list:focus-visible{box-shadow:0 0 0 2px rgba(216,174,100,.35)}
+          .od-detail{overflow-y:auto;min-width:0;padding-right:4px;scroll-behavior:smooth}
+          .od-row{display:block;width:100%;text-align:left;background:transparent;border:none;border-bottom:1px solid rgba(255,255,255,.05);border-left:3px solid transparent;padding:8px 10px;cursor:pointer;color:inherit}
+          .od-row:hover{background:rgba(255,255,255,.035)}
+          .od-row.sel{background:rgba(216,174,100,.10);border-left-color:var(--warning)}
+          .od-chip{font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;white-space:nowrap}
+          @media (max-width: 900px){
+            .od-split{grid-template-columns:1fr;height:auto}
+            .od-list{max-height:42vh}
+            .od-detail{overflow:visible}
+          }
+        `}</style>
+        {visiblePendingResults.length === 0 && (
+          <div style={{ padding: "18px", textAlign: "center", color: "var(--text-muted)", fontSize: "12px" }}>
+            {pendingSearch.trim()
+              ? `No ${CATEGORY_LABEL[pendingCategory].toLowerCase()} match "${pendingSearch}".`
+              : `No ${CATEGORY_LABEL[pendingCategory].toLowerCase()} awaiting a decision on this date.`}
+          </div>
+        )}
+        {visiblePendingResults.length > 0 && (
+        <div className="od-split">
+          <div className="od-list" tabIndex={0} aria-label="Filings"
+            onKeyDown={e => {
+              if (e.key === "ArrowDown" || e.key === "j") { e.preventDefault(); moveSelection(1); }
+              if (e.key === "ArrowUp" || e.key === "k") { e.preventDefault(); moveSelection(-1); }
+            }}>
+            {visiblePendingResults.map(p => {
+              const q = marketQuotesMap[p.symbol.toUpperCase()] || {};
+              const base = p.price_at_announcement;
+              const since = q.last_price && base ? ((q.last_price - base) / base) * 100 : null;
+              const day = q.change ?? p.stored_price?.change_pct ?? null;
+              const move = since ?? day;
+              const iso = p.announced_at || p.event_time || p.ingested_at;
+              const when = iso ? new Date(iso.endsWith("Z") || iso.includes("+") ? iso : iso + "Z") : null;
+              const hhmm = when && !isNaN(when.getTime())
+                ? `${String(when.getHours()).padStart(2, "0")}:${String(when.getMinutes()).padStart(2, "0")}` : "";
+              const rows = Array.isArray(p.comparison) ? p.comparison : [];
+              const yoyOf = (k: string) => {
+                const r = rows.find(x => x.key === k || x.label === (k === "pat" ? "Profit (PAT)" : "Revenue"));
+                return r ? r.actual_yoy : null;
+              };
+              const rev = yoyOf("revenue"), pat = yoyOf("pat");
+              const pctTxt = (v: number | null | undefined) => v == null ? "n/a" : `${v > 0 ? "+" : ""}${v.toFixed(1)}%`;
+              const pctCol = (v: number | null | undefined) => v == null ? "var(--text-faint)" : v > 0 ? "var(--positive)" : v < 0 ? "var(--negative)" : "var(--text-muted)";
+              const sig = p.screener_signal;
+              const aiSug = p.ai_status === "done" && p.ai_analysis ? (p.ai_analysis.ai_suggestion || "NA") : null;
+              const isRes = categoryOf(p) === "results";
+              const sel = selectedPending?.id === p.id;
+              return (
+                <button key={p.id} id={`od-row-${p.id}`} className={`od-row${sel ? " sel" : ""}`}
+                  onClick={() => setSelectedResultId(p.id)}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                    <span style={{ fontSize: "13px", fontWeight: 800, color: p.position ? "var(--accent)" : "var(--text-primary)" }}>{p.symbol}</span>
+                    <span className="od-chip" style={{ color: p.exchange === "nse" ? "var(--accent)" : "var(--ai)", background: "rgba(255,255,255,.05)" }}>
+                      {(p.exchange || "").toUpperCase()}
+                    </span>
+                    {p.position && <span className="od-chip" style={{ color: "var(--accent)", background: "rgba(127,166,225,.12)" }}>ORDERED</span>}
+                    {p.paused && <span className="od-chip" style={{ color: "var(--text-muted)", background: "rgba(255,255,255,.05)" }}>PAUSED</span>}
+                    <span style={{ marginLeft: "auto", fontSize: "12px", fontWeight: 700, color: pctCol(move) }}
+                      title={since != null ? "Since the result" : "Day change"}>
+                      {move == null ? "—" : `${move > 0 ? "+" : ""}${move.toFixed(1)}%`}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "3px", fontSize: "10px", color: "var(--text-muted)" }}>
+                    <span>{hhmm}</span>
+                    {isRes ? (
+                      <>
+                        <span>Rev <b style={{ color: pctCol(rev) }}>{pctTxt(rev)}</b></span>
+                        <span>PAT <b style={{ color: pctCol(pat) }}>{pctTxt(pat)}</b></span>
+                      </>
+                    ) : (
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {(p.kind || "").replace(/_/g, " ")}
+                      </span>
+                    )}
+                    <span style={{ marginLeft: "auto", display: "flex", gap: "4px" }}>
+                      {isRes && sig && (
+                        <span className="od-chip" title={sig.reason}
+                          style={{ color: sig.tone === "pos" ? "var(--positive)" : sig.tone === "neg" ? "var(--negative)" : "var(--text-muted)",
+                                   background: sig.tone === "pos" ? "rgba(91,190,147,.10)" : sig.tone === "neg" ? "rgba(226,141,131,.10)" : "rgba(255,255,255,.05)" }}>
+                          YoY {sig.label}
+                        </span>
+                      )}
+                      {aiSug && aiSug !== "NA" && (
+                        <span className="od-chip" style={{ color: "var(--ai)", background: "var(--ai-bg)" }}>AI {aiSug}</span>
+                      )}
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          <div className="od-detail">
+          {(selectedPending ? [selectedPending] : []).map(pending => {
             const form = getResultForm(pending.id);
             const busy = !!actionLoading[`result_${pending.id}`];
             const ai = pending.ai_analysis;
             const quote = marketQuotesMap[pending.symbol.toUpperCase()] || {};
-            const isOpen = !!expandedResults[pending.id];
+            // The detail pane shows one filing, so its analysis is always open.
+            const isOpen = true;
             // Only a quarterly filing has figures to read. Impact news gets no
             // Screener lookup and no earnings AI — asking would spend a
             // premium call to be told there are no numbers in an order win.
@@ -3094,20 +3197,11 @@ export function TradingDashboard() {
                     all: there are no quarterly figures to extract. */}
                 <div style={{ marginTop: "10px", paddingTop: "9px", borderTop: "1px solid var(--border-subtle)",
                               display: isResult ? undefined : "none" }}>
-                  <button
-                    onClick={() => setExpandedResults(prev => ({ ...prev, [pending.id]: !prev[pending.id] }))}
+                  <div
                     style={{
                       display: "flex", alignItems: "center", gap: "8px", width: "100%",
-                      background: "transparent", border: "none", padding: 0,
-                      cursor: "pointer", textAlign: "left", flexWrap: "wrap",
+                      flexWrap: "wrap",
                     }}>
-                    <ChevronRight
-                      size={13}
-                      style={{
-                        color: "var(--ai)", flexShrink: 0,
-                        transform: isOpen ? "rotate(90deg)" : "none",
-                        transition: "transform 0.15s",
-                      }} />
                     <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--ai)" }}>EARNINGS ANALYSIS</span>
 
                     {pending.ai_status === "done" && ai ? (
@@ -3134,10 +3228,7 @@ export function TradingDashboard() {
                       </span>
                     )}
 
-                    <span style={{ marginLeft: "auto", fontSize: "10px", color: "var(--text-faint)" }}>
-                      {isOpen ? "hide" : "details"}
-                    </span>
-                  </button>
+                  </div>
 
                   {isOpen && (
                     <CardBoundary label="This analysis">
@@ -3439,7 +3530,9 @@ export function TradingDashboard() {
               </div>
             );
           })}
+          </div>
         </div>
+        )}
       </div>
 
       {/* The Results Digest panel used to live here. It was a second list

@@ -293,6 +293,15 @@ there is nothing for Screener to publish and nothing for the extractor to read.
 Enforced server-side too — `_attach_screener` skips non-results and
 `/reanalyse` refuses them with a reason.
 
+**A list beside one open pane, not a stack of collapsible cards.** The left
+column lists every filing for the day in a line or two — symbol, exchange,
+time, revenue and PAT YoY, the YoY verdict, AI verdict, move since the result —
+and scrolls on its own (↑/↓ or j/k move through it). The right pane shows the
+selected filing in full: prices, order form, the like-for-like table and both
+suggestion cards, nothing to expand. It replaced a 560 px scroll box of cards,
+each with its own collapsible analysis — a scroll inside a scroll, and a click
+per company to see the numbers. Stacks under 900 px.
+
 **Pause, not dismiss.** Pausing stops a row being quoted and leaves it in place
 with its last price; its symbol leaves the quote batch, which is where the
 metered Upstox allowance is spent. Dismiss removed the card outright, the wrong
