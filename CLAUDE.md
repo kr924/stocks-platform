@@ -11,14 +11,37 @@ anything in the results pipeline.
 
 ## Deploy
 
-There is no CI. Push to `main`, then rebuild on the VM:
+**Pushing to `main` is the deploy.** `ops/auto_deploy.sh` runs every 5 minutes
+on the VM under the `stocks-auto-deploy` systemd timer. When `origin/main` has
+moved since the last successful deploy it fast-forwards the checkout, builds
+the image beside the running container, swaps it in, and health-checks `/` and
+`/api/trading/poller/status`. Unhealthy within 2 minutes → the previous image
+and commit are restored and that commit is not retried until `main` moves
+again. Outcomes go to Telegram.
+
+- It **never deploys Mon–Fri 09:00–15:35 IST** — a restart mid-session drops
+  announcement polling and armed-target matching. A push during the session
+  goes live at ~15:35. `bash ops/auto_deploy.sh --force` on the VM overrides.
+- It **refuses** if tracked files on the VM were edited by hand, or if `main`
+  is not a fast-forward of the VM checkout. Fix on the VM, then it resumes.
+- State lives in `~/.stocks-deploy/` (`deployed`, `failed`); the log is
+  `~/stocks/deploy.log`. `bash ops/auto_deploy.sh --status` shows both.
+
+One-time install (already done if `systemctl list-timers | grep stocks` shows it):
 
 ```bash
 ssh -i ~/.ssh/oci_key ubuntu@129.159.23.190
+cd ~/stocks && git pull origin main && sudo bash ops/install_auto_deploy.sh
+```
+
+Manual deploy, if the timer is ever removed (`--uninstall`):
+
+```bash
 cd ~/stocks && git pull origin main
 sudo docker build -t stocks-app . && sudo docker rm -f stocks-app
 sudo docker run -d --name stocks-app --restart always --network host \
   --env-file ~/stocks/backend/.env \
+  -v ~/stocks/backend/.env:/app/backend/.env:ro \
   -v ~/stocks/backend/market_tracker.db:/app/backend/market_tracker.db stocks-app
 ```
 
