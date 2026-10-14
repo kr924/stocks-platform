@@ -167,6 +167,37 @@ def accounts(cfg: dict, model_override: Optional[str] = None) -> dict:
             "missing": None}
 
 
+# Premium is switched off at 15:25 IST each day: the session is ending, and a
+# filing after that has no market left to trade into, so a paid model reading
+# it buys nothing. Five minutes before the 15:30 close so a filing landing in
+# the last minutes is not left mid-analysis on a model about to be withdrawn.
+PREMIUM_OFF_AT = (15, 25)
+
+
+def premium_auto_off(now_ist) -> bool:
+    """
+    Called every scheduler tick. The first tick at or after 15:25 IST each day
+    turns premium off if it is on, and records the date whether or not it was
+    on. Turning premium back on by hand later the same day therefore sticks,
+    restarts included; it goes off again at the next day's 15:25.
+    Returns True when it switched premium off.
+    """
+    if (now_ist.hour, now_ist.minute) < PREMIUM_OFF_AT:
+        return False
+    from app.services.intel_config import get_intel_config
+    cfg = get_intel_config()
+    ai_cfg = cfg.auto_trading_ai
+    today = now_ist.strftime("%Y-%m-%d")
+    if ai_cfg.get("premium_auto_off_date") == today:
+        return False
+    was_on = bool(ai_cfg.get("premium_openrouter_enabled", True))
+    cfg.update_auto_trading_ai(premium_openrouter_enabled=False if was_on else None,
+                               premium_auto_off_date=today)
+    if was_on:
+        logger.info("Premium OpenRouter switched off at 15:25 IST; free account until it is switched back on")
+    return was_on
+
+
 def mask(key: str) -> str:
     """What the settings screen shows for a stored key: enough to recognise it."""
     k = _clean_key(key)

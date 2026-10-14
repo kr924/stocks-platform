@@ -382,7 +382,8 @@ class IntelConfig:
     
     def update_auto_trading_ai(self, custom_api_url: str = None, premium_openrouter_api_key: str = None,
                                premium_openrouter_model: str = None, premium_openrouter_enabled: bool = None,
-                               free_openrouter_api_key: str = None, free_openrouter_model: str = None):
+                               free_openrouter_api_key: str = None, free_openrouter_model: str = None,
+                               premium_auto_off_date: str = None):
         """
         Update auto_trading_ai settings in memory, YAML, and persistent database.
         None leaves a field as it is. A key that arrives masked ("••••abcd", as
@@ -404,6 +405,8 @@ class IntelConfig:
             ai_cfg["free_openrouter_api_key"] = free_openrouter_api_key.strip()
         if free_openrouter_model is not None:
             ai_cfg["free_openrouter_model"] = free_openrouter_model.strip()
+        if premium_auto_off_date is not None:
+            ai_cfg["premium_auto_off_date"] = premium_auto_off_date
             
         self._config["auto_trading_ai"] = ai_cfg
 

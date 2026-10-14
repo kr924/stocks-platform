@@ -243,6 +243,14 @@ async def _intelligence_scheduler():
                     last_run["earnings_sync_date"] = today_str
                     await asyncio.to_thread(_run_earnings_sync)
 
+                # 15:25 — premium OpenRouter off for the day (once; a manual
+                # re-enable afterwards sticks, restarts included: the date is
+                # also kept in the saved settings).
+                if (now_ist.hour, now_ist.minute) >= (15, 25) and last_run.get("premium_off_date") != today_str:
+                    last_run["premium_off_date"] = today_str
+                    from app.services.openrouter_models import premium_auto_off
+                    await asyncio.to_thread(premium_auto_off, now_ist)
+
                 # 08:00 — publish the digest page and send the single alert
                 if now_ist.hour >= 8 and last_run.get("morning_digest_date") != today_str:
                     last_run["morning_digest_date"] = today_str

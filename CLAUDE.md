@@ -651,6 +651,12 @@ decided by `services/openrouter_models.accounts()`:
 | **OFF** | gemcall → free account. The premium key is never touched. |
 | Re-analyse with a model picked | that model alone, no gemcall: `:free` on the free key, anything else on the premium key whatever the switch says |
 
+- **Premium switches itself off at 15:25 IST** every day
+  (`openrouter_models.premium_auto_off`, from the scheduler). A filing after
+  that has no session left to trade into. The first tick past 15:25 records
+  the date in `premium_auto_off_date` whether premium was on or not, so turning
+  it back on by hand later that day sticks, restarts included, until the next
+  day's 15:25.
 - The switch and the premium model sit in the Order Decisions header; both
   keys and both models are in AI settings. `premium_openrouter_enabled`
   defaults to true, so a config saved before the switch existed behaves as it did.

@@ -2802,7 +2802,7 @@ export function TradingDashboard() {
                     role="switch"
                     aria-checked={on}
                     title={on
-                      ? "New results are analysed on the premium OpenRouter account. Click to switch to the free account."
+                      ? "New results are analysed on the premium OpenRouter account. Switches itself off at 15:25 IST each day. Click to switch to the free account now."
                       : `Premium is off: new results go to gemcall, then the free OpenRouter account (${freeLabel}). Click to use premium.`}
                     style={{
                       display: "inline-flex", alignItems: "center", gap: "6px",
@@ -4487,7 +4487,8 @@ export function TradingDashboard() {
                         </select>
                         <span style={hint}>
                           ON: every new result is analysed here first, before gemcall. OFF: this key is never used,
-                          except when you pick a paid model for one filing with Re-analyse.
+                          except when you pick a paid model for one filing with Re-analyse. Premium switches itself
+                          off at 15:25 IST each day; turning it back on after that holds until the next day's 15:25.
                         </span>
                       </div>
                     </div>
