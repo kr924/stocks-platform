@@ -206,7 +206,11 @@ def _build_rows(db: Session, pendings: List[PendingResultOrder],
                 extraction = None
         if is_result_row:
             lfl = build_like_for_like(db, p.symbol, p.event_time,
-                                      extraction=extraction, screener=screener)
+                                      extraction=extraction, screener=screener,
+                                      # Only this filing's own analysis: the fallback above can
+                                      # find the company's last log, from another quarter.
+                                      ai_metrics=ai_metrics if (log and log.extraction_ok
+                                                                and p.ai_log_id == log.id) else None)
         else:
             lfl = None
 
@@ -229,6 +233,10 @@ def _build_rows(db: Session, pendings: List[PendingResultOrder],
                 "actual_yoy": r["yoy_pct"],
                 "actual_qoq": r["qoq_pct"],
                 "current_note": r["current_note"],
+                # The AI's reading of the same quarter, against the same bases.
+                "ai_current": r.get("ai_current"),
+                "ai_yoy_pct": r.get("ai_yoy_pct"),
+                "ai_qoq_pct": r.get("ai_qoq_pct"),
                 "yoy_note": r["yoy_note"],
                 "qoq_note": r["qoq_note"],
                 "ai_yoy": (ai_metrics.get(key) or {}).get("yoy_change_pct", "NA"),
@@ -297,6 +305,11 @@ th:first-child{text-align:left}
 td{text-align:right;padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.04);
 font-variant-numeric:tabular-nums}
 td:first-child{text-align:left;font-weight:600}
+.reads{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+@media(max-width:640px){.reads{grid-template-columns:1fr}}
+.read{background:var(--s2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px}
+.read .rh{font-size:11px;color:var(--tx2);margin-bottom:4px}
+.read .ok,.read .bad{margin-top:2px}
 .na{color:var(--na);font-style:italic}
 .ok{color:var(--pos)}.bad{color:var(--neg)}.unk{color:var(--na)}
 .src{font-size:10px;color:var(--tx3);margin-top:8px}
@@ -357,13 +370,32 @@ def render_html(rows: List[dict], for_date: str) -> str:
                 f"<td>{_pct_cell(c.get('actual_yoy'), c.get('yoy_note'))}</td>"
                 f"<td>{pq}</td>"
                 f"<td>{_pct_cell(c.get('actual_qoq'), c.get('qoq_note'))}</td>"
-                f"<td>{ai_disp}</td>"
-                f"<td>{verdict_cell}</td>"
                 f"</tr>"
             )
         q, yq, qq = lfl.get("quarter") or "this qtr", lfl.get("yoy_quarter") or "year ago", lfl.get("qoq_quarter") or "prev qtr"
         cur_src = {"screener": "Screener", "filing": "filing"}.get(lfl.get("current_source") or "", "")
         lfl_note = (f'<div class="src na">{e(lfl["message"])}</div>' if lfl.get("message") else "")
+
+        # The two reads, side by side: the rule-based one on the figures above,
+        # and the AI's, which also reads the filing's prose.
+        def _points(items, cls, mark):
+            return "".join(f'<div class="{cls}">{mark} {e(t)}</div>' for t in (items or []))
+        nr = lfl.get("numbers_read") or {}
+        nr_html = (f'<div class="read"><div class="rh">Figures read · <b>{e(nr.get("label", "NA"))}</b></div>'
+                   f'<div class="na">{e(nr.get("reason") or nr.get("note") or "")}</div>'
+                   f'{_points(nr.get("positives"), "ok", "+")}{_points(nr.get("negatives"), "bad", "−")}</div>')
+        hl = {}
+        if log and getattr(log, "highlights_json", None):
+            try:
+                hl = json.loads(log.highlights_json) or {}
+            except Exception:
+                hl = {}
+        ai_html = (f'<div class="read"><div class="rh">AI read · <b>{e(verdict)}</b></div>'
+                   + (f'<div class="na">{e((log.ai_summary or "")[:400])}</div>' if r["analysed"] and log else
+                      '<div class="na">not analysed — filed outside 09:00-15:30</div>')
+                   + _points(hl.get("positives"), "ok", "+") + _points(hl.get("negatives"), "bad", "−")
+                   + '</div>')
+        reads = f'<div class="reads">{nr_html}{ai_html}</div>'
 
         src = (f'<a href="{e(sc["source_url"])}" target="_blank">screener.in</a> · '
                f'quarter {e(sc.get("quarter") or "?")}' if sc.get("ok")
@@ -394,12 +426,12 @@ def render_html(rows: List[dict], for_date: str) -> str:
       <th></th><th title="{e('Source: ' + (cur_src or 'none'))}">{e(q)}{(' · ' + e(cur_src)) if cur_src else ''}</th>
       <th title="Screener, same quarter last year">{e(yq)}</th><th>YoY</th>
       <th title="Screener, previous quarter">{e(qq)}</th><th>QoQ</th>
-      <th>Our AI</th><th>AI vs {e(q)}</th>
     </tr></thead>
     <tbody>{''.join(body)}</tbody>
   </table>
   {lfl_note}
-  <div class="src">{src} · <b>Read</b> {e(sig['reason'])}</div>
+  {reads}
+  <div class="src">{src}</div>
 </div>""")
 
     content = "".join(cards) if cards else '<div class="empty">No results were filed after yesterday\'s cutoff.</div>'
@@ -417,7 +449,7 @@ def render_html(rows: List[dict], for_date: str) -> str:
 <div class="legend">
   <span>Each filing is compared with the <b>same quarter last year</b> (YoY) and the <b>quarter before</b> (QoQ) on Screener — never with a different quarter</span>
   <span><b style="color:var(--na)">n/a</b> Screener has no figure for that quarter, so no change is shown</span>
-  <span><b style="color:var(--pos)">match</b> our AI within 2% of the quarter's figure</span>
+  <span><b>Figures read</b> rules applied to the table · <b>AI read</b> the model's reading of the whole filing</span>
   <span><b style="color:var(--na)">—</b> one side missing, so no comparison is possible</span>
   <span><b style="color:var(--na)">not analysed</b> filed outside 09:00-15:30; no AI is run on those</span>
   <span>All values in ₹ crore, consolidated where available. Expenses include interest and depreciation, as filed</span>

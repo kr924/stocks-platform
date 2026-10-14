@@ -711,6 +711,13 @@ Document Extract / Content snippet:
 4. Set extraction_ok to true only if revenue.current_qtr AND pat.current_qtr are
    both real numbers (not "NA"). Otherwise set it to false and ai_suggestion "NA".
 
+5. positives / negatives: up to 4 short points each (one line, under 20 words)
+   on what THIS filing shows went well and badly — segment performance, margin
+   moves, exceptional or one-off items, provisions, debt, order book, guidance,
+   auditor qualifications. Each point must come from the document; cite the
+   figure where there is one. Do not restate the revenue/profit growth already
+   in the grid. Use an empty list rather than inventing a point.
+
 CRITICAL: Output ONLY raw JSON. No prose, no markdown fences, no preamble.
 
 {{
@@ -724,6 +731,8 @@ CRITICAL: Output ONLY raw JSON. No prose, no markdown fences, no preamble.
   "future_growth_outlook": "What management says about forward growth, or NA",
   "future_projected_numbers": "Specific forward guidance figures, or NA",
   "broker_estimates": "Broker expectations versus the actual print, or NA",
+  "positives": ["EBITDA margin up to 21.4% from 18.9% on lower raw material costs", "Order book ₹4,200 Cr, 1.8x revenue"],
+  "negatives": ["Exceptional loss of ₹12.5 Cr on asset write-down", "Finance cost up 34% after new borrowing"],
   "extraction_ok": true,
   "ai_suggestion": "BEATS ESTIMATES",
   "summary": "2-3 sentence executive summary comparing YoY performance and estimates",
@@ -864,6 +873,19 @@ CRITICAL: Output ONLY raw JSON. No prose, no markdown fences, no preamble.
     future_projected_numbers = _clean_cell(parsed_json.get("future_projected_numbers")) or "NA"
     broker_estimates = _clean_cell(parsed_json.get("broker_estimates")) or "NA"
 
+    def _points(key):
+        raw = parsed_json.get(key) if isinstance(parsed_json, dict) else None
+        if not isinstance(raw, list):
+            return []
+        out = []
+        for item in raw[:4]:
+            text = _clean_cell(item)
+            if text and text.upper() not in ("NA", "N/A", "NONE"):
+                out.append(text[:200])
+        return out
+
+    highlights = {"positives": _points("positives"), "negatives": _points("negatives")}
+
     # A verdict is only meaningful when the numbers behind it were extracted.
     # Anything uncertain must read "NA" rather than being dressed up as HOLD or
     # NEUTRAL, which a reader would otherwise act on as a real call.
@@ -893,6 +915,7 @@ CRITICAL: Output ONLY raw JSON. No prose, no markdown fences, no preamble.
         )
         revenue = expenses = other_income = operating_profit = pat_yoy = _cell_summary(metrics, "revenue")
         future_growth_outlook = future_projected_numbers = "NA"
+        highlights = {"positives": [], "negatives": []}
 
     # Guard against an analysis of the wrong company reaching the dashboard.
     elif parsed_json and not response_matches_company(ai_summary, symbol, company_name):
@@ -910,6 +933,7 @@ CRITICAL: Output ONLY raw JSON. No prose, no markdown fences, no preamble.
         )
         revenue = expenses = other_income = operating_profit = pat_yoy = _cell_summary(metrics, "revenue")
         future_growth_outlook = future_projected_numbers = "NA"
+        highlights = {"positives": [], "negatives": []}
 
     if ai_suggestion == "NA":
         # Do not let a sentiment leak a directional view the numbers cannot support.
@@ -965,6 +989,7 @@ CRITICAL: Output ONLY raw JSON. No prose, no markdown fences, no preamble.
                 future_growth_outlook=future_growth_outlook,
                 future_projected_numbers=future_projected_numbers,
                 extraction_ok=extraction_ok,
+                highlights_json=json.dumps(highlights),
             )
             db.add(log_entry)
             db.commit()

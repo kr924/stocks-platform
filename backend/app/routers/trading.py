@@ -151,6 +151,14 @@ def _serialize_order(o: TradeOrder) -> dict:
     }
 
 
+def _highlights(a: TradeAILog) -> dict:
+    try:
+        h = json.loads(getattr(a, "highlights_json", None) or "{}")
+    except Exception:
+        h = {}
+    return {"positives": h.get("positives") or [], "negatives": h.get("negatives") or []}
+
+
 def _serialize_ai_log(a: TradeAILog) -> dict:
     metrics = None
     if getattr(a, "metrics_json", None):
@@ -170,6 +178,8 @@ def _serialize_ai_log(a: TradeAILog) -> dict:
         "future_growth_outlook": getattr(a, "future_growth_outlook", None),
         "future_projected_numbers": getattr(a, "future_projected_numbers", None),
         "extraction_ok": bool(getattr(a, "extraction_ok", False)),
+        # What the filing says went well and badly, as the AI read it.
+        **_highlights(a),
         "validation": (json.loads(a.validation_json)
                        if getattr(a, "validation_json", None) else None),
         "provider": a.provider,

@@ -367,7 +367,7 @@ def _company_block(r: dict, st: dict) -> list:
     # before — never against whatever quarter Screener last published.
     head = ["", f"{q}" + (f" ({src})" if src else ""),
             lfl.get("yoy_quarter") or "Year ago", "YoY",
-            lfl.get("qoq_quarter") or "Prev qtr", "QoQ", "Our AI", "AI vs qtr"]
+            lfl.get("qoq_quarter") or "Prev qtr", "QoQ"]
     data = [head]
     styles = [
         ("BACKGROUND", (0, 0), (-1, 0), _HEAD_BG),
@@ -408,7 +408,6 @@ def _company_block(r: dict, st: dict) -> list:
             pct_cell(c.get("actual_yoy")),
             _num(c.get("prev_qtr")) if c.get("prev_qtr") is not None else "n/a",
             pct_cell(c.get("actual_qoq")),
-            ai_cell, var,
         ])
         for col, v in ((3, c.get("actual_yoy")), (5, c.get("actual_qoq"))):
             styles.append(("TEXTCOLOR", (col, i), (col, i),
@@ -416,15 +415,37 @@ def _company_block(r: dict, st: dict) -> list:
         for col, v in ((1, c.get("actual")), (2, c.get("year_ago")), (4, c.get("prev_qtr"))):
             if v is None:
                 styles.append(("TEXTCOLOR", (col, i), (col, i), _NA))
-        styles.append(("TEXTCOLOR", (7, i), (7, i), vcol))
-        if ai_cell in ("not analysed", "NA"):
-            styles.append(("TEXTCOLOR", (6, i), (6, i), _NA))
 
-    table = Table(data, colWidths=[24 * mm, 26 * mm, 19 * mm, 15 * mm, 19 * mm, 15 * mm, 27 * mm, 16 * mm])
+    table = Table(data, colWidths=[30 * mm, 30 * mm, 26 * mm, 22 * mm, 26 * mm, 22 * mm])
     table.setStyle(TableStyle(styles))
     flow.append(table)
     if lfl.get("message"):
         flow.append(Paragraph(_safe(lfl["message"]), st["small"]))
+
+    # The two reads: rules on the figures above, and the AI's reading of the
+    # whole filing.
+    nr = lfl.get("numbers_read") or {}
+    if nr:
+        flow.append(Paragraph(
+            f'<b>Figures read:</b> {_safe(nr.get("label", "NA"))} — '
+            f'<font color="#8b95a6">{_safe(nr.get("reason") or nr.get("note") or "")}</font>', st["meta"]))
+        for t in nr.get("positives") or []:
+            flow.append(Paragraph(f'<font color="#1a7f4f">+ {_safe(t)}</font>', st["small"]))
+        for t in nr.get("negatives") or []:
+            flow.append(Paragraph(f'<font color="#c23934">− {_safe(t)}</font>', st["small"]))
+    hl = {}
+    if log is not None and getattr(log, "highlights_json", None):
+        try:
+            import json as _json
+            hl = _json.loads(log.highlights_json) or {}
+        except Exception:
+            hl = {}
+    if analysed and (hl.get("positives") or hl.get("negatives")):
+        flow.append(Paragraph(f'<b>AI read:</b> {_safe(verdict)}', st["meta"]))
+        for t in hl.get("positives") or []:
+            flow.append(Paragraph(f'<font color="#1a7f4f">+ {_safe(t)}</font>', st["small"]))
+        for t in hl.get("negatives") or []:
+            flow.append(Paragraph(f'<font color="#c23934">− {_safe(t)}</font>', st["small"]))
 
     if sc.get("source_url"):
         flow.append(Paragraph(f'Screener: {sc["source_url"]}', st["small"]))

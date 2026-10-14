@@ -337,6 +337,17 @@ read was computed from them.
 - The digest's YoY BUY/SELL read (`screener_signal`) and `all_positive` run on
   these figures via `as_screener_shape`.
 
+**One table, two readings.** The panel shows a single like-for-like table under
+both tabs; only the current-quarter column changes — OCR (or Screener once it
+publishes the quarter) on the OCR tab, the AI's figures on the AI tab
+(`ai_current` / `ai_yoy_pct`, only from this filing's own analysis, never the
+company's last log). Below it, **two suggestion cards side by side**: *OCR ·
+figures* — `read_numbers()`, the YoY verdict plus positives/negatives computed
+from the table (growth, margin, costs vs revenue, other-income share), every
+line checkable against it — and *AI · filing* — the AI verdict and the
+`positives` / `negatives` it is now asked for, grounded in the document
+(`TradeAILog.highlights_json`). The digest page and PDF carry the same two reads.
+
 **The filing is read automatically** the moment a results prompt is created,
 intraday or not (`route_financial_result` → `run_extraction_async`). It is local
 CPU, unlike the AI. The job fetches Screener first and keeps it on the row. The

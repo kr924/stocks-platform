@@ -44,7 +44,13 @@ interface LikeForLike {
   yoy_available: boolean;
   qoq_available: boolean;
   current_available: boolean;
+  ai_available?: boolean;
   message: string;
+  // Rules applied to the figures: verdict plus positives and negatives.
+  numbers_read?: {
+    label: string; tone: string; reason: string;
+    positives: string[]; negatives: string[]; note: string; basis: string;
+  } | null;
 }
 
 interface DigestCompany {
@@ -69,6 +75,8 @@ interface DigestCompany {
     // the YoY / QoQ above. Null when Screener has no figure for that quarter.
     year_ago?: number | null; prev_qtr?: number | null;
     current_note?: string; yoy_note?: string; qoq_note?: string;
+    // The AI's reading of the same quarter, against the same two bases.
+    ai_current?: number | null; ai_yoy_pct?: number | null; ai_qoq_pct?: number | null;
     match: boolean | null; diff_pct: number | null;
   }[];
   like_for_like?: LikeForLike | null;
@@ -298,6 +306,9 @@ interface TradeAILog {
   future_projected_numbers?: string | null;
   extraction_ok?: boolean;
   validation?: { issues: string[]; hard_failures: number; reconciled: number; trustworthy: boolean } | null;
+  // What the filing itself shows went well and badly, as the AI read it.
+  positives?: string[];
+  negatives?: string[];
 }
 
 /** One labelled readout in the quote strip, matching the tracker's column head. */
@@ -605,29 +616,31 @@ function ValidationNotice({ v }: { v: TradeAILog["validation"] }) {
  * were rendering the same PendingResultOrder rows, and a second copy of this
  * table is a second place for the columns to drift.
  */
-function ScreenerComparison({ rows, lfl, analysed }: {
-  rows: DigestCompany["comparison"]; lfl?: LikeForLike | null; analysed: boolean;
+function ScreenerComparison({ rows, lfl, view }: {
+  rows: DigestCompany["comparison"]; lfl?: LikeForLike | null; view: "ai" | "ocr";
 }) {
   if (!rows || rows.length === 0) return null;
-  const na = (v: any) => !v || String(v).toUpperCase() === "NA";
   const fmt = (v: number | null | undefined) =>
     v == null ? null : v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const pctColor = (v: number | null | undefined) =>
     v == null ? "var(--text-faint)" : v > 0 ? "var(--positive)" : v < 0 ? "var(--negative)" : "var(--text-secondary)";
   const pct = (v: number | null | undefined) => v == null ? null : `${v > 0 ? "+" : ""}${v.toFixed(2)}%`;
   const q = lfl?.quarter || "This quarter";
-  const src = lfl?.current_source === "screener" ? "Screener" : lfl?.current_source === "filing" ? "filing" : "";
+  // Only the current quarter differs between the tabs: the OCR read of the
+  // filing (or Screener's own figure once published), or the AI's read. The
+  // year-ago and previous-quarter bases are Screener's either way.
+  const src = view === "ai" ? "AI"
+    : lfl?.current_source === "screener" ? "Screener" : lfl?.current_source === "filing" ? "OCR" : "";
   const head = ["", `${q}${src ? ` (${src})` : ""}`,
                 `${lfl?.yoy_quarter || "Year ago"} (Screener)`, "YoY %",
-                `${lfl?.qoq_quarter || "Prev qtr"} (Screener)`, "QoQ %",
-                "Our AI", `AI vs ${q}`];
+                `${lfl?.qoq_quarter || "Prev qtr"} (Screener)`, "QoQ %"];
   const cell = { padding: "4px 8px", textAlign: "right" as const, whiteSpace: "nowrap" as const };
   const missing = (title?: string) => (
     <span title={title || "numbers not available"} style={{ color: "var(--text-faint)", fontStyle: "italic" }}>n/a</span>
   );
   return (
     <div style={{ overflowX: "auto" }}>
-      <table style={{ borderCollapse: "collapse", fontSize: "11px", width: "100%", minWidth: "640px" }}>
+      <table style={{ borderCollapse: "collapse", fontSize: "11px", width: "100%", minWidth: "520px" }}>
         <thead>
           <tr>
             {head.map((h, i) => (
@@ -636,24 +649,59 @@ function ScreenerComparison({ rows, lfl, analysed }: {
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, ri) => (
-            <tr key={ri}>
-              <td style={{ padding: "4px 8px", fontWeight: 600, color: "var(--text-primary)", whiteSpace: "nowrap" }}>{row.label}</td>
-              <td style={{ ...cell, color: "var(--text-primary)" }}>{fmt(row.actual) ?? missing(row.current_note)}</td>
-              <td style={{ ...cell, color: "var(--text-secondary)" }}>{fmt(row.year_ago) ?? missing(row.yoy_note)}</td>
-              <td style={{ ...cell, fontWeight: 700, color: pctColor(row.actual_yoy) }}>{pct(row.actual_yoy) ?? missing(row.yoy_note)}</td>
-              <td style={{ ...cell, color: "var(--text-secondary)" }}>{fmt(row.prev_qtr) ?? missing(row.qoq_note)}</td>
-              <td style={{ ...cell, fontWeight: 700, color: pctColor(row.actual_qoq) }}>{pct(row.actual_qoq) ?? missing(row.qoq_note)}</td>
-              <td style={{ ...cell, color: !analysed || na(row.ai_text) ? "var(--text-faint)" : "var(--text-primary)", fontStyle: !analysed || na(row.ai_text) ? "italic" : "normal" }}>
-                {!analysed ? "not analysed" : (row.ai_text || "NA")}
-              </td>
-              <td style={{ ...cell, color: row.match === true ? "var(--positive)" : row.match === false ? "var(--negative)" : "var(--text-faint)" }}>
-                {row.match === true ? "match" : row.match === false ? `${row.diff_pct! > 0 ? "+" : ""}${row.diff_pct}%` : "—"}
-              </td>
-            </tr>
-          ))}
+          {rows.map((row, ri) => {
+            const cur = view === "ai" ? row.ai_current : row.actual;
+            const yoy = view === "ai" ? row.ai_yoy_pct : row.actual_yoy;
+            const qoq = view === "ai" ? row.ai_qoq_pct : row.actual_qoq;
+            const curNote = view === "ai" ? "the AI did not read this figure" : row.current_note;
+            return (
+              <tr key={ri}>
+                <td style={{ padding: "4px 8px", fontWeight: 600, color: "var(--text-primary)", whiteSpace: "nowrap" }}>{row.label}</td>
+                <td style={{ ...cell, color: "var(--text-primary)" }}>{fmt(cur) ?? missing(curNote)}</td>
+                <td style={{ ...cell, color: "var(--text-secondary)" }}>{fmt(row.year_ago) ?? missing(row.yoy_note)}</td>
+                <td style={{ ...cell, fontWeight: 700, color: pctColor(yoy) }}>{pct(yoy) ?? missing(cur == null ? curNote : row.yoy_note)}</td>
+                <td style={{ ...cell, color: "var(--text-secondary)" }}>{fmt(row.prev_qtr) ?? missing(row.qoq_note)}</td>
+                <td style={{ ...cell, fontWeight: 700, color: pctColor(qoq) }}>{pct(qoq) ?? missing(cur == null ? curNote : row.qoq_note)}</td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+
+/**
+ * One suggestion card: a verdict, a line of reasoning, and the positives and
+ * negatives behind it. Used twice, side by side — the rules applied to the
+ * figures, and the AI's reading of the whole filing.
+ */
+function ReadCard({ title, label, reason, positives, negatives, empty }: {
+  title: string; label: string; reason?: string | null;
+  positives?: string[] | null; negatives?: string[] | null; empty?: string;
+}) {
+  const up = (label || "").toUpperCase();
+  const tone = up.includes("BUY") || up.includes("BEAT") ? "var(--positive)"
+    : up.includes("SELL") || up.includes("MISS") ? "var(--negative)" : "var(--text-muted)";
+  const pos = Array.isArray(positives) ? positives : [];
+  const neg = Array.isArray(negatives) ? negatives : [];
+  return (
+    <div style={{ flex: "1 1 260px", minWidth: 0, background: "var(--surface-1)", border: "1px solid var(--border-subtle)", borderRadius: "8px", padding: "10px 12px" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginBottom: "4px" }}>
+        <span style={{ fontSize: "10px", fontWeight: 700, letterSpacing: "0.4px", color: "var(--text-muted)" }}>{title}</span>
+        <span style={{ fontSize: "12px", fontWeight: 800, color: tone }}>{label || "NA"}</span>
+      </div>
+      {reason && <div style={{ fontSize: "11px", color: "var(--text-secondary)", lineHeight: 1.5, marginBottom: "6px" }}>{reason}</div>}
+      {pos.map((t, i) => (
+        <div key={`p${i}`} style={{ fontSize: "11px", color: "var(--positive)", lineHeight: 1.5 }}>+ {t}</div>
+      ))}
+      {neg.map((t, i) => (
+        <div key={`n${i}`} style={{ fontSize: "11px", color: "var(--negative)", lineHeight: 1.5 }}>− {t}</div>
+      ))}
+      {pos.length === 0 && neg.length === 0 && empty && (
+        <div style={{ fontSize: "11px", color: "var(--text-faint)", fontStyle: "italic" }}>{empty}</div>
+      )}
     </div>
   );
 }
@@ -2840,7 +2888,7 @@ export function TradingDashboard() {
                     </span>
                   )}
                   {isResult && pending.screener_signal && (
-                    <span title={`Screener read: ${pending.screener_signal.reason}`}
+                    <span title={`This quarter vs the same quarter last year: ${pending.screener_signal.reason}`}
                       style={{
                         fontSize: "10px", fontWeight: 700, padding: "2px 7px", borderRadius: "4px",
                         color: pending.screener_signal.tone === "pos" ? "var(--positive)"
@@ -2848,7 +2896,7 @@ export function TradingDashboard() {
                         background: pending.screener_signal.tone === "pos" ? "rgba(91, 190, 147, 0.09)"
                           : pending.screener_signal.tone === "neg" ? "rgba(226, 141, 131, 0.09)" : "var(--surface-2)",
                       }}>
-                      SCREENER {pending.screener_signal.label}
+                      YoY {pending.screener_signal.label}
                     </span>
                   )}
                   {isResult && pending.all_positive && (
@@ -3213,7 +3261,10 @@ export function TradingDashboard() {
                                   </div>
                                 )}
 
-                                {Array.isArray(ex.comparisons) && ex.comparisons.length > 0 && (
+                                {/* Filing against Screener's figure for the same
+                                    quarter — only once Screener has published it;
+                                    before that every gap would be blank. */}
+                                {ex.covers_screener_quarter && Array.isArray(ex.comparisons) && ex.comparisons.length > 0 && (
                                   <div style={{ overflowX: "auto" }}>
                                     <table style={{ borderCollapse: "collapse", fontSize: "11px", width: "100%", minWidth: "440px" }}>
                                       <thead>
@@ -3296,17 +3347,7 @@ export function TradingDashboard() {
                           </div>
 
                           {pending.ai_status === "done" && ai ? (
-                            <div style={{ marginTop: "8px" }}>
-                              <MetricsTable metrics={ai.metrics} />
-                              <ValidationNotice v={ai.validation} />
-                              <div style={{ fontSize: "11px", color: "var(--text-secondary)", lineHeight: 1.55, marginTop: "8px" }}>{ai.ai_summary}</div>
-                              {(ai.future_growth_outlook || ai.future_projected_numbers) && (
-                                <div style={{ display: "flex", flexDirection: "column", gap: "3px", marginTop: "8px", fontSize: "10px", color: "var(--text-muted)" }}>
-                                  {ai.future_growth_outlook && <span><b style={{ color: "var(--text-primary)" }}>Outlook:</b> {ai.future_growth_outlook}</span>}
-                                  {ai.future_projected_numbers && <span><b style={{ color: "var(--text-primary)" }}>Projected:</b> {ai.future_projected_numbers}</span>}
-                                </div>
-                              )}
-                            </div>
+                            <ValidationNotice v={ai.validation} />
                           ) : pending.ai_status === "failed" ? (
                             <div style={{ fontSize: "11px", color: "var(--negative-strong)", marginTop: "8px" }}>
                               AI analysis failed — place the order on the filing itself, or try another model above.
@@ -3338,11 +3379,52 @@ export function TradingDashboard() {
                                     : `Screener unavailable — ${pending.screener?.error || "no data"}`}
                                 </div>
                               )}
+                              {tab === "ai" && !(pending.ai_status === "done" && ai && pending.like_for_like?.ai_available) && (
+                                <div style={{ fontSize: "10px", color: "var(--text-muted)", marginBottom: "6px" }}>
+                                  {pending.ai_status === "done" && ai
+                                    ? "The AI did not read usable figures from this filing — switch to OCR for the filing's own numbers."
+                                    : pending.deferred
+                                      ? "Not analysed by the AI (filed after the cutoff) — the OCR tab has the filing's own numbers."
+                                      : "AI figures appear here when the analysis finishes."}
+                                </div>
+                              )}
                               <ScreenerComparison
                                 rows={pending.comparison}
                                 lfl={pending.like_for_like}
-                                analysed={pending.ai_status === "done" && !!ai}
+                                view={tab}
                               />
+
+                              {/* The two reads next to each other: rules on the
+                                  figures, and the AI's reading of the filing. */}
+                              <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--info)", margin: "12px 0 6px", letterSpacing: "0.4px" }}>
+                                SUGGESTIONS
+                              </div>
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
+                                <ReadCard
+                                  title="OCR · FIGURES"
+                                  label={pending.like_for_like?.numbers_read?.label || "NA"}
+                                  reason={pending.like_for_like?.numbers_read?.reason}
+                                  positives={pending.like_for_like?.numbers_read?.positives}
+                                  negatives={pending.like_for_like?.numbers_read?.negatives}
+                                  empty={pending.like_for_like?.numbers_read?.note || "No figures to read yet."}
+                                />
+                                <ReadCard
+                                  title="AI · FILING"
+                                  label={pending.ai_status === "done" && ai ? (ai.ai_suggestion || "NA") : "NA"}
+                                  reason={pending.ai_status === "done" && ai
+                                    ? [ai.ai_summary,
+                                       ai.future_growth_outlook && ai.future_growth_outlook !== "NA" ? `Outlook: ${ai.future_growth_outlook}` : ""]
+                                        .filter(Boolean).join(" ")
+                                    : null}
+                                  positives={pending.ai_status === "done" && ai ? ai.positives : []}
+                                  negatives={pending.ai_status === "done" && ai ? ai.negatives : []}
+                                  empty={pending.ai_status === "done" && ai
+                                    ? "The AI listed no positives or negatives for this filing."
+                                    : pending.ai_status === "failed" ? "AI analysis failed."
+                                    : pending.deferred ? "Not analysed — filed after the 15:30 cutoff."
+                                    : "Waiting for the AI analysis."}
+                                />
+                              </div>
                               {pending.screener?.source_url && (
                                 <div style={{ fontSize: "10px", color: "var(--text-faint)", marginTop: "6px" }}>
                                   <a href={pending.screener.source_url} target="_blank" rel="noreferrer" style={{ color: "var(--text-muted)" }}>screener.in</a>

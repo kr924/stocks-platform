@@ -213,8 +213,21 @@ def filing_quarter(extraction: Optional[dict], event_time: Optional[datetime]) -
     return inferred, "announcement date", False
 
 
+def _ai_number(cell) -> Optional[float]:
+    if cell is None:
+        return None
+    if isinstance(cell, (int, float)):
+        return float(cell)
+    try:
+        from app.services.screener_quarters import parse_ai_value
+        return parse_ai_value(str(cell))
+    except Exception:
+        return None
+
+
 def build(db, symbol: str, event_time: Optional[datetime],
-          extraction: Optional[dict] = None, screener: Optional[dict] = None) -> dict:
+          extraction: Optional[dict] = None, screener: Optional[dict] = None,
+          ai_metrics: Optional[dict] = None) -> dict:
     """
     The filing's quarter, its figures, and YoY / QoQ against Screener's
     same-quarter-last-year and previous-quarter figures.
@@ -263,9 +276,17 @@ def build(db, symbol: str, event_time: Optional[datetime],
                 return f"{base_q} base under ₹1 Cr" if abs(base) < MIN_BASE else ""
             return ""
 
+        # The AI's reading of the same quarter, against the same two bases.
+        # Only the current figure differs between the two views; the bases
+        # are Screener's either way.
+        ai_cur = _ai_number(((ai_metrics or {}).get(m) or {}).get("current_qtr"))
+
         rows.append({
             "key": m,
             "label": LABELS[m],
+            "ai_current": ai_cur,
+            "ai_yoy_pct": _pct(ai_cur, ya),
+            "ai_qoq_pct": _pct(ai_cur, pq),
             "current": cur,
             "year_ago": ya,
             "prev_qtr": pq,
@@ -299,7 +320,7 @@ def build(db, symbol: str, event_time: Optional[datetime],
     else:
         message = ""
 
-    return {
+    result = {
         "quarter": quarter,
         "quarter_source": q_source,
         "yoy_quarter": yoy_q,
@@ -309,8 +330,12 @@ def build(db, symbol: str, event_time: Optional[datetime],
         "yoy_available": yoy_available,
         "qoq_available": qoq_available,
         "current_available": current_available,
+        "ai_available": any(r["ai_current"] is not None for r in rows),
         "message": message,
     }
+    # The rule-based read of these figures: verdict, positives, negatives.
+    result["numbers_read"] = read_numbers(result)
+    return result
 
 
 def as_screener_shape(lfl: dict) -> dict:
@@ -332,3 +357,93 @@ def as_screener_shape(lfl: dict) -> dict:
     if label and lfl.get("yoy_quarter"):
         label = f"{label} vs {lfl['yoy_quarter']}"
     return {"ok": lfl.get("current_available", False), "quarter": label, "metrics": metrics}
+
+
+# ─── A plain read of the figures ────────────────────────────────────────────
+
+def _margin(num, den):
+    if num is None or den is None or abs(den) < MIN_BASE:
+        return None
+    return num / den * 100
+
+
+def read_numbers(lfl: dict) -> dict:
+    """
+    What the like-for-like figures say, in words: the YoY verdict (the same
+    rules the digest has always stated — screener_signal) plus the positives
+    and negatives a reader would pick out of the table.
+
+    Arithmetic only, so every line can be checked against the table above it.
+    Nothing here reads the filing's prose; that is the AI's half.
+    """
+    from app.services.screener_quarters import screener_signal
+
+    rows = {r["key"]: r for r in lfl.get("rows") or []}
+    q, yq, qq = lfl.get("quarter") or "", lfl.get("yoy_quarter") or "", lfl.get("qoq_quarter") or ""
+    verdict = screener_signal(as_screener_shape(lfl))
+    pos, neg = [], []
+
+    def g(key, field):
+        return (rows.get(key) or {}).get(field)
+
+    rev_y, pat_y = g("revenue", "yoy_pct"), g("pat", "yoy_pct")
+    pat_q = g("pat", "qoq_pct")
+    rev_q = g("revenue", "qoq_pct")
+    pat_cur, pat_ya = g("pat", "current"), g("pat", "year_ago")
+
+    if rev_y is not None:
+        (pos if rev_y >= 10 else neg if rev_y < 0 else pos if rev_y > 0 else neg).append(
+            f"Revenue {rev_y:+.1f}% YoY vs {yq}")
+    if pat_cur is not None and pat_ya is not None and abs(pat_ya) >= MIN_BASE:
+        if pat_ya < 0 < pat_cur:
+            pos.append(f"Swung to a profit of ₹{pat_cur:,.1f} Cr from a ₹{abs(pat_ya):,.1f} Cr loss in {yq}")
+        elif pat_ya > 0 > pat_cur:
+            neg.append(f"Swung to a loss of ₹{abs(pat_cur):,.1f} Cr from a ₹{pat_ya:,.1f} Cr profit in {yq}")
+        elif pat_y is not None:
+            (pos if pat_y > 0 else neg).append(f"Profit {pat_y:+.1f}% YoY vs {yq}")
+    if pat_q is not None:
+        if pat_q >= 5:
+            pos.append(f"Profit {pat_q:+.1f}% on the previous quarter ({qq})")
+        elif pat_q <= -10:
+            neg.append(f"Profit {pat_q:+.1f}% on the previous quarter ({qq})")
+    if rev_q is not None and rev_q <= -10:
+        neg.append(f"Revenue {rev_q:+.1f}% on the previous quarter ({qq})")
+
+    # Net margin, now against a year ago.
+    m_now = _margin(pat_cur, g("revenue", "current"))
+    m_then = _margin(pat_ya, g("revenue", "year_ago"))
+    if m_now is not None and m_then is not None:
+        d = m_now - m_then
+        if d >= 1:
+            pos.append(f"Net margin up to {m_now:.1f}% from {m_then:.1f}%")
+        elif d <= -1:
+            neg.append(f"Net margin down to {m_now:.1f}% from {m_then:.1f}%")
+
+    # Costs against revenue: operating leverage, or the lack of it.
+    exp_y = g("expenses", "yoy_pct")
+    if exp_y is not None and rev_y is not None:
+        if exp_y > rev_y + 5:
+            neg.append(f"Expenses {exp_y:+.1f}% YoY, ahead of revenue ({rev_y:+.1f}%)")
+        elif exp_y < rev_y - 5:
+            pos.append(f"Expenses {exp_y:+.1f}% YoY, behind revenue ({rev_y:+.1f}%)")
+
+    # Profit leaning on other income.
+    oi, pbt = g("other_income", "current"), g("pbt", "current")
+    if oi is not None and pbt is not None and pbt >= MIN_BASE and oi > 0:
+        share = oi / pbt * 100
+        if share >= 30:
+            neg.append(f"Other income is {share:.0f}% of profit before tax")
+
+    if not pos and not neg:
+        note = lfl.get("message") or "No comparison available"
+    else:
+        note = ""
+    return {
+        "label": verdict.get("label", "NA"),
+        "tone": verdict.get("tone", "na"),
+        "reason": verdict.get("reason", ""),
+        "positives": pos,
+        "negatives": neg,
+        "note": note,
+        "basis": f"{q} vs {yq} and {qq}" if q else "",
+    }

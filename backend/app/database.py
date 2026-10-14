@@ -434,6 +434,9 @@ class TradeAILog(Base):
     future_projected_numbers = Column(Text, nullable=True)
     # True when the filing yielded no usable figures — suppresses any verdict
     extraction_ok = Column(Boolean, default=False)
+    # {"positives": [...], "negatives": [...]} — what the filing itself says
+    # went well and badly: segments, margins, one-offs, guidance, auditor notes.
+    highlights_json = Column(Text, nullable=True)
 
 
 class ResultDedupKey(Base):
@@ -595,6 +598,7 @@ def init_db():
         _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN ai_requested_at DATETIME")
         _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN ai_completed_at DATETIME")
         _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN validation_json TEXT")
+        _safe_alter(conn, "ALTER TABLE trade_ai_logs ADD COLUMN highlights_json TEXT")
         _safe_alter(conn, "ALTER TABLE pending_result_orders ADD COLUMN price_at_announcement FLOAT")
         _safe_alter(conn, "ALTER TABLE pending_result_orders ADD COLUMN screener_json TEXT")
         _safe_alter(conn, "ALTER TABLE pending_result_orders ADD COLUMN paused BOOLEAN DEFAULT 0")
