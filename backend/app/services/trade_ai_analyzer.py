@@ -6,6 +6,8 @@ import json
 import logging
 import os
 import threading
+
+import requests
 from datetime import datetime
 from typing import Optional, Tuple
 
@@ -632,32 +634,95 @@ def check_against_screener(symbol: str, parsed_json: dict) -> str:
 MAX_INLINE_PDF_BYTES = 25 * 1024 * 1024
 
 
-def fetch_filing_pdf(attachment_url: str) -> Optional[bytes]:
-    """The filing's bytes, from BSE or NSE, or None."""
-    if not attachment_url or not attachment_url.startswith("http"):
+_BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+               "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+_last_fetch_reason = threading.local()
+
+
+def _as_pdf(data: bytes) -> Optional[bytes]:
+    """The PDF in a download: the bytes themselves, or the first PDF in a ZIP
+    (NSE attaches some filings zipped)."""
+    if not data:
         return None
-    try:
-        from app.services import bse_http
-        if bse_http.is_bse_url(attachment_url):
-            res = bse_http.get(attachment_url, headers={"Accept": "application/pdf,*/*",
-                                                        "Referer": "https://www.bseindia.com/"}, timeout=45)
-        else:
+    head = data.lstrip()[:5]
+    if head.startswith(b"%PDF"):
+        return data
+    if data[:2] == b"PK":
+        try:
+            import io
+            import zipfile
+            with zipfile.ZipFile(io.BytesIO(data)) as z:
+                names = sorted((n for n in z.namelist() if n.lower().endswith(".pdf")),
+                               key=lambda n: -z.getinfo(n).file_size)
+                if names:
+                    return z.read(names[0])
+        except Exception:
+            return None
+    return None
+
+
+def fetch_filing_pdf(attachment_url: str) -> Optional[bytes]:
+    """
+    The filing's bytes, from BSE or NSE, or None. Why it failed, if it did,
+    is left in last_fetch_reason().
+
+    Several ways in, the first that returns a PDF wins. On 15 Oct 2026
+    HDFCAMC's NSE filing could not be fetched through the NSE session with a
+    Referer, while the extractor's plain browser GET of the same archive
+    works every day. So:
+      1. BSE: the Chrome-impersonating client (bse_http). Nothing else passes.
+      2. a plain GET with a browser User-Agent (the extractor's method)
+      3. the NSE session, cookies and Referer
+      4. the Chrome-impersonating client, for any host behind Akamai
+    """
+    _last_fetch_reason.v = ""
+    if not attachment_url or not attachment_url.startswith("http"):
+        _last_fetch_reason.v = "no PDF link on the filing"
+        return None
+    from app.services import bse_http
+    tried = []
+
+    def attempt(name, fn):
+        try:
+            res = fn()
+            pdf = _as_pdf(res.content) if res.status_code == 200 else None
+            if pdf:
+                return pdf
+            tried.append(f"{name}: HTTP {res.status_code}, {len(res.content or b'')} bytes"
+                         + ("" if res.status_code != 200 else ", not a PDF"))
+        except Exception as e:
+            tried.append(f"{name}: {str(e)[:80]}")
+        return None
+
+    if bse_http.is_bse_url(attachment_url):
+        ways = [("BSE client", lambda: bse_http.get(
+            attachment_url, headers={"Accept": "application/pdf,*/*",
+                                     "Referer": "https://www.bseindia.com/"}, timeout=45))]
+    else:
+        def nse_session():
             from app.services.trade_nse_poller import _get_trade_nse_session
-            session = _get_trade_nse_session().session
-            res = session.get(attachment_url, timeout=45, headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Accept": "application/pdf,*/*",
+            return _get_trade_nse_session().session.get(attachment_url, timeout=45, headers={
+                "User-Agent": _BROWSER_UA, "Accept": "application/pdf,*/*",
                 "Referer": "https://www.nseindia.com/companies-listing/corporate-filings/announcements",
             })
-        data = res.content if res.status_code == 200 else b""
-        if len(data) < 100 or not data.lstrip()[:5].startswith(b"%PDF"):
-            logger.warning(f"[FILING PDF] {attachment_url}: HTTP {res.status_code}, "
-                           f"{len(data)} bytes, not a PDF")
-            return None
-        return data
-    except Exception as e:
-        logger.warning(f"[FILING PDF] download failed for {attachment_url}: {e}")
-        return None
+        ways = [
+            ("plain GET", lambda: requests.get(attachment_url, timeout=45,
+                                               headers={"User-Agent": _BROWSER_UA})),
+            ("NSE session", nse_session),
+            ("Chrome client", lambda: bse_http.get(attachment_url,
+                                                   headers={"Accept": "application/pdf,*/*"}, timeout=45)),
+        ]
+    for name, fn in ways:
+        pdf = attempt(name, fn)
+        if pdf:
+            return pdf
+    _last_fetch_reason.v = "; ".join(tried)
+    logger.warning(f"[FILING PDF] {attachment_url}: {_last_fetch_reason.v}")
+    return None
+
+
+def last_fetch_reason() -> str:
+    return getattr(_last_fetch_reason, "v", "") or ""
 
 
 def analyze_earnings_disclosure_2step(
@@ -770,7 +835,14 @@ def _do_analyze_earnings_disclosure_2step(
     if attachment_url and (plan["before_gemcall"] or plan["after_gemcall"]):
         raw_pdf = fetch_filing_pdf(attachment_url)
         if raw_pdf is None:
-            failures.append("the filing PDF could not be downloaded, so it was sent as a link")
+            failures.append(f"the filing PDF could not be downloaded ({last_fetch_reason()})")
+            # A link to an exchange archive is no use to OpenRouter either:
+            # BSE answers it 403 and NSE 520. Calling anyway spends a free-tier
+            # request to be told so, or worse, gets an answer from the
+            # announcement text alone. Stop and say why instead.
+            if any(h in attachment_url.lower() for h in ("bseindia.com", "nseindia.com")):
+                plan = dict(plan, before_gemcall=[], after_gemcall=[], skip_gemcall=True,
+                            missing=None, no_document=True)
         else:
             from app.services.filing_text import prepare_for_ai
             doc_prep = prepare_for_ai(raw_pdf)
@@ -1097,14 +1169,18 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
 
     no_reading_reason = ""
     if not result_raw:
-        if plan.get("missing"):
+        if plan.get("no_document"):
+            no_reading_reason = "; ".join(failures) or "the filing PDF could not be downloaded"
+        elif plan.get("missing"):
             no_reading_reason = f"no {plan['missing']} OpenRouter key is set for the model chosen"
         elif not plan["before_gemcall"] and not plan["after_gemcall"]:
             no_reading_reason = ("no OpenRouter key is set (premium is off or has no key, and the free "
                                  "key is empty) — add one under AI settings")
         else:
             no_reading_reason = "; ".join(failures) or "every OpenRouter call failed"
-        if plan.get("missing"):
+        if plan.get("no_document"):
+            logger.error(f"❌ [AUTO AI]: #{symbol} not analysed: {no_reading_reason}")
+        elif plan.get("missing"):
             logger.error(f"❌ [AUTO AI]: no {plan['missing']} OpenRouter key set for the model chosen for #{symbol}")
         elif not plan["before_gemcall"] and not plan["after_gemcall"]:
             logger.error(f"❌ [AUTO AI]: no OpenRouter key is usable for #{symbol} "

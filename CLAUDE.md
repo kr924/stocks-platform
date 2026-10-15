@@ -738,7 +738,13 @@ longer in the automatic chain (`skip_gemcall`). Its code path remains in
   The catalogue is `GET openrouter.ai/api/v1/models` (no key needed), cached 6h,
   served at `/api/trading/openrouter/models?tier=free|premium`.
 - **The AI reads the filing's pages as text** (`services/filing_text.py`). We
-  download the PDF ourselves (`fetch_filing_pdf`). Given a URL, OpenRouter
+  download the PDF ourselves (`fetch_filing_pdf`). That tries a plain browser
+  GET (the extractor's method), then the NSE session, then the
+  Chrome-impersonating client; BSE goes through `bse_http` only. A ZIP
+  attachment is unpacked. On 15 Oct HDFCAMC failed through the NSE session
+  alone. If every way fails for an exchange URL, **no OpenRouter call is
+  made**: the link would only come back 403/520, and the summary gives each
+  way's status. Given a URL, OpenRouter
   fetches it itself, and BSE refuses it with 403 while NSE's archive wants
   cookies. PyMuPDF then picks the statement pages (the extractor's
   `page_score`, needing ≥40 formatted figures), the notes, and the press
