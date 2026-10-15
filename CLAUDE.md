@@ -781,6 +781,10 @@ longer in the automatic chain (`skip_gemcall`). Its code path remains in
   Each model's own message, code and provider are now reported.
 - `flow_used` is `openrouter_premium` / `openrouter_free` / `custom_rest_api`;
   `provider` names the model that actually answered, fallbacks included.
+- **Free-model limits are per account, not per key** ("Making additional
+  accounts or API keys will not affect your rate limits"): 20/min, and 50/day
+  until the account has bought $10 of credit, then 1,000/day. The free key
+  should come from the funded account; extra keys add nothing.
 - Env fallbacks: `OPENROUTER_PREMIUM_API_KEY` for premium, `OPENROUTER_API_KEY`
   for **free**. It used to back the premium path and could spend; now it only
   ever runs free models.
@@ -844,7 +848,7 @@ in-line quarter with high reaction risk is NA. These go into
 the list ("⚠ High reaction risk —"), the Telegram verdict and the digest.
 **Broker estimates are looked up and checked** (`services/consensus.py`, table
 `broker_estimates`). One OpenRouter call on the **premium** key uses the web
-plugin (Exa, ≈$0.007 a search; web search is never free, even on free models),
+plugin (≈$0.03 a search: $4 per 1,000 results, 8 results; charged whatever the model, so a free model saves only the ~$0.0005 of tokens),
 restricted to Indian financial news domains, and asks for the brokers'
 published previews for the quarter (`fiscal_label`: "Q2 FY27 (quarter ended
 30 September 2026)"). **Every figure must appear in the cited article's

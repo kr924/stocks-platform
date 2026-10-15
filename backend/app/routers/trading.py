@@ -1367,7 +1367,7 @@ def estimates_refresh_pending(pending_id: int, db: Session = Depends(get_db)):
     """
     Search again for brokers' published estimates of this filing's quarter.
 
-    One web search on the premium key (about $0.007), with every figure checked
+    One web search on the premium key (about $0.03: $4 per 1,000 results, 8 results), with every figure checked
     against its article. See services/consensus.py.
     """
     pending = db.query(PendingResultOrder).filter(PendingResultOrder.id == pending_id).first()

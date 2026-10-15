@@ -9,7 +9,7 @@ filing alone cannot say what was expected.
 
 How:
   1. One OpenRouter call on the PREMIUM key with the web plugin (Exa, about
-     $0.007 a search plus the model's tokens), restricted to Indian financial
+     $0.03 a search: $4 per 1,000 results, 8 results plus the model's tokens), restricted to Indian financial
      news sites. It asks for the brokers' published estimates for the
      quarter, with source URLs.
   2. Every figure is checked against the cited article's text: OpenRouter's

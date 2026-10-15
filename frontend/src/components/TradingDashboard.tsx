@@ -95,7 +95,7 @@ function EstimatesPanel({ est, busy, message, onRefresh }: {
           <span style={{ fontSize: "11px", fontWeight: 800, color: tone(est.overall) }}>{est.overall}</span>
         )}
         <button onClick={onRefresh} disabled={busy}
-          title="Web search for brokers' published previews of this quarter (premium key, about $0.007). Every figure is checked against its article."
+          title="Web search for brokers' published previews of this quarter (premium key, about $0.03). Every figure is checked against its article."
           style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: "4px", padding: "3px 10px",
                    borderRadius: "5px", background: "transparent", border: "1px solid rgba(var(--neutral-rgb),.2)",
                    color: "var(--text-muted)", fontSize: "10px", cursor: busy ? "wait" : "pointer" }}>
@@ -4816,7 +4816,7 @@ export function TradingDashboard() {
                         <input type="checkbox" checked={aiSettings.broker_estimates_enabled !== false}
                           onChange={e => setAiSettings({ ...aiSettings, broker_estimates_enabled: e.target.checked })} />
                         <span>
-                          <b>Look up broker estimates</b> by web search on this key (about $0.007 a company): each
+                          <b>Look up broker estimates</b> by web search on this key (about $0.03 a company): each
                           results-day company at 08:40, and any filing analysed without them. Only figures found in
                           the cited article are kept. Works whether premium analysis is on or off.
                         </span>

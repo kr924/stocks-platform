@@ -359,7 +359,7 @@ class IntelConfig:
             "free_openrouter_api_key": "",
             "free_openrouter_model": "",
             # Broker estimates by web search on the premium key
-            # (services/consensus.py), about $0.007 a company.
+            # (services/consensus.py), about $0.03 a company ($4 per 1,000 results, 8 results).
             "broker_estimates_enabled": True,
         })
         ai_cfg = dict(ai_cfg)
