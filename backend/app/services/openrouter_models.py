@@ -100,15 +100,53 @@ def list_models(force: bool = False) -> list:
         return _cache["models"]   # a stale list beats none
 
 
+# Free models all cost 0, so "cheapest first" sorted them by name, and the
+# automatic pick on 15 Oct 2026 was cohere/north-mini-code:free, a coding
+# model, for a results filing. They are now ranked for reading a financial
+# statement: at least 64k context, then general-purpose families known to
+# handle long documents and tables, then PDF readers, then the largest context. Code, embedding,
+# guard, audio and image models are never picked automatically. They still
+# appear in the list for anyone who chooses one by hand.
+_PREFERRED_VENDORS = ("google/", "deepseek/", "qwen/", "meta-llama/", "mistralai/",
+                      "openai/", "moonshotai/", "z-ai/", "nvidia/", "microsoft/")
+_UNSUITABLE = ("code", "coder", "embed", "guard", "tts", "whisper", "audio",
+               "image", "vision-only", "rerank", "moderation")
+
+
+def suitable_for_filings(m: dict) -> bool:
+    mid = m["id"].lower()
+    if mid.startswith("openrouter/"):      # routers: unpredictable model per call
+        return False
+    return not any(w in mid for w in _UNSUITABLE)
+
+
+def _vendor_rank(model_id: str) -> int:
+    mid = model_id.lower()
+    for i, v in enumerate(_PREFERRED_VENDORS):
+        if mid.startswith(v):
+            return i
+    return len(_PREFERRED_VENDORS)
+
+
 def models_for(tier: str) -> list:
     """
-    The models one account can run. Free: ":free" or zero-priced models.
-    Premium: everything else, cheapest first. Models that read PDFs natively
-    come first in both lists, because that is what a results filing needs.
+    The models one account can run. Free: ":free" or zero-priced models,
+    ranked for reading a results filing (see above). Premium: everything else,
+    PDF readers first, then cheapest first.
     """
     want_free = tier == "free"
     rows = [m for m in list_models() if m["free"] == want_free]
-    rows.sort(key=lambda m: (not m["reads_pdf"], m["prompt_per_m"] or 0, m["name"].lower()))
+    if want_free:
+        # A results PDF parsed to text runs to tens of thousands of tokens, so
+        # a small context ranks low whatever the vendor. Reading PDFs natively
+        # matters less now that the file is sent as data: OpenRouter's free
+        # parser covers a text-only model, scans excepted.
+        rows.sort(key=lambda m: (not suitable_for_filings(m),
+                                 (m.get("context") or 0) < 64000,
+                                 _vendor_rank(m["id"]), not m["reads_pdf"],
+                                 -(m.get("context") or 0), m["name"].lower()))
+    else:
+        rows.sort(key=lambda m: (not m["reads_pdf"], m["prompt_per_m"] or 0, m["name"].lower()))
     return rows
 
 
@@ -121,8 +159,11 @@ def reads_pdf(model_id: str) -> Optional[bool]:
 
 
 def free_fallbacks(exclude: str = "", limit: int = 2) -> list:
-    """A short chain of other free models to try if the chosen one fails."""
-    out = [m["id"] for m in models_for("free") if m["id"] != exclude]
+    """
+    A short chain of free models to try: the best-ranked suitable ones, so a
+    code or embedding model is never picked automatically.
+    """
+    out = [m["id"] for m in models_for("free") if m["id"] != exclude and suitable_for_filings(m)]
     return out[:limit]
 
 

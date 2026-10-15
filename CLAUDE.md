@@ -709,7 +709,14 @@ longer in the automatic chain (`skip_gemcall`). Its code path remains in
   `openrouter/auto` or the paid chain. A free model that cannot read PDFs gets
   OpenRouter's free `pdf-text` parser, not the paid OCR engine. That parser
   has no OCR, so a scanned filing reads as empty on a text-only free model.
-- An empty free model means "pick from the live catalogue", PDF readers first.
+- An empty free model means "pick from the live catalogue". Free models all
+  cost 0, so the list used to sort by name, and on 15 Oct the pick was
+  `cohere/north-mini-code:free`, a coding model, with the `openrouter/free`
+  router as fallback. They are now ranked for a results filing: ≥64k context
+  first, then general-purpose families (Google, DeepSeek, Qwen, Meta, Mistral…),
+  then PDF readers, then the largest context. Code, embedding, guard, audio and
+  image models, and `openrouter/*` routers, are never auto-picked
+  (`suitable_for_filings`).
   The catalogue is `GET openrouter.ai/api/v1/models` (no key needed), cached 6h,
   served at `/api/trading/openrouter/models?tier=free|premium`.
 - **The filing is sent as data, not a link** (`fetch_filing_pdf` →
