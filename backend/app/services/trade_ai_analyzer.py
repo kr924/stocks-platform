@@ -586,6 +586,7 @@ def analyze_earnings_disclosure_2step(
     config_id: Optional[int] = None,
     tracking_ref: Optional[str] = None,
     model_override: Optional[str] = None,
+    notify: bool = True,
 ) -> Optional[dict]:
     """
     Two-Step AI Analysis Pipeline:
@@ -630,7 +631,7 @@ def analyze_earnings_disclosure_2step(
     try:
         return _do_analyze_earnings_disclosure_2step(
             symbol, title, attachment_url, pdf_text, config_id, tracking_ref,
-            model_override,
+            model_override, notify,
         )
     finally:
         with _in_progress_lock:
@@ -645,6 +646,7 @@ def _do_analyze_earnings_disclosure_2step(
     config_id: Optional[int] = None,
     tracking_ref: Optional[str] = None,
     model_override: Optional[str] = None,
+    notify: bool = True,
 ) -> Optional[dict]:
     import base64
     import requests
@@ -675,69 +677,85 @@ def _do_analyze_earnings_disclosure_2step(
     except Exception:
         pass
 
-    prompt = f"""You are an Indian stock market research analyst. Analyse the attached quarterly earnings document for {symbol}{f' ({company_name})' if company_name else ''} and return a strict metric grid.
+    # The prompt is written for what a model can actually do with one filing.
+    # It used to ask the model to "refer to screener.in and public broker
+    # research", which a model with no browsing cannot do, and weak models
+    # answered by inventing year-ago figures. Every number now comes from the
+    # statement's own columns. An Indian quarterly statement already carries
+    # the same quarter last year and the previous quarter beside the current
+    # one, and the definitions match Screener's, so the AI tab compares like
+    # with like. Placeholders rather than sample numbers in the schema: free
+    # models copy example values.
+    prompt = f"""You are a senior Indian equity research analyst. Read the attached quarterly results filing for {symbol}{f' ({company_name})' if company_name else ''} and return ONE JSON object.
 
-Compare against the same quarter last year and against broker/analyst estimates (refer to screener.in and public broker research for historical and estimated figures).
+Announcement text (context only, the figures are in the attached PDF):
+{pdf_text[:3500] if pdf_text else '(none, use the attachment)'}
 
-Document Extract / Content snippet:
-{pdf_text[:3500] if pdf_text else 'Refer to attachment document'}
+=== WHERE THE NUMBERS COME FROM ===
+Use ONLY the attached filing. Do not use outside knowledge, websites or memory of past results.
+The Statement of Financial Results has these columns; use them exactly:
+  - current_qtr          = "Quarter ended <latest date>" (the first numeric column)
+  - previous_qtr         = "Quarter ended <the quarter before>" (the preceding quarter)
+  - last_year_same_qtr   = "Quarter ended <same date one year earlier>" (corresponding quarter of the previous year)
+Never take a half-year, nine-month or full-year column for a quarter.
+If the filing has both CONSOLIDATED and STANDALONE statements, use CONSOLIDATED. Say which in "basis".
+Convert every figure to ₹ crore (₹ lakh / 100; ₹ million / 10; ₹ thousand / 10,000; rupees / 1,00,00,000). Write as "₹1,234.56 Cr". Losses are negative: "-₹45.20 Cr".
 
-=== EXTRACTION RULES — FOLLOW EXACTLY ===
+=== THE FIVE ROWS (definitions match Screener so the figures can be compared) ===
+  revenue      = Revenue from operations (NOT total income). Banks/NBFCs: interest earned / revenue from operations.
+  expenses     = Total expenses exactly as filed (includes finance costs and depreciation).
+  other_income = Other income.
+  pat          = Net profit for the period after tax (total, before other comprehensive income), including exceptional items as filed.
+  ebitda       = revenue - (total expenses - finance costs - depreciation). Other income is excluded. "NA" for banks/NBFCs.
 
-1. Fill every cell of the grid below for these five rows:
-     revenue, expenses, other_income, pat, ebitda
-   with these five columns:
-     current_qtr        - the reported figure for this quarter
-     last_year_same_qtr - the figure for the SAME quarter one year earlier
-     yoy_change_pct     - % change of current_qtr versus last_year_same_qtr
-     qoq_change_pct     - % change versus the IMMEDIATELY PRECEDING quarter
-     estimated          - a published broker/analyst estimate for this quarter
+=== THE COLUMNS ===
+  current_qtr, previous_qtr, last_year_same_qtr : figures from the columns above
+  yoy_change_pct = (current_qtr - last_year_same_qtr) / |last_year_same_qtr| x 100, as "+12.3%" / "-4.5%"
+  qoq_change_pct = (current_qtr - previous_qtr) / |previous_qtr| x 100
+  estimated      = a broker/consensus estimate ONLY if the document itself states one; otherwise "NA"
+Compute the percentages from the figures you wrote. They are checked against each other, and a
+mismatch discards the whole analysis. Any figure you cannot read with certainty is "NA". Never guess.
 
-2. If a figure is NOT present in the document and cannot be reliably sourced,
-   put the exact string "NA" in that cell. NEVER guess, interpolate, or carry a
-   number across from a different line item.
-   Most filings carry no broker estimate at all — leave "estimated" as "NA"
-   unless a research house has actually published a number for this quarter.
-   Do not invent a consensus.
+=== VERDICT (ai_suggestion) ===
+  "BUY"  : revenue and PAT both read, and the quarter is clearly strong YoY (profit growth driven by operations, not by other income or one-offs).
+  "SELL" : revenue and PAT both read, and the quarter is clearly weak YoY (falling profit or a swing to loss from operations).
+  "BEATS ESTIMATES" / "MISSES ESTIMATES" : only when the document states an estimate.
+  "NA"   : anything else, including mixed or unclear results. Never use HOLD or NEUTRAL to express doubt.
+extraction_ok = true only if revenue.current_qtr and pat.current_qtr are real numbers.
 
-3. ai_suggestion rules — this is critical:
-     - Give "BEATS ESTIMATES" or "MISSES ESTIMATES" only when an estimate exists
-       AND the corresponding actual was extracted.
-     - Give "BUY", "SELL" or "HOLD" only when the core figures (revenue and pat)
-       were extracted and the picture is conclusive.
-     - Otherwise return exactly "NA".
-   Do NOT return "HOLD", "NEUTRAL", "BUY" or "SELL" as a way of expressing
-   uncertainty. Uncertainty is always "NA".
+=== POSITIVES / NEGATIVES (the most useful part for the reader) ===
+3 to 5 points each, most material first, each one line under 25 words with the figure from the filing.
+Look for: EBITDA / net margin change (state the % both quarters); segment revenue and profit
+(which segment drove the change); exceptional or one-off items and their size; other income as a
+share of profit; finance cost and debt changes; tax rate anomalies; inventory or receivable build-up;
+order book or guidance in the notes; auditor qualifications, emphasis of matter or going-concern
+notes (always a negative); related-party or subsidiary losses.
+Do NOT restate plain revenue/PAT growth already in the grid. Use an empty list rather than invent a point.
 
-4. Set extraction_ok to true only if revenue.current_qtr AND pat.current_qtr are
-   both real numbers (not "NA"). Otherwise set it to false and ai_suggestion "NA".
+=== SUMMARY ===
+2-3 sentences: what drove the quarter, how good the profit quality is, and the main risk.
 
-5. positives / negatives: up to 4 short points each (one line, under 20 words)
-   on what THIS filing shows went well and badly — segment performance, margin
-   moves, exceptional or one-off items, provisions, debt, order book, guidance,
-   auditor qualifications. Each point must come from the document; cite the
-   figure where there is one. Do not restate the revenue/profit growth already
-   in the grid. Use an empty list rather than inventing a point.
-
-CRITICAL: Output ONLY raw JSON. No prose, no markdown fences, no preamble.
-
+Output ONLY raw JSON. No prose, no markdown fences. Shape:
 {{
+  "quarter": "<e.g. Sep 2026>",
+  "basis": "<consolidated|standalone>",
+  "unit_in_filing": "<lakh|crore|million|...>",
   "metrics": {{
-    "revenue":      {{"current_qtr": "₹132.35 Cr", "last_year_same_qtr": "₹61.32 Cr", "yoy_change_pct": "+115.8%", "qoq_change_pct": "-57.0%", "estimated": "₹120.00 Cr"}},
-    "expenses":     {{"current_qtr": "₹111.05 Cr", "last_year_same_qtr": "₹56.05 Cr", "yoy_change_pct": "+98.2%",  "qoq_change_pct": "-12.4%", "estimated": "NA"}},
-    "other_income": {{"current_qtr": "₹2.10 Cr",   "last_year_same_qtr": "₹2.00 Cr",  "yoy_change_pct": "+5.0%",   "qoq_change_pct": "NA",     "estimated": "NA"}},
-    "pat":          {{"current_qtr": "₹25.79 Cr",  "last_year_same_qtr": "₹9.55 Cr",  "yoy_change_pct": "+170.1%", "qoq_change_pct": "-24.1%", "estimated": "₹20.00 Cr"}},
-    "ebitda":       {{"current_qtr": "₹35.81 Cr",  "last_year_same_qtr": "₹16.28 Cr", "yoy_change_pct": "+120.0%", "qoq_change_pct": "+8.3%",  "estimated": "NA"}}
+    "revenue":      {{"current_qtr": "<₹ Cr>", "previous_qtr": "<₹ Cr>", "last_year_same_qtr": "<₹ Cr>", "yoy_change_pct": "<±%>", "qoq_change_pct": "<±%>", "estimated": "NA"}},
+    "expenses":     {{"current_qtr": "<₹ Cr>", "previous_qtr": "<₹ Cr>", "last_year_same_qtr": "<₹ Cr>", "yoy_change_pct": "<±%>", "qoq_change_pct": "<±%>", "estimated": "NA"}},
+    "other_income": {{"current_qtr": "<₹ Cr>", "previous_qtr": "<₹ Cr>", "last_year_same_qtr": "<₹ Cr>", "yoy_change_pct": "<±%>", "qoq_change_pct": "<±%>", "estimated": "NA"}},
+    "pat":          {{"current_qtr": "<₹ Cr>", "previous_qtr": "<₹ Cr>", "last_year_same_qtr": "<₹ Cr>", "yoy_change_pct": "<±%>", "qoq_change_pct": "<±%>", "estimated": "NA"}},
+    "ebitda":       {{"current_qtr": "<₹ Cr>", "previous_qtr": "<₹ Cr>", "last_year_same_qtr": "<₹ Cr>", "yoy_change_pct": "<±%>", "qoq_change_pct": "<±%>", "estimated": "NA"}}
   }},
-  "future_growth_outlook": "What management says about forward growth, or NA",
-  "future_projected_numbers": "Specific forward guidance figures, or NA",
-  "broker_estimates": "Broker expectations versus the actual print, or NA",
-  "positives": ["EBITDA margin up to 21.4% from 18.9% on lower raw material costs", "Order book ₹4,200 Cr, 1.8x revenue"],
-  "negatives": ["Exceptional loss of ₹12.5 Cr on asset write-down", "Finance cost up 34% after new borrowing"],
+  "positives": ["<point with figure>", "..."],
+  "negatives": ["<point with figure>", "..."],
+  "future_growth_outlook": "<what management says about growth, or NA>",
+  "future_projected_numbers": "<specific guidance figures, or NA>",
+  "broker_estimates": "<estimates stated in the document, or NA>",
   "extraction_ok": true,
-  "ai_suggestion": "BEATS ESTIMATES",
-  "summary": "2-3 sentence executive summary comparing YoY performance and estimates",
-  "sentiment": "positive"
+  "ai_suggestion": "<BUY|SELL|BEATS ESTIMATES|MISSES ESTIMATES|NA>",
+  "summary": "<2-3 sentences>",
+  "sentiment": "<positive|negative|neutral>"
 }}"""
 
     result_raw = None
@@ -926,10 +944,12 @@ CRITICAL: Output ONLY raw JSON. No prose, no markdown fences, no preamble.
         if not isinstance(raw, list):
             return []
         out = []
-        for item in raw[:4]:
+        for item in raw[:5]:
             text = _clean_cell(item)
-            if text and text.upper() not in ("NA", "N/A", "NONE"):
-                out.append(text[:200])
+            # "<point with figure>" or "..." is the schema echoed back, not a point.
+            if (text and text.upper() not in ("NA", "N/A", "NONE")
+                    and not text.startswith("<") and text.strip(". ") != ""):
+                out.append(text[:240])
         return out
 
     highlights = {"positives": _points("positives"), "negatives": _points("negatives")}
@@ -1073,6 +1093,12 @@ CRITICAL: Output ONLY raw JSON. No prose, no markdown fences, no preamble.
     # --- Dispatch Telegram Alert ---
     # Carries the metric grid, and SELL buttons when the stock is already held so
     # an exit can be taken from the same message that delivers the verdict.
+    # Not for a filing outside market hours: it is analysed as soon as it lands
+    # so the numbers are on the panel, but there is no session to act in and
+    # the 08:00 digest reports it.
+    if not notify:
+        logger.info(f"🔕 [EARNINGS AI] #{symbol}: analysed outside market hours — no Telegram verdict.")
+        return parsed_json
     try:
         from app.services.telegram_notifier import send_earnings_verdict_alert
         from app.database import SessionLocal as _SL, TradeConfig

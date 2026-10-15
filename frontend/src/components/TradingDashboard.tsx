@@ -3177,11 +3177,6 @@ export function TradingDashboard() {
                                            | "ocr_yoy_pct" | "ocr_qoq_pct" | "scr_yoy_pct" | "scr_qoq_pct") => {
                 const r = rowOf(k) as any;
                 if (!r) return null;
-                // A server without per-source fields: the OCR line falls back
-                // to the best figure, as it showed before.
-                if ((f === "ocr_yoy_pct" || f === "ocr_qoq_pct") && !("ocr_current" in r)) {
-                  f = f === "ocr_yoy_pct" ? "actual_yoy" : "actual_qoq";
-                }
                 return typeof r[f] === "number" ? (r[f] as number) : null;
               };
               const pctTxt = (v: number | null | undefined) => v == null ? "n/a" : `${v > 0 ? "+" : ""}${v.toFixed(1)}%`;
@@ -3194,6 +3189,17 @@ export function TradingDashboard() {
               const ocrLabel = nr?.label || p.screener_signal?.label || "NA";
               const ocrTone = nr?.tone || p.screener_signal?.tone || "na";
               const ocrWhy = nr?.reason || p.screener_signal?.reason || "";
+              // When the filing read gave nothing usable, say why instead of a
+              // row of n/a.
+              const tier = (p.extraction as any)?.confidence?.tier as string | undefined;
+              const ocrState = p.like_for_like?.ocr_available ? ""
+                : !p.extraction ? (p.attachment_url ? "reading the filing…" : "no PDF to read")
+                : tier === "READING" ? "reading the filing…"
+                : (p.extraction as any)?.ok === false ? "filing read failed its checks — not used"
+                : (p.extraction as any)?.quarter && p.like_for_like?.quarter
+                    && (p.extraction as any).quarter !== p.like_for_like.quarter
+                  ? `read ${(p.extraction as any).quarter}, not ${p.like_for_like.quarter} — not used`
+                : tier ? `read flagged (${tier.toLowerCase()}) — not used` : "figures not read";
               // Screener's line appears once it has published the quarter.
               const scrPub = !!p.like_for_like?.screener_published;
               const snr = p.like_for_like?.numbers_read_screener;
@@ -3202,7 +3208,7 @@ export function TradingDashboard() {
               const aiSummary = aiDone && p.ai_analysis!.ai_summary && !/^AI analysis pending/i.test(p.ai_analysis!.ai_summary)
                 ? p.ai_analysis!.ai_summary : "";
               const aiState = aiDone ? "" : p.ai_status === "failed" ? "AI failed"
-                : p.deferred ? "not analysed — after cutoff" : "AI running…";
+                : p.ai_status === "deferred" ? "not analysed — Re-analyse to run" : "AI running…";
               const isRes = categoryOf(p) === "results";
               const sel = selectedPending?.id === p.id;
               return (
@@ -3235,8 +3241,13 @@ export function TradingDashboard() {
                           and the quarter before, then the call. */}
                       <div className="od-grid" style={{ marginTop: "4px" }}>
                         <span className="src">OCR</span>
-                        {(["revenue", "pat"] as const).flatMap(k =>
-                          (["actual_yoy", "actual_qoq"] as const).map(f => {
+                        {/* The filing's own figures. Until this used the best
+                            figure, which is Screener's once published, so the
+                            OCR and SCR lines read the same. */}
+                        {ocrState ? (
+                          <span style={{ gridColumn: "2 / 6", color: "var(--text-faint)", fontStyle: "italic" }}>{ocrState}</span>
+                        ) : (["revenue", "pat"] as const).flatMap(k =>
+                          (["ocr_yoy_pct", "ocr_qoq_pct"] as const).map(f => {
                             const v = val(k, f);
                             return <span key={`o${k}${f}`} className="n" style={{ color: pctCol(v) }}>{pctTxt(v)}</span>;
                           }))}
@@ -3588,8 +3599,8 @@ export function TradingDashboard() {
                       </>
                     ) : pending.ai_status === "failed" ? (
                       <span style={{ fontSize: "10px", color: "var(--negative-strong)" }}>failed</span>
-                    ) : pending.deferred ? (
-                      <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>not analysed — after cutoff</span>
+                    ) : pending.ai_status === "deferred" ? (
+                      <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>not analysed — use Re-analyse on the AI tab</span>
                     ) : (
                       <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "inline-flex", alignItems: "center", gap: "5px" }}>
                         <RefreshCw size={11} className="spin" /> running…
@@ -3895,8 +3906,8 @@ export function TradingDashboard() {
                                 <div style={{ fontSize: "10px", color: "var(--text-muted)", marginBottom: "6px" }}>
                                   {pending.ai_status === "done" && ai
                                     ? "The AI did not read usable figures from this filing — switch to OCR for the filing's own numbers."
-                                    : pending.deferred
-                                      ? "Not analysed by the AI (filed after the cutoff) — the OCR tab has the filing's own numbers."
+                                    : pending.ai_status === "deferred"
+                                      ? "Not analysed by the AI (filed before it ran out of hours) — Re-analyse above, or see the OCR tab."
                                       : "AI figures appear here when the analysis finishes."}
                                 </div>
                               )}
@@ -3944,7 +3955,7 @@ export function TradingDashboard() {
                                   empty={pending.ai_status === "done" && ai
                                     ? "The AI listed no positives or negatives for this filing."
                                     : pending.ai_status === "failed" ? "AI analysis failed."
-                                    : pending.deferred ? "Not analysed — filed after the 15:30 cutoff."
+                                    : pending.ai_status === "deferred" ? "Not analysed — use Re-analyse on the AI tab."
                                     : "Waiting for the AI analysis."}
                                 />
                               </div>

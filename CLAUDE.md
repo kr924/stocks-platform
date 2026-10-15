@@ -185,17 +185,22 @@ knowledge we did not have at the decision moment and inflates any backtest.
 
 ### The 09:00-15:30 window
 
-Alerts and AI analysis run only while the market is open, **09:00 to 15:30 IST**
-on a working day. Anything outside that — pre-open, post-close, or a weekend —
-gets **no alert and no AI analysis**, because there is no session left to trade
-into. Those are marked `deferred`, stay visible in the app, and are reported in
-the 08:00 digest from the filing read and Screener's like-for-like quarters.
+Alerts run only while the market is open, **09:00 to 15:30 IST** on a working
+day. A filing outside that (pre-open, post-close, weekend) is marked `deferred`:
+**no Telegram result alert and no Telegram AI verdict**, because there is no
+session left to trade into. It is reported in the 08:00 digest.
 
-A filing between 08:00 and 09:00 therefore waits for the *next* morning's
-digest: it is past the current digest's window but before the AI opens.
+**The OCR read and the AI analysis run on every result the moment it lands,
+in or out of hours** (changed 15 Oct 2026 at the owner's request: the numbers
+belong on the panel at once). Out of hours, `_run_earnings_ai(..., notify=False)`
+runs it with no Telegram verdict. Premium switches itself off at 15:25, so the
+evening's filings run on gemcall and then the free OpenRouter account. On a heavy
+evening that can exceed the free account's daily limit; anything that fails
+shows "failed" and can be re-analysed. Rows created before the change carry
+`ai_status="deferred"` and are only analysed by Re-analyse.
 
-Nothing analyses them later. That is deliberate; a 07:00 batch job existed
-briefly and was removed for contradicting the cutoff.
+A filing between 08:00 and 09:00 waits for the *next* morning's digest: it is
+past the current digest's window.
 
 ### Daily jobs (IST, guarded by last-run date)
 
@@ -295,7 +300,11 @@ Enforced server-side too — `_attach_screener` skips non-results and
 
 **A list beside one open pane, not a stack of collapsible cards.** The left
 column lists every filing for the day — symbol, exchange, time, move since the
-result, then two lines under one sticky header: **OCR** and **AI**, each with
+result, then lines under one sticky header: **OCR**, **SCR** (once Screener has
+the quarter) and **AI**. The OCR line reads only `ocr_*`, never `current`: it
+used `actual_*` until 15 Oct, which is Screener's once published, so OCR and SCR
+showed identical numbers. With no usable read it says why ("read flagged —
+not used", "read Jun 2026, not Sep 2026"). Each line has
 revenue YoY / QoQ, PAT YoY / QoQ and its call, and the AI summary clamped to
 two lines — and scrolls on its own (↑/↓ or j/k move through it). The right pane shows the
 selected filing in full: prices, order form, the like-for-like table and both
@@ -719,6 +728,20 @@ current qtr/YoY/YoY %/QoQ %/estimated). Three layers protect it:
 
 Uncertainty is always **NA**, never HOLD or NEUTRAL — a hedge reads as a real
 call to anyone acting on it.
+
+**The prompt reads only the filing** (rewritten 15 Oct 2026). It used to ask
+the model to "refer to screener.in and broker research", which a model without
+browsing cannot do, so year-ago figures were invented. Now every figure comes
+from the statement's own columns, never a half-year or nine-month column:
+current quarter, preceding quarter, and corresponding quarter last year.
+Consolidated is preferred, units are converted to ₹ crore, and the row
+definitions match Screener (revenue = revenue from operations; EBITDA = revenue
+− (expenses − finance − depreciation)). It asks for 3–5 positives and negatives
+with figures, covering margins, segments, one-offs, other-income share, debt,
+and auditor qualifications. The schema uses placeholders, not sample numbers,
+because free models copy examples. `quarter`, `basis` and `previous_qtr` are
+asked for to make the model show its reading; the grid stores only its five
+columns.
 
 `_extract_json_from_llm` is deliberately tolerant: scraped output arrives with
 literal newlines inside strings and sometimes **two concatenated renderings** of

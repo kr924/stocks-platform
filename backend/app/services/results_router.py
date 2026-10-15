@@ -216,7 +216,7 @@ def _send_result_alert(ann, event, pending_id=None, instrument_key: str = "", pe
 
 
 def _run_earnings_ai(symbol: str, title: str, attachment_url: str, description: str,
-                     config_id, pending_id, model_override: str = None):
+                     config_id, pending_id, model_override: str = None, notify: bool = True):
     """Background worker: run the existing 2-step earnings analysis."""
     from app.database import SessionLocal
 
@@ -241,6 +241,7 @@ def _run_earnings_ai(symbol: str, title: str, attachment_url: str, description: 
             config_id=config_id,
             tracking_ref=tracking_ref,
             model_override=model_override,
+            notify=notify,
         )
 
         if pending_id:
@@ -341,7 +342,9 @@ def route_financial_result(db: Session, ann, event, dedup_key: str):
         tracking_ref=make_tracking_ref(symbol),
         status="pending",
         deferred=not actionable,
-        ai_status="pending" if actionable else "deferred",
+        # The AI runs on every result as it lands, in or out of hours: the
+        # numbers belong on the panel at once. Only the alerts wait.
+        ai_status="pending",
     )
     try:
         db.add(pending)
@@ -397,8 +400,14 @@ def route_financial_result(db: Session, ann, event, dedup_key: str):
         _capture_baseline(db, pending, symbol)
         logger.info(
             f"🌙 [RESULT DEFERRED] {symbol} ({pending.tracking_ref}) arrived "
-            f"outside the 09:00-15:30 IST window — no alert or AI now; held for the 08:00 digest."
+            f"outside the 09:00-15:30 IST window — no alert; analysed now, reported in the 08:00 digest."
         )
+        # Analysed now, like the OCR read above, so the panel and the digest
+        # carry the AI's figures and positives/negatives. No Telegram verdict:
+        # there is no session to act in. After 15:25 premium is off, so this
+        # runs on gemcall and then the free OpenRouter account.
+        _ai_pool.submit(_run_earnings_ai, symbol, ann.title, ann.url, ann.description,
+                        None, pending.id, None, False)
         return
 
     logger.info(

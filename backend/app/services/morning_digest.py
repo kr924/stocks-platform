@@ -344,7 +344,7 @@ def render_html(rows: List[dict], for_date: str) -> str:
         cls = ("b-pos" if verdict.upper() in ("BUY", "BEATS ESTIMATES")
                else "b-neg" if verdict.upper() in ("SELL", "MISSES ESTIMATES")
                else "b-na")
-        badge_title = ("Filed outside 09:00-15:30 IST, so it was not analysed — Screener is the source here"
+        badge_title = ("No AI analysis for this filing (still queued, or it failed) — Screener is the source here"
                        if not r["analysed"] else "Verdict from our AI analysis")
 
         # The Screener read stands on its own: it is the only signal available
@@ -400,7 +400,7 @@ def render_html(rows: List[dict], for_date: str) -> str:
                 hl = {}
         ai_html = (f'<div class="read"><div class="rh">AI read · <b>{e(verdict)}</b></div>'
                    + (f'<div class="na">{e((log.ai_summary or "")[:400])}</div>' if r["analysed"] and log else
-                      '<div class="na">not analysed — filed outside 09:00-15:30</div>')
+                      '<div class="na">not analysed — the AI has not returned a reading</div>')
                    + _points(hl.get("positives"), "ok", "+") + _points(hl.get("negatives"), "bad", "−")
                    + '</div>')
         reads = f'<div class="reads">{nr_html}{ai_html}</div>'
@@ -459,7 +459,7 @@ def render_html(rows: List[dict], for_date: str) -> str:
   <span><b style="color:var(--na)">n/a</b> Screener has no figure for that quarter, so no change is shown</span>
   <span><b>Figures read</b> rules applied to the table · <b>AI read</b> the model's reading of the whole filing</span>
   <span><b style="color:var(--na)">—</b> one side missing, so no comparison is possible</span>
-  <span><b style="color:var(--na)">not analysed</b> filed outside 09:00-15:30; no AI is run on those</span>
+  <span><b style="color:var(--na)">not analysed</b> the AI has not returned a reading for that filing</span>
   <span>All values in ₹ crore, consolidated where available. Expenses include interest and depreciation, as filed</span>
 </div>
 {content}
