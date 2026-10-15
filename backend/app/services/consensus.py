@@ -21,8 +21,9 @@ How:
 When: 08:40 IST on a results day, for every company on that day's calendar
 (cache_results_day), and on demand when an analysis runs with nothing on
 file. At most DAILY_CAP searches a day. Rows are kept per symbol and quarter
-in broker_estimates. An empty result is retried after 6 hours, because
-previews often appear the day before.
+in broker_estimates. A completed search is never repeated automatically,
+even when it found nothing; only a failed call is retried, and "Search
+again" on the panel forces a new one.
 
 Comparison against the actual figures is arithmetic, in
 result_compare.estimates_view, not the model's opinion.
@@ -41,7 +42,6 @@ import requests
 logger = logging.getLogger("app.consensus")
 
 DAILY_CAP = 80
-EMPTY_RETRY_HOURS = 6
 METRICS = ("revenue_cr", "ebitda_cr", "ebitda_margin_pct", "pat_cr")
 
 FINANCE_DOMAINS = [
@@ -257,7 +257,7 @@ def stored(db, symbol: str, quarter: str) -> Optional[dict]:
 
 def get_or_fetch(db, symbol: str, company_name: str, quarter: str,
                  force: bool = False, allow_fetch: bool = True) -> Optional[dict]:
-    """The stored estimates, fetching them first if missing or stale."""
+    """The stored estimates; searched only if none were ever found (or the last call failed)."""
     from app.database import BrokerEstimate
     if not symbol or not quarter:
         return None
@@ -270,12 +270,14 @@ def get_or_fetch(db, symbol: str, company_name: str, quarter: str,
             data = json.loads(row.data_json)
         except Exception:
             data = None
-    fresh_enough = bool(data) and (
-        data.get("brokers") or
-        (row.fetched_at and datetime.utcnow() - row.fetched_at < timedelta(hours=EMPTY_RETRY_HOURS)))
-    if (fresh_enough and not force) or not allow_fetch:
+    # Fetched once, kept for good (owner's call, 15 Oct 2026). A search that
+    # completed, brokers found or not, is never repeated automatically: not by
+    # the analysis, not by a re-analyse, not by the next 08:40 run. Only a
+    # call that failed outright (no answer, so nothing was learned) may be
+    # tried again. "Search again" on the panel passes force=True.
+    already = bool(data) and not data.get("error")
+    if (already and not force) or not allow_fetch:
         return data
-
     enabled, key, model = _settings()
     if not enabled:
         return data
@@ -297,6 +299,9 @@ def get_or_fetch(db, symbol: str, company_name: str, quarter: str,
     logger.info(f"[ESTIMATES] {sym} {quarter}: {len(brokers)} broker(s) verified, "
                 f"{dropped} figure(s) dropped as not in the source"
                 f"{'; error ' + found['error'] if found['error'] else ''}")
+    if found["error"] and data and not data.get("error"):
+        # A forced search that failed keeps what was already found.
+        return data
     try:
         if row is None:
             row = BrokerEstimate(symbol=sym, quarter=quarter)

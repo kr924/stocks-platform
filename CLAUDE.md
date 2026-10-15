@@ -860,7 +860,11 @@ When it runs:
   (`cache_results_day`).
 - On analysis, if nothing is on file.
 - On demand, via "Find estimates" (`POST /pending-results/{id}/estimates-refresh`).
-Limits: 80 searches a day, and an empty result is retried after 6h. The toggle
+**Searched once, kept** (owner's call, 15 Oct 2026): a search that completed,
+brokers found or not, is never repeated by the analysis, a re-analyse or the
+next 08:40 run. Only a call that failed outright is retried; "Search again"
+forces one, and a forced search that fails keeps the earlier result.
+Limit: 80 searches a day. The toggle
 is `broker_estimates_enabled` in AI settings (on by default; needs the
 premium key).
 
