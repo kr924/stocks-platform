@@ -128,6 +128,7 @@ def _download(url: str) -> Optional[str]:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
         return path
+    path = None
     try:
         with requests.get(url, timeout=_DOWNLOAD_TIMEOUT, stream=True, headers={
             "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -150,6 +151,13 @@ def _download(url: str) -> Optional[str]:
                     f.write(chunk)
             return path
     except Exception as e:
+        # A download that dies part-way leaves its temp file behind; the
+        # caller only deletes paths it was given.
+        if path:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
         logger.warning(f"Could not download filing {url}: {e}")
         return None
 

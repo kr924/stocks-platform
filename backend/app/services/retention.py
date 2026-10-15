@@ -162,6 +162,8 @@ def run_retention(db: Session, dry_run: bool = False) -> dict:
         counts["news_stories (orphaned)"] = f"failed: {e}"
         logger.error(f"[RETENTION] orphaned stories failed: {e}")
 
+    counts.update(prune_files(dry_run=dry_run))
+
     if not dry_run:
         try:
             from app.services.registry_builder import _set_setting
@@ -173,6 +175,48 @@ def run_retention(db: Session, dry_run: bool = False) -> dict:
         logger.info(f"[RETENTION] sweep complete: {total} rows removed.")
 
     return counts
+
+
+# Files on disk, swept with the rows. PDFs are otherwise held in memory, or
+# in a temp file deleted as soon as it has been read, so this is a safety net
+# for a worker killed mid-read and for the digest archive, which gains three
+# files every morning.
+DIGEST_RETENTION_DAYS = 30
+TEMP_FILE_HOURS = 6
+_TEMP_PREFIXES = ("filing_", "order_decisions_")
+
+
+def prune_files(dry_run: bool = False) -> dict:
+    import os
+    import tempfile
+    import time
+    now = time.time()
+    out = {"digest files": 0, "stale temp files": 0}
+    try:
+        from app.services.morning_digest import _DIGEST_DIR
+        if os.path.isdir(_DIGEST_DIR):
+            for name in os.listdir(_DIGEST_DIR):
+                p = os.path.join(_DIGEST_DIR, name)
+                if os.path.isfile(p) and now - os.path.getmtime(p) > DIGEST_RETENTION_DAYS * 86400:
+                    out["digest files"] += 1
+                    if not dry_run:
+                        os.unlink(p)
+    except Exception as e:
+        logger.warning(f"[RETENTION] digest files: {e}")
+    try:
+        tmp = tempfile.gettempdir()
+        for name in os.listdir(tmp):
+            p = os.path.join(tmp, name)
+            if (name.startswith(_TEMP_PREFIXES) and name.endswith(".pdf") and os.path.isfile(p)
+                    and now - os.path.getmtime(p) > TEMP_FILE_HOURS * 3600):
+                out["stale temp files"] += 1
+                if not dry_run:
+                    os.unlink(p)
+    except Exception as e:
+        logger.warning(f"[RETENTION] temp files: {e}")
+    if any(out.values()):
+        logger.info(f"[RETENTION] files: {out}")
+    return out
 
 
 def database_size_mb(db: Session) -> float:

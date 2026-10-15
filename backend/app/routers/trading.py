@@ -1339,10 +1339,14 @@ def pending_results_pdf(trade_date: Optional[str] = Query(None), db: Session = D
             "paused": bool(getattr(rp, "paused", False)),
         }
 
-    out = os.path.join(tempfile.gettempdir(), f"order_decisions_{day}.pdf")
+    # A fresh temp file per request, deleted once it has been sent.
+    fd, out = tempfile.mkstemp(suffix=".pdf", prefix=f"order_decisions_{day}_")
+    os.close(fd)
     build_digest_pdf(rows, day, out, title=f"Order decisions {day}")
+    from starlette.background import BackgroundTask
     return FileResponse(out, media_type="application/pdf",
-                        filename=f"order-decisions-{day}.pdf")
+                        filename=f"order-decisions-{day}.pdf",
+                        background=BackgroundTask(lambda: os.path.exists(out) and os.unlink(out)))
 
 
 @router.post("/pending-results/{pending_id}/dismiss")

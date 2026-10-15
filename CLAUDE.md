@@ -270,6 +270,14 @@ database and needs free disk equal to its size. First run: **138.5 MB → 50.0 M
 counted against articles that are still present, so the real sweep removes far
 more than the dry run shows.
 
+**Files are swept too** (`prune_files`, same Sunday run). Filing PDFs never
+persist: the AI path, the PDF probe and the estimates search hold them in
+memory, and the extractor's temp file is deleted in a `finally`, including
+when a download dies part-way. The Order Decisions PDF export is deleted once
+sent. As a safety net, the sweep removes `filing_*` / `order_decisions_*`
+temp PDFs older than 6h (a worker killed mid-read) and digest files in
+`data/digests` older than 30 days (three are written every morning).
+
 Rows within minutes of a cutoff survive a run and go in the next one. Every rule
 is defined by an age rather than a cursor, so re-running is always safe.
 
