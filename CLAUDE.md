@@ -721,15 +721,32 @@ longer in the automatic chain (`skip_gemcall`). Its code path remains in
   first, then general-purpose families (Google, DeepSeek, Qwen, Meta, Mistral…),
   then PDF readers, then the largest context. Code, embedding, guard, audio and
   image models, and `openrouter/*` routers, are never auto-picked
-  (`suitable_for_filings`).
+  (`suitable_for_filings`). The check is by output modality too, not just
+  name: INDIANB's pick was `google/lyria-3-clip-preview`, a music model.
   The catalogue is `GET openrouter.ai/api/v1/models` (no key needed), cached 6h,
   served at `/api/trading/openrouter/models?tier=free|premium`.
-- **The filing is sent as data, not a link** (`fetch_filing_pdf` →
-  `call_openrouter(attachment_bytes=)` as a base64 data URL, ≤25 MB). Given a
-  URL, OpenRouter fetches the PDF itself, and BSE refuses it (403, the same
-  TLS-fingerprint block as bse_http) while NSE's archive wants cookies. The model
-  then had nothing to read. A download failure falls back to the link and says
-  so.
+- **The AI reads the filing's pages as text** (`services/filing_text.py`). We
+  download the PDF ourselves (`fetch_filing_pdf`). Given a URL, OpenRouter
+  fetches it itself, and BSE refuses it with 403 while NSE's archive wants
+  cookies. PyMuPDF then picks the statement pages (the extractor's
+  `page_score`, needing ≥40 formatted figures), the notes, and the press
+  release, at most 8 pages. They are sent in the prompt as rows rebuilt from
+  word coordinates (`67,883.4 | 63,781.8 | 56,436.1 i Revenue from
+  Operations | …`), with a stated unit line. Why not the whole PDF:
+  - INDIANB's PDF hit "file exceeds the maximum size supported".
+  - OpenRouter's text parser glues columns together ("65,147.460,730.5…").
+  - Nestle's PDF carries hidden template text for an older quarter.
+  - A free model read Nestle's revenue as ₹4,520 Cr against an actual ₹6,788 Cr.
+  A scan (under 1,500 chars of text on those pages) is sent instead as a
+  trimmed PDF of just those pages. When the heading's "(₹ in million)" does
+  not extract, `infer_unit` matches the press release's "INR X crore" figures
+  against the statement at ×1/×10/×100/×10⁴.
+- **The AI's year-ago and previous-quarter revenue must match Screener's**
+  within 15% (`check_against_screener`). Those quarters are already published.
+  A model that invents figures computes consistent percentages from them,
+  which `validate_metrics` cannot catch. On a mismatch the figures and verdict
+  are dropped, and the reason is shown as a validation issue. The panel also
+  flags AI vs OCR differences over 10% on revenue or PAT (`ai_ocr_disagree`).
 - **An empty analysis says why.** With no reading, `ai_summary` is
   `"No AI reading for X: <reason>"`: no key set, rate limited, PDF not
   downloaded, or the model's own error. The AI tab shows that line instead of

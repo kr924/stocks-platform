@@ -429,6 +429,15 @@ def build(db, symbol: str, event_time: Optional[datetime],
         "qoq_available": qoq_available,
         "current_available": current_available,
         "ai_available": any(r["ai_current"] is not None for r in rows),
+        # Where the AI and the filing read (OCR) disagree by more than 10% on
+        # revenue or PAT: one of them misread, and the reader should know.
+        "ai_ocr_disagree": [
+            f"{r['label']}: AI {r['ai_current']:,.1f} vs OCR {r['ocr_current']:,.1f} Cr"
+            for r in rows if r["key"] in ("revenue", "pat")
+            and isinstance(r.get("ai_current"), (int, float)) and isinstance(r.get("ocr_current"), (int, float))
+            and abs(r["ocr_current"]) >= MIN_BASE
+            and abs(r["ai_current"] - r["ocr_current"]) / abs(r["ocr_current"]) > 0.10
+        ],
         "ocr_available": any(r["ocr_current"] is not None for r in rows),
         # Set when the filing read was thrown out as implausible (see
         # implausible_filing_read); the OCR tab and list say so.

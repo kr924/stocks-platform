@@ -48,6 +48,8 @@ interface LikeForLike {
   ocr_available?: boolean;
   // Why the filing read was thrown out as implausible against Screener, or "".
   ocr_rejected?: string;
+  // Revenue/PAT where the AI's reading and the filing read differ by >10%.
+  ai_ocr_disagree?: string[];
   // Set when the read was off by a clean power of ten and was rescaled.
   ocr_rescaled?: string;
   // Screener has published the filing's own quarter.
@@ -3887,6 +3889,12 @@ export function TradingDashboard() {
                             </button>
                           </div>
 
+                          {Array.isArray(pending.like_for_like?.ai_ocr_disagree) && pending.like_for_like!.ai_ocr_disagree!.length > 0 && (
+                            <div style={{ fontSize: "11px", color: "var(--warning)", background: "var(--warning-bg)",
+                                          borderRadius: "6px", padding: "6px 10px", marginBottom: "8px", lineHeight: 1.5 }}>
+                              AI and the filing read disagree: {pending.like_for_like!.ai_ocr_disagree!.join("; ")}. One of them misread — check the filing.
+                            </div>
+                          )}
                           {pending.ai_status === "done" && ai ? (
                             <ValidationNotice v={ai.validation} />
                           ) : pending.ai_status === "failed" ? (

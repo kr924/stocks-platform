@@ -294,7 +294,9 @@ def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url
                     "https://openrouter.ai/api/v1/chat/completions",
                     json=payload, headers=headers,
                     # Fetching, parsing and reading a filing does not fit in 25s.
-                    timeout=180 if has_attachment else 30,
+                    # A filing's pages sent as text make a long prompt; free
+                    # models take well over 30s to answer one.
+                    timeout=180 if (has_attachment or len(prompt) > 8000) else 30,
                 )
                 if res.ok:
                     raw_text = res.json()["choices"][0]["message"]["content"]

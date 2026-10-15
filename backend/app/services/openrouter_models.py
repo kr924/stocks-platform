@@ -68,11 +68,14 @@ def _shape(m: dict) -> Optional[dict]:
     pricing = m.get("pricing") or {}
     arch = m.get("architecture") or {}
     inputs = [str(x).lower() for x in (arch.get("input_modalities") or [])]
+    outputs = [str(x).lower() for x in (arch.get("output_modalities") or [])]
     return {
         "id": mid,
         "name": m.get("name") or mid,
         "free": is_free_model(mid, pricing),
         "reads_pdf": "file" in inputs,
+        # Text out, and nothing else: an audio or image generator is no use.
+        "text_only_out": (outputs == ["text"]) if outputs else True,
         "context": m.get("context_length"),
         "prompt_per_m": _price_per_million(pricing.get("prompt")),
         "completion_per_m": _price_per_million(pricing.get("completion")),
@@ -110,12 +113,17 @@ def list_models(force: bool = False) -> list:
 _PREFERRED_VENDORS = ("google/", "deepseek/", "qwen/", "meta-llama/", "mistralai/",
                       "openai/", "moonshotai/", "z-ai/", "nvidia/", "microsoft/")
 _UNSUITABLE = ("code", "coder", "embed", "guard", "tts", "whisper", "audio",
-               "image", "vision-only", "rerank", "moderation")
+               "image", "vision-only", "rerank", "moderation", "lyria", "veo",
+               "imagen", "music", "speech", "clip")
 
 
 def suitable_for_filings(m: dict) -> bool:
     mid = m["id"].lower()
     if mid.startswith("openrouter/"):      # routers: unpredictable model per call
+        return False
+    # Judged by what the model outputs, not only its name: on 15 Oct the
+    # auto-pick for INDIANB was google/lyria-3-clip-preview, a music generator.
+    if not m.get("text_only_out", True):
         return False
     return not any(w in mid for w in _UNSUITABLE)
 

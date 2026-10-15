@@ -578,6 +578,51 @@ _in_progress_analyses = set()
 _in_progress_lock = threading.Lock()
 
 
+def check_against_screener(symbol: str, parsed_json: dict) -> str:
+    """
+    Why the AI's reading cannot be the filing's, or "".
+
+    The AI states the same quarter last year and the quarter before. Those are
+    already published, and Screener has them. If the AI's figures for them are
+    far from Screener's, the AI read a different table or document, or made
+    the numbers up. On 15 Oct 2026 a free model put Nestle's revenue at
+    ₹4,520 Cr (actual ₹6,788 Cr). validate_metrics cannot catch that: a model
+    that invents figures computes consistent percentages from them.
+
+    Revenue only. It is the line least changed between standalone and
+    consolidated, so a mismatch beyond 15% is a misread, not a basis choice.
+    """
+    try:
+        from datetime import datetime as _dt
+        from app.database import SessionLocal
+        from app.services.result_compare import (
+            parse_quarter, infer_quarter, shift_quarter, screener_figures, comparable)
+        from app.services.screener_quarters import parse_ai_value
+    except Exception:
+        return ""
+    q = str((parsed_json or {}).get("quarter") or "").strip()
+    if not parse_quarter(q):
+        q = infer_quarter(_dt.utcnow())
+    if not q:
+        return ""
+    yq, pq = shift_quarter(q, -12), shift_quarter(q, -3)
+    db = SessionLocal()
+    try:
+        figs = screener_figures(db, symbol, [yq, pq])
+    except Exception:
+        return ""
+    finally:
+        db.close()
+    rev = ((parsed_json or {}).get("metrics") or {}).get("revenue") or {}
+    issues = []
+    for col, quarter in (("last_year_same_qtr", yq), ("previous_qtr", pq)):
+        ai = parse_ai_value(str(rev.get(col) or ""))
+        scr = comparable(figs.get(quarter), "revenue")
+        if ai and scr and scr >= 1 and abs(ai - scr) / abs(scr) > 0.15:
+            issues.append(f"revenue for {quarter} read as ₹{ai:,.0f} Cr, Screener has ₹{scr:,.0f} Cr")
+    return "; ".join(issues)
+
+
 # OpenRouter can be handed a filing as a URL, which it then fetches itself.
 # Exchange URLs refuse that fetch: BSE answers anything that is not a browser
 # with 403 (Akamai, by TLS fingerprint; see bse_http), and NSE's archive wants
@@ -714,6 +759,41 @@ def _do_analyze_earnings_disclosure_2step(
     except Exception:
         pass
 
+    # The filing, prepared once for every OpenRouter attempt: its statement,
+    # notes and press-release pages as text rebuilt row by row, or for a scan
+    # a trimmed PDF of those pages (services/filing_text.py). Why there is no
+    # reading, if there is none, is collected in `failures` and stored as the
+    # summary, so the panel can say "no free key" or "rate limited" rather
+    # than "no figures".
+    failures = []
+    doc_prep = {"mode": "none"}
+    if attachment_url and (plan["before_gemcall"] or plan["after_gemcall"]):
+        raw_pdf = fetch_filing_pdf(attachment_url)
+        if raw_pdf is None:
+            failures.append("the filing PDF could not be downloaded, so it was sent as a link")
+        else:
+            from app.services.filing_text import prepare_for_ai
+            doc_prep = prepare_for_ai(raw_pdf)
+            if doc_prep["mode"] == "pdf" and len(doc_prep["pdf"]) > MAX_INLINE_PDF_BYTES:
+                failures.append(f"the filing's pages come to {len(doc_prep['pdf']) // 1048576} MB, "
+                                f"too large to send; sent as a link")
+                doc_prep = {"mode": "none"}
+            logger.info(f"[AUTO AI] #{symbol}: filing prepared as {doc_prep['mode']}"
+                        f"{' pages ' + str(doc_prep.get('pages')) if doc_prep.get('pages') else ''}")
+
+    if doc_prep["mode"] == "text":
+        document_block = (
+            "THE FILING (its results statements, notes and press release; the other pages were left out).\n"
+            "Tables are rebuilt row by row from the PDF: cells are separated by ' | '. Use each table's\n"
+            "header row (the dates) to tell which number belongs to which column. In many Indian\n"
+            "statements the three quarter columns come BEFORE the row label.\n\n"
+            + doc_prep["text"]
+        )
+        doc_word = "filing below"
+    else:
+        document_block = "THE FILING is attached as a PDF."
+        doc_word = "attached filing"
+
     # The prompt is written for what a model can actually do with one filing.
     # It used to ask the model to "refer to screener.in and public broker
     # research", which a model with no browsing cannot do, and weak models
@@ -723,13 +803,14 @@ def _do_analyze_earnings_disclosure_2step(
     # one, and the definitions match Screener's, so the AI tab compares like
     # with like. Placeholders rather than sample numbers in the schema: free
     # models copy example values.
-    prompt = f"""You are a senior Indian equity research analyst. Read the attached quarterly results filing for {symbol}{f' ({company_name})' if company_name else ''} and return ONE JSON object.
+    prompt = f"""You are a senior Indian equity research analyst. Read the quarterly results filing for {symbol}{f' ({company_name})' if company_name else ''} and return ONE JSON object.
 
-Announcement text (context only, the figures are in the attached PDF):
-{pdf_text[:3500] if pdf_text else '(none, use the attachment)'}
+Announcement text (context only):
+{pdf_text[:1500] if pdf_text else '(none)'}
 
 === WHERE THE NUMBERS COME FROM ===
-Use ONLY the attached filing. Do not use outside knowledge, websites or memory of past results.
+Use ONLY the {doc_word}. Do not use outside knowledge, websites or memory of past results.
+Ignore any text about a different period (e.g. template text for an older quarter).
 The Statement of Financial Results has these columns; use them exactly:
   - current_qtr          = "Quarter ended <latest date>" (the first numeric column)
   - previous_qtr         = "Quarter ended <the quarter before>" (the preceding quarter)
@@ -793,7 +874,9 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
   "ai_suggestion": "<BUY|SELL|BEATS ESTIMATES|MISSES ESTIMATES|NA>",
   "summary": "<2-3 sentences>",
   "sentiment": "<positive|negative|neutral>"
-}}"""
+}}
+
+{document_block}"""
 
     result_raw = None
     used_flow = "custom_rest_api"
@@ -889,26 +972,13 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
 
         return result_raw
 
-    # Why there is no reading, if there is none: stored as the summary so the
-    # panel can say "no free key" or "rate limited" rather than "no figures".
-    failures = []
-    _pdf_cache = {}
-
-    def filing_pdf():
-        if "v" not in _pdf_cache:
-            _pdf_cache["v"] = fetch_filing_pdf(attachment_url)
-            if attachment_url and _pdf_cache["v"] is None:
-                failures.append("the filing PDF could not be downloaded, so it was sent as a link")
-            elif _pdf_cache["v"] and len(_pdf_cache["v"]) > MAX_INLINE_PDF_BYTES:
-                failures.append(f"the filing is {len(_pdf_cache['v']) // 1048576} MB, too large to send inline; sent as a link")
-                _pdf_cache["v"] = None
-        return _pdf_cache["v"]
-
     def _openrouter(attempt):
         tier, model = attempt["tier"], attempt["model"]
         label = "Premium" if tier == "premium" else "Free"
         report = {}
-        pdf = filing_pdf()
+        # Text mode carries the filing in the prompt; nothing to attach.
+        pdf = doc_prep.get("pdf") if doc_prep["mode"] == "pdf" else None
+        link = attachment_url if doc_prep["mode"] == "none" else None
         try:
             fallbacks = None
             if tier == "free":
@@ -924,7 +994,7 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
             logger.info(f"🔬 [AUTO AI OPENROUTER {label.upper()}]: Calling {model} for #{symbol}")
             print(f"🔬 [AUTO AI OPENROUTER {label.upper()}]: Calling {model} for #{symbol}")
             or_res = call_openrouter(prompt, attempt["key"], model=model,
-                                     attachment_url=attachment_url,
+                                     attachment_url=link,
                                      attachment_bytes=pdf,
                                      free_only=(tier == "free"), fallbacks=fallbacks,
                                      report=report)
@@ -999,6 +1069,18 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
             f"consistency failure(s) — {'; '.join(validation['issues'][:3])}"
         )
         extraction_ok = False
+
+    # Against Screener's already-published quarters: catches invented figures,
+    # which reconcile with themselves and pass the check above.
+    if extraction_ok:
+        mismatch = check_against_screener(symbol, parsed_json)
+        if mismatch:
+            logger.warning(f"⚠️ [AI vs SCREENER] #{symbol}: {mismatch} — figures not used")
+            validation = dict(validation)
+            validation["issues"] = [f"Does not match Screener: {mismatch}"] + list(validation.get("issues") or [])
+            validation["hard_failures"] = int(validation.get("hard_failures") or 0) + 1
+            validation["trustworthy"] = False
+            extraction_ok = False
 
     future_growth_outlook = _clean_cell(parsed_json.get("future_growth_outlook")) or "NA"
     future_projected_numbers = _clean_cell(parsed_json.get("future_projected_numbers")) or "NA"
