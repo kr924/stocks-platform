@@ -185,22 +185,24 @@ knowledge we did not have at the decision moment and inflates any backtest.
 
 ### The 09:00-15:30 window
 
-Alerts run only while the market is open, **09:00 to 15:30 IST** on a working
-day. A filing outside that (pre-open, post-close, weekend) is marked `deferred`:
-**no Telegram result alert and no Telegram AI verdict**, because there is no
-session left to trade into. It is reported in the 08:00 digest.
+Alerts and AI analysis run only while the market is open, **09:00 to 15:30 IST,
+Monday to Friday** (`is_within_action_window`). Inside it, a result gets its OCR
+read and its AI analysis **the moment it lands**. Outside it (pre-open,
+post-close, weekend) it gets **no alert and no AI analysis**, because there is no
+session left to trade into. Those rows are marked `deferred` with
+`ai_status="deferred"`, are still read by OCR (local CPU, and the digest needs
+it), stay visible in the app, and are reported in the 08:00 digest from the
+filing read and Screener's like-for-like quarters. Re-analyse still runs one by
+hand.
 
-**The OCR read and the AI analysis run on every result the moment it lands,
-in or out of hours** (changed 15 Oct 2026 at the owner's request: the numbers
-belong on the panel at once). Out of hours, `_run_earnings_ai(..., notify=False)`
-runs it with no Telegram verdict. Premium switches itself off at 15:25, so the
-evening's filings run on gemcall and then the free OpenRouter account. On a heavy
-evening that can exceed the free account's daily limit; anything that fails
-shows "failed" and can be re-analysed. Rows created before the change carry
-`ai_status="deferred"` and are only analysed by Re-analyse.
+On 15 Oct 2026 the AI briefly ran on every filing at all hours. The owner
+reverted that the same morning: the window stands.
 
-A filing between 08:00 and 09:00 waits for the *next* morning's digest: it is
-past the current digest's window.
+A filing between 08:00 and 09:00 therefore waits for the *next* morning's
+digest: it is past the current digest's window but before the AI opens.
+
+Nothing analyses them later. That is deliberate; a 07:00 batch job existed
+briefly and was removed for contradicting the cutoff.
 
 ### Daily jobs (IST, guarded by last-run date)
 
@@ -672,16 +674,19 @@ responses now re-check the origin.
 
 ## AI earnings analysis
 
-Three backends: **gemcall** (`custom_api_url`, a local Playwright service
-driving the Gemini web UI; lives at `C:\Users\koush\OneDrive\Desktop\gemcall`,
-**not in git**) and **two OpenRouter accounts**, premium and free. The order is
-decided by `services/openrouter_models.accounts()`:
+**OpenRouter only, two accounts** (owner's call, 15 Oct 2026), decided by
+`services/openrouter_models.accounts()`:
 
 | Premium switch | order |
 |---|---|
-| **ON** (and a premium key) | premium model → gemcall → free account |
-| **OFF** | gemcall → free account. The premium key is never touched. |
-| Re-analyse with a model picked | that model alone, no gemcall: `:free` on the free key, anything else on the premium key whatever the switch says |
+| **ON** (and a premium key) | premium model → free account if it fails |
+| **OFF** | free account only. The premium key is never touched. |
+| Re-analyse with a model picked | that model alone: `:free` on the free key, anything else on the premium key whatever the switch says |
+
+**gemcall** (`custom_api_url`, a local Playwright service driving the Gemini
+web UI at `C:\Users\koush\OneDrive\Desktop\gemcall`, **not in git**) is no
+longer in the automatic chain (`skip_gemcall`). Its code path remains in
+`trade_ai_analyzer._gemcall` should it be reinstated.
 
 - **Premium switches itself off at 15:25 IST** every day
   (`openrouter_models.premium_auto_off`, from the scheduler). A filing after
@@ -835,15 +840,11 @@ repo (a stray `results_announcements.csv` in the root is a leftover, safe to del
 
 ## Open items
 
-- Both OpenRouter keys are **empty** until set in AI settings. Until then
-  nothing runs but gemcall, so most analyses return NA unless gemcall is up and
-  logged in.
-- gemcall needs `login-google.bat` then `start-all.bat` (login first, or it
-  restarts into an unauthenticated session), and its `custom_api_url` is a quick
-  tunnel that has already died — a named tunnel would end this.
-- **Both AI paths are therefore down**, which is why 1,510 of 1,531 analyses have
-  no usable revenue+PAT. The triage in front of them works; nothing is reading
-  the numbers. An OpenRouter key is the cheap fix (~$0.0011/filing).
+- **Both OpenRouter keys are empty until set in AI settings**, and gemcall is
+  no longer in the chain, so no AI analysis runs at all until at least the
+  free key is set. That is why 1,510 of 1,531 analyses had no usable
+  revenue+PAT. The free key costs nothing. Premium ≈ $0.0011/filing on
+  gemini-2.5-flash-lite.
 - **Secrets are baked into the Docker image** — see the `.env` note above. Wants
   a `.dockerignore` and `load_dotenv(override=False)`.
 - **The weekly symbol-registry rebuild has probably failed every Sunday since

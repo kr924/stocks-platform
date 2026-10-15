@@ -342,9 +342,9 @@ def route_financial_result(db: Session, ann, event, dedup_key: str):
         tracking_ref=make_tracking_ref(symbol),
         status="pending",
         deferred=not actionable,
-        # The AI runs on every result as it lands, in or out of hours: the
-        # numbers belong on the panel at once. Only the alerts wait.
-        ai_status="pending",
+        # The AI runs only in market hours (09:00-15:30, Mon-Fri). A filing
+        # outside them is read by OCR now and reported in the 08:00 digest.
+        ai_status="pending" if actionable else "deferred",
     )
     try:
         db.add(pending)
@@ -400,14 +400,8 @@ def route_financial_result(db: Session, ann, event, dedup_key: str):
         _capture_baseline(db, pending, symbol)
         logger.info(
             f"🌙 [RESULT DEFERRED] {symbol} ({pending.tracking_ref}) arrived "
-            f"outside the 09:00-15:30 IST window — no alert; analysed now, reported in the 08:00 digest."
+            f"outside the 09:00-15:30 IST window — no alert or AI; OCR read only, reported in the 08:00 digest."
         )
-        # Analysed now, like the OCR read above, so the panel and the digest
-        # carry the AI's figures and positives/negatives. No Telegram verdict:
-        # there is no session to act in. After 15:25 premium is off, so this
-        # runs on gemcall and then the free OpenRouter account.
-        _ai_pool.submit(_run_earnings_ai, symbol, ann.title, ann.url, ann.description,
-                        None, pending.id, None, False)
         return
 
     logger.info(

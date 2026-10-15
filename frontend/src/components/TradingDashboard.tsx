@@ -1050,8 +1050,8 @@ interface UpcomingEarningsItem {
 
 /**
  * Two OpenRouter accounts. With premium ON, results are analysed on the premium
- * account first; OFF, gemcall then the free account, and the paid key is never
- * spent. Keys come back from the server masked ("••••abcd") and are only sent
+ * account, falling back to the free one; OFF, the free account only, and the
+ * paid key is never spent. The AI runs only 09:00-15:30 Mon-Fri. Keys come back from the server masked ("••••abcd") and are only sent
  * when typed anew, so saving the form never round-trips a key.
  */
 interface AutoTradingSettings {
@@ -2855,8 +2855,8 @@ export function TradingDashboard() {
             )}
 
             {/* Which OpenRouter account analyses new results. ON: the premium
-                account and the model picked here, ahead of gemcall. OFF:
-                gemcall, then the free account; the paid key is never spent. */}
+                account and the model picked here (free account if it fails).
+                OFF: the free account only; the paid key is never spent. */}
             {(() => {
               const on = !!aiSettings.premium_openrouter_enabled;
               const freeLabel = aiSettings.free_openrouter_model || "best free model";
@@ -2875,7 +2875,7 @@ export function TradingDashboard() {
                     aria-checked={on}
                     title={on
                       ? "New results are analysed on the premium OpenRouter account. Switches itself off at 15:25 IST each day. Click to switch to the free account now."
-                      : `Premium is off: new results go to gemcall, then the free OpenRouter account (${freeLabel}). Click to use premium.`}
+                      : `Premium is off: new results are analysed on the free OpenRouter account (${freeLabel}). Click to use premium.`}
                     style={{
                       display: "inline-flex", alignItems: "center", gap: "6px",
                       background: "none", border: "none", padding: 0,
@@ -2916,7 +2916,7 @@ export function TradingDashboard() {
                   <button
                     type="button"
                     onClick={() => setShowSettingsModal(true)}
-                    title="AI settings: both OpenRouter accounts and gemcall"
+                    title="AI settings: both OpenRouter accounts"
                     style={{ display: "inline-flex", background: "none", border: "none", padding: "2px", cursor: "pointer", color: "var(--text-muted)" }}>
                     <Settings size={12} />
                   </button>
@@ -3208,7 +3208,7 @@ export function TradingDashboard() {
               const aiSummary = aiDone && p.ai_analysis!.ai_summary && !/^AI analysis pending/i.test(p.ai_analysis!.ai_summary)
                 ? p.ai_analysis!.ai_summary : "";
               const aiState = aiDone ? "" : p.ai_status === "failed" ? "AI failed"
-                : p.ai_status === "deferred" ? "not analysed — Re-analyse to run" : "AI running…";
+                : p.ai_status === "deferred" ? "not analysed — outside 09:00–15:30" : "AI running…";
               const isRes = categoryOf(p) === "results";
               const sel = selectedPending?.id === p.id;
               return (
@@ -3600,7 +3600,7 @@ export function TradingDashboard() {
                     ) : pending.ai_status === "failed" ? (
                       <span style={{ fontSize: "10px", color: "var(--negative-strong)" }}>failed</span>
                     ) : pending.ai_status === "deferred" ? (
-                      <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>not analysed — use Re-analyse on the AI tab</span>
+                      <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>not analysed — outside 09:00–15:30</span>
                     ) : (
                       <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "inline-flex", alignItems: "center", gap: "5px" }}>
                         <RefreshCw size={11} className="spin" /> running…
@@ -3824,7 +3824,7 @@ export function TradingDashboard() {
                               <option value="">
                                 {aiSettings.premium_openrouter_enabled && aiSettings.premium_openrouter_key_set
                                   ? `Default — premium (${aiSettings.premium_openrouter_model})`
-                                  : `Default — gemcall, then free (${aiSettings.free_openrouter_model || "best free"})`}
+                                  : `Default — free (${aiSettings.free_openrouter_model || "best free model"})`}
                               </option>
                               {orModels.premium.length > 0 || orModels.free.length > 0 ? (
                                 <>
@@ -3907,7 +3907,7 @@ export function TradingDashboard() {
                                   {pending.ai_status === "done" && ai
                                     ? "The AI did not read usable figures from this filing — switch to OCR for the filing's own numbers."
                                     : pending.ai_status === "deferred"
-                                      ? "Not analysed by the AI (filed before it ran out of hours) — Re-analyse above, or see the OCR tab."
+                                      ? "Not analysed by the AI — filed outside 09:00–15:30 Mon–Fri. The OCR tab has the filing's own numbers; Re-analyse above runs it anyway."
                                       : "AI figures appear here when the analysis finishes."}
                                 </div>
                               )}
@@ -3955,7 +3955,7 @@ export function TradingDashboard() {
                                   empty={pending.ai_status === "done" && ai
                                     ? "The AI listed no positives or negatives for this filing."
                                     : pending.ai_status === "failed" ? "AI analysis failed."
-                                    : pending.ai_status === "deferred" ? "Not analysed — use Re-analyse on the AI tab."
+                                    : pending.ai_status === "deferred" ? "Not analysed — filed outside 09:00–15:30 Mon–Fri."
                                     : "Waiting for the AI analysis."}
                                 />
                               </div>
@@ -4542,7 +4542,7 @@ export function TradingDashboard() {
             <form onSubmit={handleSaveSettings} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
               <div>
                 <label style={{ display: "block", fontSize: "12px", fontWeight: "700", color: "var(--text-secondary)", marginBottom: "6px" }}>
-                  gemcall: Custom REST API Endpoint URL (POST /api/generate)
+                  gemcall: Custom REST API Endpoint URL (not used for automatic analysis)
                 </label>
                 <input
                   type="text"
@@ -4561,7 +4561,7 @@ export function TradingDashboard() {
                   }}
                 />
                 <span style={{ fontSize: "11px", color: "var(--text-faint)", marginTop: "4px", display: "block" }}>
-                  Tried first when premium is off, and after premium when it is on.
+                  Kept for reference. Results are analysed on OpenRouter only: premium when on, else free.
                 </span>
               </div>
 
@@ -4635,7 +4635,7 @@ export function TradingDashboard() {
                           <OrModelOptions models={orModels.premium} current={aiSettings.premium_openrouter_model} />
                         </select>
                         <span style={hint}>
-                          ON: every new result is analysed here first, before gemcall. OFF: this key is never used,
+                          ON: every new result (09:00–15:30 Mon–Fri) is analysed here, with the free account as fallback. OFF: this key is never used,
                           except when you pick a paid model for one filing with Re-analyse. Premium switches itself
                           off at 15:25 IST each day; turning it back on after that holds until the next day's 15:25.
                         </span>
@@ -4655,7 +4655,7 @@ export function TradingDashboard() {
                           <OrModelOptions models={orModels.free} current={aiSettings.free_openrouter_model || undefined} />
                         </select>
                         <span style={hint}>
-                          Used when premium is off, or when premium and gemcall both fail. Only free models are tried
+                          Used when premium is off, or when the premium call fails. Only free models are tried
                           on this key. Free models are rate-limited (about 50 a day on an account with no credit).
                         </span>
                       </div>

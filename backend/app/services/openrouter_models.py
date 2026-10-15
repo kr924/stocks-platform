@@ -9,11 +9,12 @@ Two OpenRouter accounts:
            rate limited (about 20 a minute, 50 a day without credit on the
            account) and many cannot read a PDF natively.
 
-With premium ON, every results filing is analysed on the premium account
-first, ahead of gemcall. If it fails, gemcall runs, then the free account.
-With premium OFF, the premium key is never used: gemcall runs, then the free
-account. Switching premium off is a decision not to spend, so it never falls
-back onto the paid key.
+With premium ON, every results filing is analysed on the premium account,
+falling back to the free account if that fails. With premium OFF, only the
+free account runs; switching premium off is a decision not to spend, so it
+never falls back onto the paid key. gemcall is not used for automatic
+analysis. The AI itself runs only in market hours (results_router), and the
+premium switch turns itself off at 15:25.
 
 A re-analysis that names a model is the operator's explicit choice. A ":free"
 model runs on the free account. Anything else runs on the premium key whatever
@@ -131,8 +132,9 @@ def _clean_key(k) -> str:
 
 def accounts(cfg: dict, model_override: Optional[str] = None) -> dict:
     """
-    Which OpenRouter calls to make for one results analysis, and where they
-    sit relative to gemcall.
+    Which OpenRouter calls to make for one results analysis, in order.
+    gemcall is skipped (skip_gemcall); the before/after keys remain so the
+    analyser can still place calls around it if it is ever reinstated.
 
     Returns {"before_gemcall": [...], "after_gemcall": [...]}; each attempt is
     {"tier", "key", "model"}. An attempt with no key is left out. If model is
@@ -158,12 +160,16 @@ def accounts(cfg: dict, model_override: Optional[str] = None) -> dict:
         return {"before_gemcall": attempt, "after_gemcall": [], "skip_gemcall": True,
                 "missing": None if key else ("premium" if tier == "premium" else "free")}
 
-    before, after = [], []
+    # Automatic analysis is OpenRouter only (owner's call, 15 Oct 2026): the
+    # premium account when the switch is on, else the free one. Premium falls
+    # back to the free account if it fails. gemcall is not in the chain; its
+    # tunnel URL rotates and it was down more often than not.
+    chain = []
     if premium_on and premium_key:
-        before.append({"tier": "premium", "key": premium_key, "model": premium_model})
+        chain.append({"tier": "premium", "key": premium_key, "model": premium_model})
     if free_key:
-        after.append({"tier": "free", "key": free_key, "model": free_model})
-    return {"before_gemcall": before, "after_gemcall": after, "skip_gemcall": False,
+        chain.append({"tier": "free", "key": free_key, "model": free_model})
+    return {"before_gemcall": chain, "after_gemcall": [], "skip_gemcall": True,
             "missing": None}
 
 

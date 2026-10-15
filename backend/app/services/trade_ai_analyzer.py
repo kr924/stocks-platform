@@ -888,8 +888,9 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
             print(f"❌ [AUTO AI OPENROUTER {label.upper()} ERROR]: {model} failed for #{symbol}: {e}")
             return None, None
 
-    # Premium ON: the premium account first. Then gemcall, then the free
-    # account. Premium OFF: gemcall, then free; the paid key is never touched.
+    # Premium ON: the premium account, then the free one if it fails.
+    # Premium OFF: the free account only; the paid key is never touched.
+    # gemcall is skipped for automatic analysis (plan["skip_gemcall"]).
     for attempt in plan["before_gemcall"]:
         result_raw, provider = _openrouter(attempt)
         if result_raw:
@@ -912,8 +913,8 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
         if plan.get("missing"):
             logger.error(f"❌ [AUTO AI]: no {plan['missing']} OpenRouter key set for the model chosen for #{symbol}")
         elif not plan["before_gemcall"] and not plan["after_gemcall"]:
-            logger.error(f"❌ [AUTO AI]: gemcall gave nothing and no OpenRouter key is usable for #{symbol} "
-                         "(premium off or empty, free key empty)")
+            logger.error(f"❌ [AUTO AI]: no OpenRouter key is usable for #{symbol} "
+                         "(premium off or empty, free key empty) — set them under AI settings")
         tried = plan["after_gemcall"] or plan["before_gemcall"]
         if tried:
             used_flow = f"openrouter_{tried[-1]['tier']}"
