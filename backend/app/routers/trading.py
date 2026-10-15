@@ -68,6 +68,7 @@ class AutoTradingSettingsUpdate(BaseModel):
     premium_openrouter_enabled: Optional[bool] = None
     free_openrouter_api_key: Optional[str] = None
     free_openrouter_model: Optional[str] = None
+    broker_estimates_enabled: Optional[bool] = None
 
 
 class DirectBuyRequest(BaseModel):
@@ -1357,6 +1358,41 @@ def dismiss_pending_result(pending_id: int, db: Session = Depends(get_db)):
     return {"status": "success", "pending": _serialize_pending(pending, None, db)}
 
 
+@router.post("/pending-results/{pending_id}/estimates-refresh")
+def estimates_refresh_pending(pending_id: int, db: Session = Depends(get_db)):
+    """
+    Search again for brokers' published estimates of this filing's quarter.
+
+    One web search on the premium key (about $0.007), with every figure checked
+    against its article. See services/consensus.py.
+    """
+    pending = db.query(PendingResultOrder).filter(PendingResultOrder.id == pending_id).first()
+    if not pending:
+        raise HTTPException(status_code=404, detail="Pending result not found")
+    if (getattr(pending, "kind", "result") or "result") != "result":
+        raise HTTPException(status_code=400, detail="Impact news has no quarterly estimates.")
+    from app.services import consensus
+    from app.services.result_compare import filing_quarter
+    extraction = json.loads(pending.extraction_json) if getattr(pending, "extraction_json", None) else None
+    quarter, _, _ = filing_quarter(extraction, pending.event_time)
+    enabled, key, _ = consensus._settings()
+    if not key:
+        raise HTTPException(status_code=400,
+                            detail="Broker estimates need the premium OpenRouter key: web search is not free.")
+    if not enabled:
+        raise HTTPException(status_code=400, detail="Broker estimates are switched off in AI settings.")
+    data = consensus.get_or_fetch(db, pending.symbol, pending.company_name or "", quarter, force=True) or {}
+    item = _serialize_pending(pending, None, db)
+    _attach_screener(db, [pending], [item])
+    n = len(data.get("brokers") or [])
+    msg = (f"{n} broker estimate(s) found and checked against their articles." if n else
+           (f"Search failed: {data.get('error')}" if data.get("error") else
+            "No published broker estimates found for this quarter."))
+    if data.get("dropped_unverified"):
+        msg += f" {data['dropped_unverified']} figure(s) dropped: not found in the cited article."
+    return {"message": msg, "pending": item}
+
+
 @router.post("/pending-results/{pending_id}/screener-refresh")
 def screener_refresh_pending(pending_id: int, db: Session = Depends(get_db)):
     """
@@ -1698,6 +1734,7 @@ def update_auto_trading_settings(body: AutoTradingSettingsUpdate):
         premium_openrouter_enabled=body.premium_openrouter_enabled,
         free_openrouter_api_key=body.free_openrouter_api_key,
         free_openrouter_model=body.free_openrouter_model,
+        broker_estimates_enabled=body.broker_estimates_enabled,
     )
     return {"message": "Auto-trading AI settings updated successfully",
             "settings": _public_ai_settings(cfg.auto_trading_ai)}

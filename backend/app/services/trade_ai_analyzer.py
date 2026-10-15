@@ -811,6 +811,23 @@ def _do_analyze_earnings_disclosure_2step(
     except Exception as e:
         logger.debug(f"[AUTO AI] trend context unavailable for {symbol}: {e}")
 
+    # What brokers forecast for this quarter, verified against the articles
+    # (services/consensus.py). Usually cached by the 08:40 job; fetched now
+    # when it is not.
+    estimates_block = ""
+    try:
+        from app.database import SessionLocal as _SL2
+        from app.services import consensus
+        from app.services.result_compare import infer_quarter as _iq
+        _db2 = _SL2()
+        try:
+            est = consensus.get_or_fetch(_db2, symbol, company_name, _iq(datetime.utcnow()))
+        finally:
+            _db2.close()
+        estimates_block = consensus.prompt_block(est)
+    except Exception as e:
+        logger.debug(f"[AUTO AI] broker estimates unavailable for {symbol}: {e}")
+
     # The prompt is written for what a model can actually do with one filing.
     # It used to ask the model to "refer to screener.in and public broker
     # research", which a model with no browsing cannot do, and weak models
@@ -847,14 +864,16 @@ Convert every figure to ₹ crore (₹ lakh / 100; ₹ million / 10; ₹ thousan
   current_qtr, previous_qtr, last_year_same_qtr : figures from the columns above
   yoy_change_pct = (current_qtr - last_year_same_qtr) / |last_year_same_qtr| x 100, as "+12.3%" / "-4.5%"
   qoq_change_pct = (current_qtr - previous_qtr) / |previous_qtr| x 100
-  estimated      = a broker/consensus estimate ONLY if the document itself states one; otherwise "NA"
+  estimated      = the broker consensus given below, or one the document itself states; otherwise "NA"
 Compute the percentages from the figures you wrote. They are checked against each other, and a
 mismatch discards the whole analysis. Any figure you cannot read with certainty is "NA". Never guess.
 
-{trend_block}
+{trend_block}{estimates_block}
 === HOW THE MARKET WILL READ IT (judge this before the verdict) ===
-Good growth is not enough: a price moves on the SURPRISE against what was expected, and the
-expectation is roughly the recent trend above. A quarter that grows in line with its trend is
+Good growth is not enough: a price moves on the SURPRISE against what was expected. Where
+BROKER ESTIMATES are given above, they ARE the expectation: compare revenue, EBITDA and PAT
+with the consensus and put the consensus in each row's "estimated" cell. Otherwise the
+expectation is roughly the recent trend. A quarter that grows in line with its trend is
 already priced in, and the stock can fall on in-line numbers. Check each of these and report the
 ones that apply in "red_flags":
   - growth in line with or below the recent trend (no acceleration)
@@ -872,7 +891,9 @@ reaction_risk: "low" / "medium" / "high" that the stock falls on this result, wi
            driven by operations, and no serious red flag.
   "SELL" : revenue and PAT both read, and the quarter is clearly weak: falling profit, a swing to
            loss, growth well below trend, or serious red flags (margin collapse, cautious guidance).
-  "BEATS ESTIMATES" / "MISSES ESTIMATES" : only when the document states an estimate.
+  "BEATS ESTIMATES" / "MISSES ESTIMATES" : only when broker estimates are given above (or the
+           document states one), and PAT (or revenue, with PAT not beating) is clearly beyond them,
+           by more than about 3-4%. Within that band the result is in line, usually already priced in.
   "NA"   : anything else, including a strong but in-line quarter with high reaction risk, and mixed
            or unclear results. Never use HOLD or NEUTRAL to express doubt.
 extraction_ok = true only if revenue.current_qtr and pat.current_qtr are real numbers.

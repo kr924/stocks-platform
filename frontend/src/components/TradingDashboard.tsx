@@ -60,6 +60,91 @@ interface LikeForLike {
   numbers_read?: NumbersRead | null;
   numbers_read_ocr?: NumbersRead | null;
   numbers_read_screener?: NumbersRead | null;
+  // The quarter against brokers' verified consensus, where one was found.
+  estimates?: EstimatesView | null;
+}
+
+interface EstimatesView {
+  quarter: string;
+  fiscal?: string;
+  overall: string;            // "BEAT" | "MISS" | "IN LINE" | ""
+  rows: { key: string; label: string; consensus: number | null; n?: number | null;
+          actual: number | null; actual_source: string; surprise_pct: number | null; call: string }[];
+  brokers: { broker: string; revenue_cr?: number; ebitda_cr?: number; ebitda_margin_pct?: number;
+             pat_cr?: number; source_url: string; title?: string; published?: string }[];
+  dropped_unverified?: number;
+  fetched_at?: string | null;
+  error?: string;
+}
+
+/** The quarter against what brokers forecast, with the articles it came from. */
+function EstimatesPanel({ est, busy, message, onRefresh }: {
+  est?: EstimatesView | null; busy: boolean; message?: string; onRefresh: () => void;
+}) {
+  const rows = Array.isArray(est?.rows) ? est!.rows : [];
+  const brokers = Array.isArray(est?.brokers) ? est!.brokers : [];
+  const tone = (c: string) => c === "beat" || c === "BEAT" ? "var(--positive)"
+    : c === "miss" || c === "MISS" ? "var(--negative)" : "var(--text-secondary)";
+  const fmt = (v: number | null | undefined) => v == null ? "—" : v.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  const cell = { padding: "4px 8px", textAlign: "right" as const, whiteSpace: "nowrap" as const };
+  return (
+    <div style={{ marginTop: "12px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: "6px" }}>
+        <span style={{ fontSize: "10px", fontWeight: 700, color: "var(--info)", letterSpacing: "0.4px" }}>VS BROKER ESTIMATES</span>
+        {est?.overall && (
+          <span style={{ fontSize: "11px", fontWeight: 800, color: tone(est.overall) }}>{est.overall}</span>
+        )}
+        <button onClick={onRefresh} disabled={busy}
+          title="Web search for brokers' published previews of this quarter (premium key, about $0.007). Every figure is checked against its article."
+          style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: "4px", padding: "3px 10px",
+                   borderRadius: "5px", background: "transparent", border: "1px solid rgba(160,168,180,.2)",
+                   color: "var(--text-muted)", fontSize: "10px", cursor: busy ? "wait" : "pointer" }}>
+          <RefreshCw size={10} className={busy ? "spin" : undefined} /> {busy ? "Searching…" : brokers.length ? "Search again" : "Find estimates"}
+        </button>
+      </div>
+      {message && <div style={{ fontSize: "10px", color: "var(--text-muted)", marginBottom: "6px" }}>{message}</div>}
+      {brokers.length === 0 ? (
+        <div style={{ fontSize: "11px", color: "var(--text-faint)", fontStyle: "italic" }}>
+          {est ? (est.error ? `Search failed: ${est.error}` : "No published broker estimates found for this quarter.")
+               : "Not looked up yet. Companies on the day's results calendar are looked up at 08:40."}
+        </div>
+      ) : (
+        <>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ borderCollapse: "collapse", fontSize: "11px", width: "100%", minWidth: "420px" }}>
+              <thead><tr>
+                {["", "Consensus", "Actual", "Surprise", ""].map((h, i) => (
+                  <th key={i} style={{ ...cell, textAlign: i === 0 ? "left" : "right", color: "var(--text-muted)", fontWeight: 600, fontSize: "10px", borderBottom: "1px solid var(--border-subtle)" }}>{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {rows.map(r => (
+                  <tr key={r.key}>
+                    <td style={{ padding: "4px 8px", fontWeight: 600, color: "var(--text-primary)" }}>{r.label}</td>
+                    <td style={cell} title={r.n ? `median of ${r.n} broker(s)` : undefined}>{fmt(r.consensus)}</td>
+                    <td style={cell} title={r.actual_source ? `from ${r.actual_source}` : undefined}>{fmt(r.actual)}</td>
+                    <td style={{ ...cell, fontWeight: 700, color: tone(r.call) }}>
+                      {r.surprise_pct == null ? "—" : `${r.surprise_pct > 0 ? "+" : ""}${r.surprise_pct.toFixed(1)}%`}
+                    </td>
+                    <td style={{ ...cell, color: tone(r.call), textAlign: "left" }}>{r.call}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ fontSize: "10px", color: "var(--text-faint)", marginTop: "4px", lineHeight: 1.6 }}>
+            {brokers.map((b, i) => (
+              <span key={i} style={{ marginRight: "10px" }}>
+                <a href={b.source_url} target="_blank" rel="noreferrer" style={{ color: "var(--text-muted)" }}>{b.broker}</a>
+                {b.published ? ` (${b.published})` : ""}
+              </span>
+            ))}
+            {est?.dropped_unverified ? <span>· {est.dropped_unverified} figure(s) dropped as not in the source</span> : null}
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
 
 interface NumbersRead {
@@ -1081,6 +1166,7 @@ interface AutoTradingSettings {
   free_openrouter_api_key: string;
   free_openrouter_model: string;
   free_openrouter_key_set?: boolean;
+  broker_estimates_enabled?: boolean;
 }
 
 /**
@@ -1160,6 +1246,8 @@ export function TradingDashboard() {
   // Per-card: which extraction tab is showing, and which model a re-analysis
   // would use. Keyed by prompt id so opening one card does not reset another.
   const [resultTab, setResultTab] = useState<Record<number, "ai" | "ocr" | "screener">>({});
+  // What the last broker-estimates search said, per filing.
+  const [estimatesCheck, setEstimatesCheck] = useState<Record<number, { busy: boolean; message?: string }>>({});
   // What the last "Check Screener" said, per filing.
   const [screenerCheck, setScreenerCheck] = useState<Record<number, { busy: boolean; message?: string }>>({});
   const [reanalyseModel, setReanalyseModel] = useState<Record<number, string>>({});
@@ -2033,6 +2121,24 @@ export function TradingDashboard() {
     }
   };
 
+  /** Search for brokers' published estimates of this filing's quarter. */
+  const handleEstimatesRefresh = async (pending: PendingResult) => {
+    setEstimatesCheck(prev => ({ ...prev, [pending.id]: { busy: true } }));
+    let message = "";
+    try {
+      const res = await fetch(`${API_BASE}/api/trading/pending-results/${pending.id}/estimates-refresh`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      message = (res.ok ? data.message : data.detail) || "";
+      if (res.ok && data.pending) {
+        setPendingResults(prev => prev.map(p => p.id === pending.id ? { ...p, ...data.pending } : p));
+      }
+    } catch (err) {
+      console.error("Estimates search failed:", err);
+      message = "Could not reach the server.";
+    }
+    setEstimatesCheck(prev => ({ ...prev, [pending.id]: { busy: false, message } }));
+  };
+
   /** Ask Screener now whether it has published this filing's quarter. */
   const handleScreenerRefresh = async (pending: PendingResult) => {
     setScreenerCheck(prev => ({ ...prev, [pending.id]: { busy: true } }));
@@ -2185,6 +2291,7 @@ export function TradingDashboard() {
       premium_openrouter_model: aiSettings.premium_openrouter_model,
       premium_openrouter_enabled: aiSettings.premium_openrouter_enabled,
       free_openrouter_model: aiSettings.free_openrouter_model,
+      broker_estimates_enabled: aiSettings.broker_estimates_enabled !== false,
     };
     if (keyDrafts.premium !== undefined) patch.premium_openrouter_api_key = keyDrafts.premium.trim();
     if (keyDrafts.free !== undefined) patch.free_openrouter_api_key = keyDrafts.free.trim();
@@ -3242,6 +3349,14 @@ export function TradingDashboard() {
                     </span>
                     {p.position && <span className="od-chip" style={{ color: "var(--accent)", background: "rgba(127,166,225,.12)" }}>ORDERED</span>}
                     {p.paused && <span className="od-chip" style={{ color: "var(--text-muted)", background: "rgba(255,255,255,.05)" }}>PAUSED</span>}
+                    {p.like_for_like?.estimates?.overall && (
+                      <span className="od-chip" title="Against brokers' verified consensus"
+                        style={{ color: p.like_for_like.estimates.overall === "BEAT" ? "var(--positive)"
+                                   : p.like_for_like.estimates.overall === "MISS" ? "var(--negative)" : "var(--text-secondary)",
+                                 background: "rgba(255,255,255,.05)" }}>
+                        EST {p.like_for_like.estimates.overall}
+                      </span>
+                    )}
                     <span style={{ marginLeft: "auto", fontSize: "12px", fontWeight: 700, color: pctCol(move) }}
                       title={since != null ? "Since the result" : "Day change"}>
                       {move == null ? "—" : `${move > 0 ? "+" : ""}${move.toFixed(1)}%`}
@@ -3957,6 +4072,13 @@ export function TradingDashboard() {
                                 rows={pending.comparison}
                                 lfl={pending.like_for_like}
                                 view={tab}
+                              />
+
+                              <EstimatesPanel
+                                est={pending.like_for_like?.estimates}
+                                busy={!!estimatesCheck[pending.id]?.busy}
+                                message={estimatesCheck[pending.id]?.message}
+                                onRefresh={() => handleEstimatesRefresh(pending)}
                               />
 
                               {/* The two reads next to each other: rules on the
@@ -4687,6 +4809,15 @@ export function TradingDashboard() {
                           off at 15:25 IST each day; turning it back on after that holds until the next day's 15:25.
                         </span>
                       </div>
+                      <label style={{ display: "flex", alignItems: "flex-start", gap: "8px", fontSize: "11px", color: "var(--text-secondary)", cursor: "pointer" }}>
+                        <input type="checkbox" checked={aiSettings.broker_estimates_enabled !== false}
+                          onChange={e => setAiSettings({ ...aiSettings, broker_estimates_enabled: e.target.checked })} />
+                        <span>
+                          <b>Look up broker estimates</b> by web search on this key (about $0.007 a company): each
+                          results-day company at 08:40, and any filing analysed without them. Only figures found in
+                          the cited article are kept. Works whether premium analysis is on or off.
+                        </span>
+                      </label>
                     </div>
 
                     <div style={section}>

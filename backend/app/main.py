@@ -251,6 +251,15 @@ async def _intelligence_scheduler():
                     from app.services.openrouter_models import premium_auto_off
                     await asyncio.to_thread(premium_auto_off, now_ist)
 
+                # 08:40 Mon-Fri — broker estimates for today's results calendar,
+                # before the first filings, so the analysis does not wait on a
+                # web search. Once a day; a second day's run re-tries only what
+                # came back empty. See services/consensus.py.
+                if (now_ist.weekday() < 5 and (now_ist.hour, now_ist.minute) >= (8, 40)
+                        and last_run.get("estimates_date") != today_str):
+                    last_run["estimates_date"] = today_str
+                    asyncio.create_task(asyncio.to_thread(_run_estimates_prefetch))
+
                 # 08:00 — publish the digest page and send the single alert
                 if now_ist.hour >= 8 and last_run.get("morning_digest_date") != today_str:
                     last_run["morning_digest_date"] = today_str
@@ -363,6 +372,21 @@ def _run_scheduled_buys():
             db.close()
     except Exception as e:
         logger.error(f"Scheduled buy sweep error: {e}")
+
+
+@_single_flight("estimates_prefetch")
+def _run_estimates_prefetch():
+    """08:40 IST — broker estimates for every company reporting today."""
+    try:
+        from app.services.consensus import cache_results_day
+        db = next(get_db())
+        try:
+            n = cache_results_day(db)
+            logger.info(f"[ESTIMATES] prefetch looked up {n} compan(ies) on today's calendar")
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"Estimates prefetch error: {e}")
 
 
 @_single_flight("pending_purge")

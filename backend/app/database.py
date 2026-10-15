@@ -278,6 +278,21 @@ class ScreenerQuarter(Base):
     )
 
 
+class BrokerEstimate(Base):
+    """
+    Brokers' published forecasts for one company's quarter, found by a web
+    search and kept only where the figures appear in the cited article
+    (services/consensus.py). One row per symbol and quarter, refreshed while
+    it is empty or stale; `data_json` holds the per-broker figures, the
+    consensus (median) and the sources.
+    """
+    __tablename__ = "broker_estimates"
+    symbol = Column(String(50), primary_key=True)
+    quarter = Column(String(20), primary_key=True)     # "Sep 2026"
+    data_json = Column(Text, nullable=True)
+    fetched_at = Column(DateTime, default=datetime.utcnow)
+
+
 class DailyPrice(Base):
     """
     One symbol's price for one trading day, as it stood when we looked.

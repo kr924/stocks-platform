@@ -448,6 +448,8 @@ def build(db, symbol: str, event_time: Optional[datetime],
         "screener_published": bool(scr_cur),
         "message": message,
     }
+    # Against the brokers' verified consensus, where one was found.
+    result["estimates"] = estimates_view(db, symbol, quarter, rows)
     # The rule-based read of these figures: verdict, positives, negatives.
     # Once on the best figures, and once per source for the OCR and Screener
     # tabs, so each tab's suggestion matches the numbers above it.
@@ -631,4 +633,62 @@ def trend_context(db, symbol: str, quarter: str, n: int = 6) -> str:
             parts.append(f"EBITDA margin {ebitda / rev * 100:.1f}%")
         lines.append("  " + " ".join(parts))
     return "\n".join(lines)
+
+
+# Beyond these, the actual figure is a beat or a miss against consensus.
+# Wider for profit, which moves on tax and other income that previews round.
+SURPRISE_BAND = {"revenue": 2.0, "ebitda": 3.0, "pat": 4.0}
+
+
+def estimates_view(db, symbol: str, quarter: str, rows: list) -> Optional[dict]:
+    """
+    The quarter against the brokers' verified consensus (services/consensus.py).
+
+    The actual figure is the best one available: Screener's for the quarter,
+    else the filing read, else the AI's. The call is arithmetic: beyond
+    SURPRISE_BAND it is a beat or a miss, inside it in line. Overall: a miss
+    on PAT, or on revenue without a PAT beat, is a MISS. A PAT beat without a
+    revenue miss is a BEAT. Anything else is IN LINE, which the market has
+    usually priced in.
+    """
+    if db is None or not symbol or not quarter:
+        return None
+    try:
+        from app.services.consensus import stored
+        data = stored(db, symbol, quarter)
+    except Exception:
+        return None
+    if not data:
+        return None
+    cons = data.get("consensus") or {}
+    by_key = {r["key"]: r for r in rows}
+    lines, calls = [], {}
+    for key, ckey in (("revenue", "revenue_cr"), ("ebitda", "ebitda_cr"), ("pat", "pat_cr")):
+        c = cons.get(ckey)
+        r = by_key.get(key) or {}
+        actual, src = None, ""
+        for field, name in (("scr_current", "Screener"), ("ocr_current", "filing"), ("ai_current", "AI")):
+            if isinstance(r.get(field), (int, float)):
+                actual, src = r[field], name
+                break
+        surprise = _pct(actual, c) if isinstance(c, (int, float)) else None
+        call = ""
+        if surprise is not None:
+            band = SURPRISE_BAND[key]
+            call = "beat" if surprise > band else "miss" if surprise < -band else "in line"
+            calls[key] = call
+        lines.append({"key": key, "label": LABELS.get(key, key), "consensus": c,
+                      "n": cons.get(ckey + "_n"), "actual": actual, "actual_source": src,
+                      "surprise_pct": surprise, "call": call})
+    if not calls:
+        overall = ""
+    elif calls.get("pat") == "miss" or (calls.get("revenue") == "miss" and calls.get("pat") != "beat"):
+        overall = "MISS"
+    elif calls.get("pat") == "beat" and calls.get("revenue") != "miss":
+        overall = "BEAT"
+    else:
+        overall = "IN LINE"
+    return {"quarter": quarter, "fiscal": data.get("fiscal"), "rows": lines, "overall": overall,
+            "brokers": data.get("brokers") or [], "dropped_unverified": data.get("dropped_unverified", 0),
+            "fetched_at": data.get("fetched_at"), "error": data.get("error") or ""}
 

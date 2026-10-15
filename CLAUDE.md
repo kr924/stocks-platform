@@ -811,8 +811,33 @@ BUY needs growth clearly above trend with no serious red flag. A strong but
 in-line quarter with high reaction risk is NA. These go into
 `highlights_json` and appear on the AI card (⚠ flags, trend and risk lines),
 the list ("⚠ High reaction risk —"), the Telegram verdict and the digest.
-**The model has no consensus estimates.** The trend stands in for them. A true
-beat/miss needs a broker-consensus feed, which is a data subscription.
+**Broker estimates are looked up and checked** (`services/consensus.py`, table
+`broker_estimates`). One OpenRouter call on the **premium** key uses the web
+plugin (Exa, ≈$0.007 a search; web search is never free, even on free models),
+restricted to Indian financial news domains, and asks for the brokers'
+published previews for the quarter (`fiscal_label`: "Q2 FY27 (quarter ended
+30 September 2026)"). **Every figure must appear in the cited article's
+text**, either OpenRouter's citation content or the page fetched here, or it
+is dropped (`verify`). Models invent plausible estimates, and a consensus
+built from them is worse than none. The consensus is the median per line.
+When it runs:
+- 08:40 IST Mon–Fri, for every company on that day's results calendar
+  (`cache_results_day`).
+- On analysis, if nothing is on file.
+- On demand, via "Find estimates" (`POST /pending-results/{id}/estimates-refresh`).
+Limits: 80 searches a day, and an empty result is retried after 6h. The toggle
+is `broker_estimates_enabled` in AI settings (on by default; needs the
+premium key).
+
+The comparison is arithmetic (`result_compare.estimates_view`). The actual
+figure is Screener's, else the filing read's, else the AI's. Bands are
+revenue ±2%, EBITDA ±3%, PAT ±4%. A PAT miss, or a revenue miss without a
+PAT beat, is a MISS; a PAT beat without a revenue miss is a BEAT; anything
+else is IN LINE. Nestle Sep 2026 against Axis/HDFC Sec/MOFSL came out IN LINE
+(−0.3% / +0.5% / −1.7%). The panel shows "VS BROKER ESTIMATES" with sources,
+and an "EST …" chip in the list. The estimates also go into the AI prompt,
+where they are the expectation: `estimated` cells, BEATS/MISSES ESTIMATES
+verdicts.
 
 `_extract_json_from_llm` is deliberately tolerant: scraped output arrives with
 literal newlines inside strings and sometimes **two concatenated renderings** of
