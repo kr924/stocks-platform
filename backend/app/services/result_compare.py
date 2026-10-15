@@ -280,10 +280,21 @@ def build(db, symbol: str, event_time: Optional[datetime],
         # Only the current figure differs between the two views; the bases
         # are Screener's either way.
         ai_cur = _ai_number(((ai_metrics or {}).get(m) or {}).get("current_qtr"))
+        # The same quarter as each source states it. `current` above is the
+        # best of the two (Screener once published); these are what the OCR
+        # and Screener tabs show, so each can be read on its own.
+        ocr_cur = (ex_metrics.get(m) or {}).get("current_qtr") if ex_metrics else None
+        scr_cur_v = comparable(scr_cur, m)
 
         rows.append({
             "key": m,
             "label": LABELS[m],
+            "ocr_current": ocr_cur,
+            "ocr_yoy_pct": _pct(ocr_cur, ya),
+            "ocr_qoq_pct": _pct(ocr_cur, pq),
+            "scr_current": scr_cur_v,
+            "scr_yoy_pct": _pct(scr_cur_v, ya),
+            "scr_qoq_pct": _pct(scr_cur_v, pq),
             "ai_current": ai_cur,
             "ai_yoy_pct": _pct(ai_cur, ya),
             "ai_qoq_pct": _pct(ai_cur, pq),
@@ -331,11 +342,43 @@ def build(db, symbol: str, event_time: Optional[datetime],
         "qoq_available": qoq_available,
         "current_available": current_available,
         "ai_available": any(r["ai_current"] is not None for r in rows),
+        "ocr_available": any(r["ocr_current"] is not None for r in rows),
+        # Screener has published the filing's own quarter.
+        "screener_published": bool(scr_cur),
         "message": message,
     }
     # The rule-based read of these figures: verdict, positives, negatives.
+    # Once on the best figures, and once per source for the OCR and Screener
+    # tabs, so each tab's suggestion matches the numbers above it.
     result["numbers_read"] = read_numbers(result)
+    result["numbers_read_ocr"] = read_numbers(source_view(
+        result, "ocr", "" if result["ocr_available"]
+        else f"{quarter} figures could not be read from the filing."))
+    result["numbers_read_screener"] = read_numbers(source_view(
+        result, "scr", "" if scr_cur
+        else f"Screener has not published {quarter} yet — it is re-checked at 08:00."))
     return result
+
+
+def source_view(lfl: dict, prefix: str, message: str = "") -> dict:
+    """
+    The comparison with one source's figures as `current` (prefix "ocr" or
+    "scr"), so read_numbers and screener_signal can run on that source alone.
+    The bases are Screener's either way.
+    """
+    rows = []
+    for r in lfl.get("rows") or []:
+        v = dict(r)
+        v["current"] = r.get(f"{prefix}_current")
+        v["yoy_pct"] = r.get(f"{prefix}_yoy_pct")
+        v["qoq_pct"] = r.get(f"{prefix}_qoq_pct")
+        rows.append(v)
+    out = {k: v for k, v in lfl.items() if not k.startswith("numbers_read")}
+    out["rows"] = rows
+    out["current_available"] = any(r["current"] is not None for r in rows)
+    if message:
+        out["message"] = message
+    return out
 
 
 def as_screener_shape(lfl: dict) -> dict:

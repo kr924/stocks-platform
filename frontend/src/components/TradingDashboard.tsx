@@ -45,12 +45,20 @@ interface LikeForLike {
   qoq_available: boolean;
   current_available: boolean;
   ai_available?: boolean;
+  ocr_available?: boolean;
+  // Screener has published the filing's own quarter.
+  screener_published?: boolean;
   message: string;
-  // Rules applied to the figures: verdict plus positives and negatives.
-  numbers_read?: {
-    label: string; tone: string; reason: string;
-    positives: string[]; negatives: string[]; note: string; basis: string;
-  } | null;
+  // Rules applied to the figures: verdict plus positives and negatives. Once on
+  // the best figures, and once per source for the OCR and Screener tabs.
+  numbers_read?: NumbersRead | null;
+  numbers_read_ocr?: NumbersRead | null;
+  numbers_read_screener?: NumbersRead | null;
+}
+
+interface NumbersRead {
+  label: string; tone: string; reason: string;
+  positives: string[]; negatives: string[]; note: string; basis: string;
 }
 
 interface DigestCompany {
@@ -77,6 +85,9 @@ interface DigestCompany {
     current_note?: string; yoy_note?: string; qoq_note?: string;
     // The AI's reading of the same quarter, against the same two bases.
     ai_current?: number | null; ai_yoy_pct?: number | null; ai_qoq_pct?: number | null;
+    // The filing's own figure (OCR) and Screener's, each against the same bases.
+    ocr_current?: number | null; ocr_yoy_pct?: number | null; ocr_qoq_pct?: number | null;
+    scr_current?: number | null; scr_yoy_pct?: number | null; scr_qoq_pct?: number | null;
     match: boolean | null; diff_pct: number | null;
   }[];
   like_for_like?: LikeForLike | null;
@@ -617,7 +628,7 @@ function ValidationNotice({ v }: { v: TradeAILog["validation"] }) {
  * table is a second place for the columns to drift.
  */
 function ScreenerComparison({ rows, lfl, view }: {
-  rows: DigestCompany["comparison"]; lfl?: LikeForLike | null; view: "ai" | "ocr";
+  rows: DigestCompany["comparison"]; lfl?: LikeForLike | null; view: "ai" | "ocr" | "screener";
 }) {
   if (!rows || rows.length === 0) return null;
   const fmt = (v: number | null | undefined) =>
@@ -627,10 +638,9 @@ function ScreenerComparison({ rows, lfl, view }: {
   const pct = (v: number | null | undefined) => v == null ? null : `${v > 0 ? "+" : ""}${v.toFixed(2)}%`;
   const q = lfl?.quarter || "This quarter";
   // Only the current quarter differs between the tabs: the OCR read of the
-  // filing (or Screener's own figure once published), or the AI's read. The
-  // year-ago and previous-quarter bases are Screener's either way.
-  const src = view === "ai" ? "AI"
-    : lfl?.current_source === "screener" ? "Screener" : lfl?.current_source === "filing" ? "OCR" : "";
+  // filing, Screener's own figure once it publishes the quarter, or the AI's
+  // read. The year-ago and previous-quarter bases are Screener's either way.
+  const src = view === "ai" ? "AI" : view === "screener" ? "Screener" : "OCR";
   const head = ["", `${q}${src ? ` (${src})` : ""}`,
                 `${lfl?.yoy_quarter || "Year ago"} (Screener)`, "YoY %",
                 `${lfl?.qoq_quarter || "Prev qtr"} (Screener)`, "QoQ %"];
@@ -650,10 +660,21 @@ function ScreenerComparison({ rows, lfl, view }: {
         </thead>
         <tbody>
           {rows.map((row, ri) => {
-            const cur = view === "ai" ? row.ai_current : row.actual;
-            const yoy = view === "ai" ? row.ai_yoy_pct : row.actual_yoy;
-            const qoq = view === "ai" ? row.ai_qoq_pct : row.actual_qoq;
-            const curNote = view === "ai" ? "the AI did not read this figure" : row.current_note;
+            // A server without the per-source fields falls back to the best
+            // figure, which is what the OCR column showed before.
+            const perSource = row.ocr_current !== undefined || row.scr_current !== undefined;
+            const cur = view === "ai" ? row.ai_current
+              : view === "screener" ? row.scr_current
+              : perSource ? row.ocr_current : row.actual;
+            const yoy = view === "ai" ? row.ai_yoy_pct
+              : view === "screener" ? row.scr_yoy_pct
+              : perSource ? row.ocr_yoy_pct : row.actual_yoy;
+            const qoq = view === "ai" ? row.ai_qoq_pct
+              : view === "screener" ? row.scr_qoq_pct
+              : perSource ? row.ocr_qoq_pct : row.actual_qoq;
+            const curNote = view === "ai" ? "the AI did not read this figure"
+              : view === "screener" ? `Screener has not published ${q} yet`
+              : "not read from the filing";
             return (
               <tr key={ri}>
                 <td style={{ padding: "4px 8px", fontWeight: 600, color: "var(--text-primary)", whiteSpace: "nowrap" }}>{row.label}</td>
@@ -1120,7 +1141,9 @@ export function TradingDashboard() {
   const [pendingCategory, setPendingCategory] = useState<PromptCategory>("results");
   // Per-card: which extraction tab is showing, and which model a re-analysis
   // would use. Keyed by prompt id so opening one card does not reset another.
-  const [resultTab, setResultTab] = useState<Record<number, "ai" | "ocr">>({});
+  const [resultTab, setResultTab] = useState<Record<number, "ai" | "ocr" | "screener">>({});
+  // What the last "Check Screener" said, per filing.
+  const [screenerCheck, setScreenerCheck] = useState<Record<number, { busy: boolean; message?: string }>>({});
   const [reanalyseModel, setReanalyseModel] = useState<Record<number, string>>({});
   const [customModel, setCustomModel] = useState<Record<number, string>>({});
   // Rows whose filing is being read, and the moment each started.
@@ -1990,6 +2013,28 @@ export function TradingDashboard() {
     } finally {
       setActionLoading(prev => ({ ...prev, [`extract_${pending.id}`]: false }));
     }
+  };
+
+  /** Ask Screener now whether it has published this filing's quarter. */
+  const handleScreenerRefresh = async (pending: PendingResult) => {
+    setScreenerCheck(prev => ({ ...prev, [pending.id]: { busy: true } }));
+    let message = "";
+    try {
+      const res = await fetch(`${API_BASE}/api/trading/pending-results/${pending.id}/screener-refresh`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        message = data.detail || "Could not reach Screener.";
+      } else {
+        message = data.message || "";
+        if (data.pending) {
+          setPendingResults(prev => prev.map(p => p.id === pending.id ? { ...p, ...data.pending } : p));
+        }
+      }
+    } catch (err) {
+      console.error("Screener refresh failed:", err);
+      message = "Could not reach the server.";
+    }
+    setScreenerCheck(prev => ({ ...prev, [pending.id]: { busy: false, message } }));
   };
 
   /** Re-run the earnings AI over one filing, optionally with another model. */
@@ -3128,9 +3173,16 @@ export function TradingDashboard() {
               const rows = Array.isArray(p.comparison) ? p.comparison : [];
               const rowOf = (k: string) =>
                 rows.find(x => x.key === k || x.label === (k === "pat" ? "Profit (PAT)" : "Revenue"));
-              const val = (k: string, f: "actual_yoy" | "actual_qoq" | "ai_yoy_pct" | "ai_qoq_pct") => {
+              const val = (k: string, f: "actual_yoy" | "actual_qoq" | "ai_yoy_pct" | "ai_qoq_pct"
+                                           | "ocr_yoy_pct" | "ocr_qoq_pct" | "scr_yoy_pct" | "scr_qoq_pct") => {
                 const r = rowOf(k) as any;
-                return r && typeof r[f] === "number" ? (r[f] as number) : null;
+                if (!r) return null;
+                // A server without per-source fields: the OCR line falls back
+                // to the best figure, as it showed before.
+                if ((f === "ocr_yoy_pct" || f === "ocr_qoq_pct") && !("ocr_current" in r)) {
+                  f = f === "ocr_yoy_pct" ? "actual_yoy" : "actual_qoq";
+                }
+                return typeof r[f] === "number" ? (r[f] as number) : null;
               };
               const pctTxt = (v: number | null | undefined) => v == null ? "n/a" : `${v > 0 ? "+" : ""}${v.toFixed(1)}%`;
               const pctCol = (v: number | null | undefined) => v == null ? "var(--text-faint)" : v > 0 ? "var(--positive)" : v < 0 ? "var(--negative)" : "var(--text-muted)";
@@ -3138,10 +3190,13 @@ export function TradingDashboard() {
               const toneBg = (tone: string) => tone === "pos" ? "rgba(91,190,147,.10)" : tone === "neg" ? "rgba(226,141,131,.10)" : "rgba(255,255,255,.05)";
               const labelTone = (l: string) => { const u = (l || "").toUpperCase();
                 return u.includes("BUY") || u.includes("BEAT") ? "pos" : u.includes("SELL") || u.includes("MISS") ? "neg" : "na"; };
-              const nr = p.like_for_like?.numbers_read;
+              const nr = p.like_for_like?.numbers_read_ocr ?? p.like_for_like?.numbers_read;
               const ocrLabel = nr?.label || p.screener_signal?.label || "NA";
               const ocrTone = nr?.tone || p.screener_signal?.tone || "na";
               const ocrWhy = nr?.reason || p.screener_signal?.reason || "";
+              // Screener's line appears once it has published the quarter.
+              const scrPub = !!p.like_for_like?.screener_published;
+              const snr = p.like_for_like?.numbers_read_screener;
               const aiDone = p.ai_status === "done" && !!p.ai_analysis;
               const aiSug = aiDone ? (p.ai_analysis!.ai_suggestion || "NA") : null;
               const aiSummary = aiDone && p.ai_analysis!.ai_summary && !/^AI analysis pending/i.test(p.ai_analysis!.ai_summary)
@@ -3187,6 +3242,19 @@ export function TradingDashboard() {
                           }))}
                         <span className="od-chip call" title={ocrWhy}
                           style={{ color: toneCol(ocrTone), background: toneBg(ocrTone) }}>{ocrLabel}</span>
+
+                        {scrPub && (
+                          <>
+                            <span className="src" style={{ color: "var(--info)" }} title="Screener's own figures for the quarter">SCR</span>
+                            {(["revenue", "pat"] as const).flatMap(k =>
+                              (["scr_yoy_pct", "scr_qoq_pct"] as const).map(f => {
+                                const v = val(k, f);
+                                return <span key={`s${k}${f}`} className="n" style={{ color: pctCol(v) }}>{pctTxt(v)}</span>;
+                              }))}
+                            <span className="od-chip call" title={snr?.reason || ""}
+                              style={{ color: toneCol(snr?.tone || "na"), background: toneBg(snr?.tone || "na") }}>{snr?.label || "NA"}</span>
+                          </>
+                        )}
 
                         <span className="src" style={{ color: "var(--ai)" }}>AI</span>
                         {aiDone ? (
@@ -3538,7 +3606,7 @@ export function TradingDashboard() {
                           tabs rather than a setting because the interesting
                           question is where two readings disagree. */}
                       <div style={{ display: "flex", gap: "6px", marginBottom: "10px" }}>
-                        {(["ai", "ocr"] as const).map(t => (
+                        {(["ai", "ocr", "screener"] as const).map(t => (
                           <button key={t}
                             onClick={() => setResultTab(prev => ({ ...prev, [pending.id]: t }))}
                             style={{
@@ -3700,7 +3768,39 @@ export function TradingDashboard() {
                             )}
                           </div>
                         );
-                      })() : (
+                      })() : tab === "screener" ? (
+                        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "10px", marginBottom: "4px" }}>
+                          <button onClick={() => handleScreenerRefresh(pending)}
+                            disabled={!!screenerCheck[pending.id]?.busy}
+                            title="Ask Screener now whether it has published this quarter. It is also re-checked every morning at 08:00."
+                            style={{
+                              display: "inline-flex", alignItems: "center", gap: "5px",
+                              padding: "5px 12px", borderRadius: "6px",
+                              background: "var(--ai-bg)", border: "1px solid rgba(176, 155, 217, 0.3)",
+                              color: "var(--ai)", fontSize: "11px", fontWeight: 700,
+                              cursor: screenerCheck[pending.id]?.busy ? "not-allowed" : "pointer",
+                              opacity: screenerCheck[pending.id]?.busy ? 0.6 : 1,
+                            }}>
+                            <RefreshCw size={11} className={screenerCheck[pending.id]?.busy ? "spin" : undefined} />
+                            {screenerCheck[pending.id]?.busy ? "Checking Screener…" : "Check Screener"}
+                          </button>
+                          <span style={{
+                            fontSize: "10px", fontWeight: 700, padding: "3px 8px", borderRadius: "5px",
+                            color: pending.like_for_like?.screener_published ? "var(--positive)" : "var(--warning)",
+                            background: pending.like_for_like?.screener_published ? "rgba(91,190,147,.10)" : "var(--warning-bg)",
+                          }}>
+                            {pending.like_for_like?.screener_published
+                              ? `${pending.like_for_like?.quarter || "Quarter"} published`
+                              : `${pending.like_for_like?.quarter || "Quarter"} not published yet`}
+                          </span>
+                          <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>
+                            {screenerCheck[pending.id]?.message
+                              || (pending.like_for_like?.screener_published
+                                ? "Screener's own figures for the quarter, against its year-ago and previous quarter."
+                                : "Re-checked automatically every morning at 08:00, for a week after the filing.")}
+                          </span>
+                        </div>
+                      ) : (
                         <>
                           {/* Model choice applies to this run only; it does not
                               change the configured default for future filings. */}
@@ -3812,14 +3912,25 @@ export function TradingDashboard() {
                                 SUGGESTIONS
                               </div>
                               <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
-                                <ReadCard
-                                  title="OCR · FIGURES"
-                                  label={pending.like_for_like?.numbers_read?.label || "NA"}
-                                  reason={pending.like_for_like?.numbers_read?.reason}
-                                  positives={pending.like_for_like?.numbers_read?.positives}
-                                  negatives={pending.like_for_like?.numbers_read?.negatives}
-                                  empty={pending.like_for_like?.numbers_read?.note || "No figures to read yet."}
-                                />
+                                {(() => {
+                                  // The figures card follows the tab: Screener's
+                                  // figures on the Screener tab, the filing's
+                                  // (OCR) everywhere else.
+                                  const lfl = pending.like_for_like;
+                                  const onScr = tab === "screener";
+                                  const nr = onScr ? lfl?.numbers_read_screener
+                                    : (lfl?.numbers_read_ocr ?? lfl?.numbers_read);
+                                  return (
+                                    <ReadCard
+                                      title={onScr ? "SCREENER · FIGURES" : "OCR · FIGURES"}
+                                      label={nr?.label || "NA"}
+                                      reason={nr?.reason}
+                                      positives={Array.isArray(nr?.positives) ? nr!.positives : []}
+                                      negatives={Array.isArray(nr?.negatives) ? nr!.negatives : []}
+                                      empty={nr?.note || (onScr ? "Screener has not published this quarter yet." : "No figures to read yet.")}
+                                    />
+                                  );
+                                })()}
                                 <ReadCard
                                   title="AI · FILING"
                                   label={pending.ai_status === "done" && ai ? (ai.ai_suggestion || "NA") : "NA"}

@@ -1353,6 +1353,36 @@ def dismiss_pending_result(pending_id: int, db: Session = Depends(get_db)):
     return {"status": "success", "pending": _serialize_pending(pending, None, db)}
 
 
+@router.post("/pending-results/{pending_id}/screener-refresh")
+def screener_refresh_pending(pending_id: int, db: Session = Depends(get_db)):
+    """
+    Ask Screener again whether it has published this filing's quarter.
+
+    The prompt's Screener snapshot is taken when the filing lands, usually
+    before Screener has the quarter. The 08:00 job re-asks for the week's
+    results; this does it for one filing now. A few paced requests, so a few
+    seconds at most.
+    """
+    pending = db.query(PendingResultOrder).filter(PendingResultOrder.id == pending_id).first()
+    if not pending:
+        raise HTTPException(status_code=404, detail="Pending result not found")
+    if (getattr(pending, "kind", "result") or "result") != "result":
+        raise HTTPException(status_code=400,
+                            detail="This is impact news, not a results filing — it has no quarterly figures.")
+    from app.services.screener_refresh import refresh_row
+    res = refresh_row(db, pending, force=True)
+    item = _serialize_pending(pending, None, db)
+    _attach_screener(db, [pending], [item])
+    q = res.get("quarter") or "this quarter"
+    message = {
+        "published": f"Screener has {q}.",
+        "not_yet": f"Screener has not published {q} yet. It is checked again at 08:00.",
+        "failed": f"Screener could not be reached ({res.get('error') or 'request failed'}).",
+    }.get(res["status"], "")
+    return {"status": res["status"], "quarter": res.get("quarter"), "message": message,
+            "pending": item}
+
+
 @router.post("/pending-results/{pending_id}/extract")
 def extract_pending_result(pending_id: int, refresh: bool = Query(False),
                            db: Session = Depends(get_db)):

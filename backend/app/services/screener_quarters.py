@@ -234,7 +234,8 @@ def persist_quarters(symbol: str, headings: list, metrics: dict,
         db.close()
 
 
-def fetch_latest_quarter(symbol: str, cache_only: bool = False) -> dict:
+def fetch_latest_quarter(symbol: str, cache_only: bool = False,
+                         want_quarter: Optional[str] = None, force: bool = False) -> dict:
     """
     Latest reported quarter for `symbol`, as values.
 
@@ -251,6 +252,16 @@ def fetch_latest_quarter(symbol: str, cache_only: bool = False) -> dict:
 
     Values are ₹ crore. The year-ago column is taken four quarters back, which
     is what "same quarter last year" means in Screener's layout.
+
+    want_quarter: the quarter the caller needs (a filing's own quarter). A
+    page that is fetched but does not carry it is kept only as a fallback, and
+    the remaining pages are tried. Screener's consolidated page can lag the
+    standalone one by years (HDB Financial's stopped at Mar 2025), and
+    stopping at the first page with a table hid the one that had the quarter.
+    Every figure in a result still comes from one page, so the bases match.
+
+    force: skip the 6-hour cache. Used when re-checking whether Screener has
+    published a quarter since the last look.
     """
     out = {"ok": False, "source_url": "", "quarter": "", "metrics": {}, "error": ""}
     if not symbol or not str(symbol).strip():
@@ -260,8 +271,11 @@ def fetch_latest_quarter(symbol: str, cache_only: bool = False) -> dict:
     sym = str(symbol).strip().upper()
 
     cached = _quarter_cache.get(sym)
-    if cached and (time.monotonic() - cached[0]) <= _QUARTER_CACHE_TTL:
-        return cached[1]
+    if cached and not force and (time.monotonic() - cached[0]) <= _QUARTER_CACHE_TTL:
+        if not want_quarter or want_quarter in (cached[1].get("quarters") or []):
+            return cached[1]
+        if cache_only:
+            return cached[1]
     if cache_only:
         # Caller cannot afford a network round trip — say so rather than block.
         out["error"] = "not fetched yet"
@@ -270,6 +284,7 @@ def fetch_latest_quarter(symbol: str, cache_only: bool = False) -> dict:
     # companies under the code, and most of a results day is BSE-only.
     slugs = [sym] + _bse_codes_for(sym)
     paths = [p for slug in slugs for p in (f"{slug}/consolidated", slug)]
+    fallback = None
     for path in paths:
         url = f"https://www.screener.in/company/{path}/"
         res = _get(url)
@@ -328,6 +343,7 @@ def fetch_latest_quarter(symbol: str, cache_only: bool = False) -> dict:
                 "qoq_change_pct": pct(current, prev_qtr),
             }
 
+        out = dict(out)
         out.update({
             "ok": any(m["current_qtr"] is not None for m in metrics.values()),
             "source_url": url,
@@ -339,11 +355,22 @@ def fetch_latest_quarter(symbol: str, cache_only: bool = False) -> dict:
             "error": "" if metrics else out["error"],
         })
         if out["ok"]:
+            if want_quarter and want_quarter not in headings:
+                if fallback is None:
+                    fallback = out
+                continue
             _quarter_cache[sym] = (time.monotonic(), out)
-            # Persisted here, once, on the one path every caller comes through.
+            # Persisted here, once, on the one path every caller comes through
+            # — and only the page returned, so the store never mixes a
+            # consolidated quarter with a standalone one.
             persist_quarters(sym, headings, metrics, url)
             return out
 
+    if fallback is not None:
+        _quarter_cache[sym] = (time.monotonic(), fallback)
+        persist_quarters(sym, fallback.get("quarters") or [], fallback.get("metrics") or {},
+                         fallback.get("source_url") or "")
+        return fallback
     _quarter_cache[sym] = (time.monotonic(), out)
     return out
 

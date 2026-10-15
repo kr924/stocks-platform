@@ -347,16 +347,39 @@ read was computed from them.
 - The digest's YoY BUY/SELL read (`screener_signal`) and `all_positive` run on
   these figures via `as_screener_shape`.
 
-**One table, two readings.** The panel shows a single like-for-like table under
-both tabs; only the current-quarter column changes — OCR (or Screener once it
-publishes the quarter) on the OCR tab, the AI's figures on the AI tab
-(`ai_current` / `ai_yoy_pct`, only from this filing's own analysis, never the
-company's last log). Below it, **two suggestion cards side by side**: *OCR ·
-figures* — `read_numbers()`, the YoY verdict plus positives/negatives computed
-from the table (growth, margin, costs vs revenue, other-income share), every
-line checkable against it — and *AI · filing* — the AI verdict and the
-`positives` / `negatives` it is now asked for, grounded in the document
-(`TradeAILog.highlights_json`). The digest page and PDF carry the same two reads.
+**One table, three readings.** The panel shows a single like-for-like table
+under three tabs, **AI / OCR / Screener**; only the current-quarter column
+changes. Each row carries every source separately: `ocr_*` (the filing read),
+`scr_*` (Screener's own figure for the quarter, once published) and `ai_*`
+(only from this filing's own analysis, never the company's last log). `current`
+stays "Screener once published, else the filing" and is what the digest and
+`screener_signal` use. Below the table, **two suggestion cards side by side**.
+The left one follows the tab: *OCR · figures* (`numbers_read_ocr`) or
+*Screener · figures* (`numbers_read_screener`), each from `read_numbers()` on
+that source alone via `source_view()`. The right one is *AI · filing*, the AI
+verdict plus the `positives` / `negatives` it is asked for, grounded in the
+document (`TradeAILog.highlights_json`). The list gains a **SCR** line once
+Screener has the quarter. The digest page and PDF carry the best figures plus
+the AI read.
+
+**Screener is re-asked until it publishes the quarter.** The snapshot taken
+when a prompt is created almost never has the filing's quarter, because
+Screener publishes it later, often overnight. `services/screener_refresh.py`:
+
+- **08:00**, before the digest is built: every digest row.
+- **08:00**, after the alert: every other result from the last 7 days still
+  missing its quarter. Done after the alert so a heavy season's paced requests
+  never delay it.
+- **On demand:** "Check Screener" on the Screener tab
+  (`POST /pending-results/{id}/screener-refresh`).
+
+A row is re-asked at most every 6h unless forced (`fetched_at` in the
+snapshot). "Never re-fetch a published quarter" still holds; a snapshot
+lacking the quarter is incomplete, not published. `fetch_latest_quarter(...,
+want_quarter=)` keeps going past a page that lacks the quarter. Screener's
+consolidated page can lag years behind the standalone (HDB Financial's stopped
+at Mar 2025). Only the page returned is persisted, so the store does not mix
+the two bases.
 
 **The filing is read automatically** the moment a results prompt is created,
 intraday or not (`route_financial_result` → `run_extraction_async`). It is local

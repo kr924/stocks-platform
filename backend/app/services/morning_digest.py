@@ -239,6 +239,14 @@ def _build_rows(db: Session, pendings: List[PendingResultOrder],
                 "ai_qoq_pct": r.get("ai_qoq_pct"),
                 "yoy_note": r["yoy_note"],
                 "qoq_note": r["qoq_note"],
+                # Each source's own reading of the quarter, for the panel's
+                # OCR and Screener tabs.
+                "ocr_current": r.get("ocr_current"),
+                "ocr_yoy_pct": r.get("ocr_yoy_pct"),
+                "ocr_qoq_pct": r.get("ocr_qoq_pct"),
+                "scr_current": r.get("scr_current"),
+                "scr_yoy_pct": r.get("scr_yoy_pct"),
+                "scr_qoq_pct": r.get("scr_qoq_pct"),
                 "ai_yoy": (ai_metrics.get(key) or {}).get("yoy_change_pct", "NA"),
                 **compare(ai_num, r["current"]),
             })
@@ -790,10 +798,35 @@ def send_digest_alert(result: dict, public_base_url: str = "") -> bool:
 
 
 def run_morning_digest(db: Session, public_base_url: str = "") -> dict:
-    """Publish the page and send the alert. Called by the 08:00 IST job."""
+    """
+    Publish the page and send the alert. Called by the 08:00 IST job.
+
+    Screener usually publishes a quarter after the filing, often overnight, so
+    each digest row is re-asked for its own quarter first: the report then
+    carries Screener's figures wherever they now exist. The rest of the week's
+    results are re-asked after the alert, so their paced requests never delay
+    it. See services/screener_refresh.py.
+    """
+    from app.services import screener_refresh
+    digest_ids = []
+    try:
+        rows = collect_for_digest(db)
+        digest_ids = [p.id for p in rows]
+        counts = screener_refresh.refresh_rows(db, rows)
+        logger.info(f"[DIGEST] Screener re-checked for {len(rows)} filing(s): {counts}")
+    except Exception as e:
+        db.rollback()
+        logger.error(f"[DIGEST] Screener refresh before the digest failed: {e}")
+
     result = build_and_publish(db)
     try:
         send_digest_alert(result, public_base_url)
     except Exception as e:
         logger.error(f"[DIGEST] Telegram alert failed: {e}")
+
+    try:
+        screener_refresh.refresh_recent(db, exclude_ids=digest_ids)
+    except Exception as e:
+        db.rollback()
+        logger.error(f"[DIGEST] Screener refresh of the week's results failed: {e}")
     return result
