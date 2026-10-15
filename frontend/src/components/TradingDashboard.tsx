@@ -48,6 +48,8 @@ interface LikeForLike {
   ocr_available?: boolean;
   // Why the filing read was thrown out as implausible against Screener, or "".
   ocr_rejected?: string;
+  // Set when the read was off by a clean power of ten and was rescaled.
+  ocr_rescaled?: string;
   // Screener has published the filing's own quarter.
   screener_published?: boolean;
   message: string;
@@ -3712,6 +3714,12 @@ export function TradingDashboard() {
                                 <div style={{ fontSize: "11px", color: "var(--text-secondary)", lineHeight: 1.55, marginBottom: "10px" }}>
                                   {ex.confidence.reason}
                                 </div>
+                                {pending.like_for_like?.ocr_rescaled && (
+                                  <div style={{ fontSize: "11px", color: "var(--warning)", background: "var(--warning-bg)",
+                                                borderRadius: "6px", padding: "6px 10px", marginBottom: "10px", lineHeight: 1.5 }}>
+                                    Unit corrected: {pending.like_for_like.ocr_rescaled}. The table above the suggestions uses the corrected figures; the figures below are as read.
+                                  </div>
+                                )}
                                 {pending.like_for_like?.ocr_rejected && (
                                   <div style={{ fontSize: "11px", color: "var(--negative)", background: "rgba(226,141,131,.08)",
                                                 border: "1px solid rgba(226,141,131,.25)", borderRadius: "6px",

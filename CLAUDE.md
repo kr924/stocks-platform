@@ -364,6 +364,11 @@ read was computed from them.
   near a power of ten off both bases, or more than 4× off both in the same
   direction, the read is dropped (`ocr_rejected`). The OCR tab still shows it,
   labelled.
+- **…unless it is a clean unit misread** (`unit_correction`, checked first).
+  Nestle files in ₹ million; the read took it as lakh, so ₹67,821.7 mn became
+  ₹678 Cr. If revenue and PAT sit at the same 10^k off both Screener bases, or
+  revenue alone does and the unit was only `assumed`, every figure is rescaled
+  by 10^−k (`ocr_rescaled`, shown on the OCR tab).
 
 **One table, three readings.** The panel shows a single like-for-like table
 under three tabs, **AI / OCR / Screener**; only the current-quarter column

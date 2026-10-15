@@ -251,6 +251,44 @@ def implausible_filing_read(ex_metrics: dict, scr_yoy: Optional[dict],
     return ""
 
 
+def unit_correction(extraction: Optional[dict], ex_metrics: dict,
+                    scr_yoy: Optional[dict], scr_qoq: Optional[dict]) -> tuple:
+    """
+    (factor, note) when the filing read is off by a clean power of ten that
+    two independent lines agree on, else (1, "").
+
+    Nestle India files in ₹ million. On 15 Oct 2026 its statement was read as
+    lakh, so revenue of ₹67,821.7 mn came out as ₹678 Cr instead of ₹6,782 Cr:
+    -88% YoY. A unit misread scales every line by the same power of ten. When
+    revenue and PAT both sit at the same 10^k against Screener's two bases,
+    or revenue alone does and the extractor only assumed the unit, the
+    read is rescaled rather than thrown away.
+    """
+    import math
+
+    def k_of(metric):
+        cur = (ex_metrics.get(metric) or {}).get("current_qtr")
+        if not isinstance(cur, (int, float)) or cur <= 0:
+            return None
+        bases = [b for b in (comparable(scr_yoy, metric), comparable(scr_qoq, metric))
+                 if isinstance(b, (int, float)) and b >= MIN_BASE]
+        if not bases:
+            return None
+        logs = [math.log10(cur / b) for b in bases]
+        k = round(logs[0])
+        return k if k != 0 and all(abs(l - k) <= 0.25 for l in logs) else None
+
+    k_rev, k_pat = k_of("revenue"), k_of("pat")
+    unit = str((extraction or {}).get("unit") or "")
+    if k_rev is None:
+        return 1.0, ""
+    if not (k_pat == k_rev or (k_pat is None and "assumed" in unit)):
+        return 1.0, ""
+    factor = 10.0 ** (-k_rev)
+    return factor, (f"rescaled x{factor:g}: the statement's unit was read as "
+                    f"{unit or 'unknown'}, but every figure is 10^{-k_rev} off Screener's")
+
+
 def _ai_number(cell) -> Optional[float]:
     if cell is None:
         return None
@@ -285,6 +323,14 @@ def build(db, symbol: str, event_time: Optional[datetime],
     scr_cur, scr_yoy, scr_qoq = figs.get(quarter), figs.get(yoy_q), figs.get(qoq_q)
 
     ex_metrics = ((extraction or {}).get("metrics") or {}) if filing_usable else {}
+    ocr_rescaled = ""
+    if ex_metrics:
+        factor, ocr_rescaled = unit_correction(extraction, ex_metrics, scr_yoy, scr_qoq)
+        if factor != 1.0:
+            ex_metrics = {m: {**(cells or {}), "current_qtr": (
+                              (cells or {}).get("current_qtr") * factor
+                              if isinstance((cells or {}).get("current_qtr"), (int, float)) else None)}
+                          for m, cells in ex_metrics.items()}
     ocr_rejected = implausible_filing_read(ex_metrics, scr_yoy, scr_qoq) if ex_metrics else ""
     if ocr_rejected:
         ex_metrics = {}
@@ -387,6 +433,8 @@ def build(db, symbol: str, event_time: Optional[datetime],
         # Set when the filing read was thrown out as implausible (see
         # implausible_filing_read); the OCR tab and list say so.
         "ocr_rejected": ocr_rejected,
+        # Set when the read was off by a clean power of ten and was rescaled.
+        "ocr_rescaled": ocr_rescaled,
         # Screener has published the filing's own quarter.
         "screener_published": bool(scr_cur),
         "message": message,
