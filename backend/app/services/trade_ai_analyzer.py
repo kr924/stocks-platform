@@ -1143,7 +1143,10 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
         except Exception as e:
             logger.error(f"❌ [AUTO AI OPENROUTER {label.upper()} ERROR]: {model} failed for #{symbol}: {e}")
             print(f"❌ [AUTO AI OPENROUTER {label.upper()} ERROR]: {model} failed for #{symbol}: {e}")
-            failures.append(f"{label.lower()} {model or 'free pick'}: {str(e)[:160]}")
+            # Each model's own reason, not a truncated "'choices'": the
+            # panel's AI tab shows this line verbatim.
+            reason = str(e).replace("All OpenRouter models failed: ", "")
+            failures.append(f"{label.lower()} {model or 'free pick'}: {reason[:420]}")
             return None, None
 
     # Premium ON: the premium account, then the free one if it fails.

@@ -139,6 +139,9 @@ def call_openai(prompt: str, api_key: str) -> dict:
     return json.loads(cleaned)
 
 
+_NO_RETRY_CODES = {"401", "402", "403", "429"}
+
+
 def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url: str = None,
                     pdf_engine: str = None, free_only: bool = False,
                     fallbacks: list = None, report: dict = None,
@@ -258,7 +261,7 @@ def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url
             },
         ]
 
-    last_err = None
+    errors = []
     for model_name in models_to_try:
         for use_json_format in [True, False]:
             payload = {
@@ -299,20 +302,61 @@ def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url
                     timeout=180 if (has_attachment or len(prompt) > 8000) else 30,
                 )
                 if res.ok:
-                    raw_text = res.json()["choices"][0]["message"]["content"]
+                    # HTTP 200 is not success on OpenRouter: an upstream
+                    # provider failure comes back as {"error": {...}} with no
+                    # "choices", and indexing it raised KeyError('choices'),
+                    # which is all the panel then showed ("failed: 'choices'").
+                    try:
+                        body = res.json()
+                    except ValueError:
+                        body = {}
+                    body = body if isinstance(body, dict) else {}
+                    err, choices = body.get("error"), body.get("choices")
+                    if err or not choices:
+                        e = err if isinstance(err, dict) else {"message": str(err or "no answer in the response")}
+                        meta = e.get("metadata") or {}
+                        provider = meta.get("provider_name")
+                        raw = str(meta.get("raw") or "")[:100]
+                        errors.append(f"{model_name}: {str(e.get('message'))[:140]}"
+                                      + (f" [{provider}]" if provider else "")
+                                      + (f" ({raw})" if raw else ""))
+                        # Rate limits, credit and key errors do not depend on
+                        # JSON mode; the same model would only fail again.
+                        if str(e.get("code")) in _NO_RETRY_CODES:
+                            break
+                        continue
+                    choice = choices[0] or {}
+                    raw_text = (choice.get("message") or {}).get("content")
+                    if not raw_text:
+                        errors.append(f"{model_name}: empty answer (finish_reason "
+                                      f"{choice.get('finish_reason') or choice.get('native_finish_reason')})")
+                        continue
                     cleaned = clean_json_response(raw_text)
+                    try:
+                        parsed = json.loads(cleaned)
+                    except ValueError:
+                        errors.append(f"{model_name}: answer was not valid JSON")
+                        continue
                     logger.info(f"✨ [OPENROUTER] Analysis successfully generated using model '{model_name}'!")
-                    parsed = json.loads(cleaned)
                     if report is not None:
                         report["model"] = model_name
                     return parsed
                 else:
-                    last_err = f"Model {model_name} HTTP {res.status_code}: {res.text[:120]}"
+                    try:
+                        msg = ((res.json() or {}).get("error") or {}).get("message") or res.text[:120]
+                    except Exception:
+                        msg = res.text[:120]
+                    errors.append(f"{model_name}: HTTP {res.status_code} {str(msg)[:140]}")
+                    if str(res.status_code) in _NO_RETRY_CODES:
+                        break
             except Exception as e:
-                last_err = str(e)
+                errors.append(f"{model_name}: {type(e).__name__} {str(e)[:120]}")
                 continue
-                
-    raise RuntimeError(f"All OpenRouter models failed: {last_err}")
+
+    # Every distinct reason, not just the last: the first model's failure is
+    # usually the one that matters, and the last is often a fallback's.
+    distinct = list(dict.fromkeys(errors))
+    raise RuntimeError("All OpenRouter models failed: " + ("; ".join(distinct[:4]) or "no model answered"))
 
 
 def call_groq(prompt: str, api_key: str, model_name: str = "llama-3.3-70b-versatile") -> dict:
