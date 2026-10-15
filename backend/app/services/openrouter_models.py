@@ -143,7 +143,11 @@ def models_for(tier: str) -> list:
     PDF readers first, then cheapest first.
     """
     want_free = tier == "free"
-    rows = [m for m in list_models() if m["free"] == want_free]
+    # ":batch" variants run only through OpenRouter's Batch API (submit, then
+    # poll; median ~7 min, up to 24 h). This app calls chat/completions and
+    # needs an answer in seconds, so they are not offered.
+    rows = [m for m in list_models()
+            if m["free"] == want_free and not m["id"].endswith(":batch")]
     if want_free:
         # A results PDF parsed to text runs to tens of thousands of tokens, so
         # a small context ranks low whatever the vendor. Reading PDFs natively
