@@ -357,6 +357,13 @@ read was computed from them.
   (banks/NBFCs have none → n/a).
 - The digest's YoY BUY/SELL read (`screener_signal`) and `all_positive` run on
   these figures via `as_screener_shape`.
+- **An implausible filing read is not used** (`implausible_filing_read`). The
+  extractor's checks are internal, so a statement read in the wrong unit
+  passes them all. Nestle India's Sep 2026 read came out at about a tenth of
+  both Screener bases (−88% YoY, −89% QoQ) and showed SELL. If revenue sits
+  near a power of ten off both bases, or more than 4× off both in the same
+  direction, the read is dropped (`ocr_rejected`). The OCR tab still shows it,
+  labelled.
 
 **One table, three readings.** The panel shows a single like-for-like table
 under three tabs, **AI / OCR / Screener**; only the current-quarter column
@@ -705,6 +712,16 @@ longer in the automatic chain (`skip_gemcall`). Its code path remains in
 - An empty free model means "pick from the live catalogue", PDF readers first.
   The catalogue is `GET openrouter.ai/api/v1/models` (no key needed), cached 6h,
   served at `/api/trading/openrouter/models?tier=free|premium`.
+- **The filing is sent as data, not a link** (`fetch_filing_pdf` →
+  `call_openrouter(attachment_bytes=)` as a base64 data URL, ≤25 MB). Given a
+  URL, OpenRouter fetches the PDF itself, and BSE refuses it (403, the same
+  TLS-fingerprint block as bse_http) while NSE's archive wants cookies. The model
+  then had nothing to read. A download failure falls back to the link and says
+  so.
+- **An empty analysis says why.** With no reading, `ai_summary` is
+  `"No AI reading for X: <reason>"`: no key set, rate limited, PDF not
+  downloaded, or the model's own error. The AI tab shows that line instead of
+  "did not read usable figures".
 - `flow_used` is `openrouter_premium` / `openrouter_free` / `custom_rest_api`;
   `provider` names the model that actually answered, fallbacks included.
 - Env fallbacks: `OPENROUTER_PREMIUM_API_KEY` for premium, `OPENROUTER_API_KEY`

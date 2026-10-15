@@ -213,6 +213,44 @@ def filing_quarter(extraction: Optional[dict], event_time: Optional[datetime]) -
     return inferred, "announcement date", False
 
 
+def implausible_filing_read(ex_metrics: dict, scr_yoy: Optional[dict],
+                            scr_qoq: Optional[dict]) -> str:
+    """
+    Why the filing read's revenue cannot be right, or "".
+
+    The extractor's own checks are internal (totals reconcile, PAT <= PBT), so
+    a statement read entirely in the wrong unit passes all of them. On 15 Oct
+    2026 Nestle India's Sep 2026 read came out at roughly a tenth of Screener's
+    year-ago and previous quarters, -88% YoY and -89% QoQ, and the list showed
+    a SELL. Revenue of a going concern does not do that against both bases at
+    once. So, against Screener's two bases:
+
+      - a ratio near a power of ten (x0.1, x10, x100...) on both: a unit misread
+      - more than 4x off both, in the same direction: the wrong row or column
+
+    Either way the read is not used. It is still shown on the OCR tab, labelled.
+    """
+    import math
+    cur = (ex_metrics.get("revenue") or {}).get("current_qtr")
+    if not isinstance(cur, (int, float)) or cur <= 0:
+        return ""
+    bases = [b for b in (comparable(scr_yoy, "revenue"), comparable(scr_qoq, "revenue"))
+             if isinstance(b, (int, float)) and b >= MIN_BASE]
+    if not bases:
+        return ""
+    ratios = [cur / b for b in bases]
+    logs = [math.log10(r) for r in ratios]
+    k = round(logs[0])
+    if k != 0 and all(abs(l - k) <= 0.25 for l in logs):
+        factor = f"x{10 ** k:g}" if k > 0 else f"x1/{10 ** -k:g}"
+        return (f"revenue read as {cur:,.2f} Cr is about {factor} Screener's year-ago and "
+                f"previous quarters — looks like a unit misread")
+    if all(r < 0.25 for r in ratios) or all(r > 4 for r in ratios):
+        return (f"revenue read as {cur:,.2f} Cr is more than 4x off both Screener quarters — "
+                f"likely the wrong row or column")
+    return ""
+
+
 def _ai_number(cell) -> Optional[float]:
     if cell is None:
         return None
@@ -247,6 +285,9 @@ def build(db, symbol: str, event_time: Optional[datetime],
     scr_cur, scr_yoy, scr_qoq = figs.get(quarter), figs.get(yoy_q), figs.get(qoq_q)
 
     ex_metrics = ((extraction or {}).get("metrics") or {}) if filing_usable else {}
+    ocr_rejected = implausible_filing_read(ex_metrics, scr_yoy, scr_qoq) if ex_metrics else ""
+    if ocr_rejected:
+        ex_metrics = {}
     if scr_cur:
         current_source = "screener"
     elif ex_metrics and any((ex_metrics.get(m) or {}).get("current_qtr") is not None for m in METRICS):
@@ -343,6 +384,9 @@ def build(db, symbol: str, event_time: Optional[datetime],
         "current_available": current_available,
         "ai_available": any(r["ai_current"] is not None for r in rows),
         "ocr_available": any(r["ocr_current"] is not None for r in rows),
+        # Set when the filing read was thrown out as implausible (see
+        # implausible_filing_read); the OCR tab and list say so.
+        "ocr_rejected": ocr_rejected,
         # Screener has published the filing's own quarter.
         "screener_published": bool(scr_cur),
         "message": message,
@@ -353,7 +397,8 @@ def build(db, symbol: str, event_time: Optional[datetime],
     result["numbers_read"] = read_numbers(result)
     result["numbers_read_ocr"] = read_numbers(source_view(
         result, "ocr", "" if result["ocr_available"]
-        else f"{quarter} figures could not be read from the filing."))
+        else (f"Filing read not used: {ocr_rejected}." if ocr_rejected
+              else f"{quarter} figures could not be read from the filing.")))
     result["numbers_read_screener"] = read_numbers(source_view(
         result, "scr", "" if scr_cur
         else f"Screener has not published {quarter} yet — it is re-checked at 08:00."))

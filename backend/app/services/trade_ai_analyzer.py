@@ -578,6 +578,43 @@ _in_progress_analyses = set()
 _in_progress_lock = threading.Lock()
 
 
+# OpenRouter can be handed a filing as a URL, which it then fetches itself.
+# Exchange URLs refuse that fetch: BSE answers anything that is not a browser
+# with 403 (Akamai, by TLS fingerprint; see bse_http), and NSE's archive wants
+# its cookies. The model then analyses a document it never received and the
+# result is empty or discarded. So the filing is downloaded here, where both
+# exchanges are already answered, and sent as data.
+MAX_INLINE_PDF_BYTES = 25 * 1024 * 1024
+
+
+def fetch_filing_pdf(attachment_url: str) -> Optional[bytes]:
+    """The filing's bytes, from BSE or NSE, or None."""
+    if not attachment_url or not attachment_url.startswith("http"):
+        return None
+    try:
+        from app.services import bse_http
+        if bse_http.is_bse_url(attachment_url):
+            res = bse_http.get(attachment_url, headers={"Accept": "application/pdf,*/*",
+                                                        "Referer": "https://www.bseindia.com/"}, timeout=45)
+        else:
+            from app.services.trade_nse_poller import _get_trade_nse_session
+            session = _get_trade_nse_session().session
+            res = session.get(attachment_url, timeout=45, headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept": "application/pdf,*/*",
+                "Referer": "https://www.nseindia.com/companies-listing/corporate-filings/announcements",
+            })
+        data = res.content if res.status_code == 200 else b""
+        if len(data) < 100 or not data.lstrip()[:5].startswith(b"%PDF"):
+            logger.warning(f"[FILING PDF] {attachment_url}: HTTP {res.status_code}, "
+                           f"{len(data)} bytes, not a PDF")
+            return None
+        return data
+    except Exception as e:
+        logger.warning(f"[FILING PDF] download failed for {attachment_url}: {e}")
+        return None
+
+
 def analyze_earnings_disclosure_2step(
     symbol: str,
     title: str,
@@ -852,10 +889,26 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
 
         return result_raw
 
+    # Why there is no reading, if there is none: stored as the summary so the
+    # panel can say "no free key" or "rate limited" rather than "no figures".
+    failures = []
+    _pdf_cache = {}
+
+    def filing_pdf():
+        if "v" not in _pdf_cache:
+            _pdf_cache["v"] = fetch_filing_pdf(attachment_url)
+            if attachment_url and _pdf_cache["v"] is None:
+                failures.append("the filing PDF could not be downloaded, so it was sent as a link")
+            elif _pdf_cache["v"] and len(_pdf_cache["v"]) > MAX_INLINE_PDF_BYTES:
+                failures.append(f"the filing is {len(_pdf_cache['v']) // 1048576} MB, too large to send inline; sent as a link")
+                _pdf_cache["v"] = None
+        return _pdf_cache["v"]
+
     def _openrouter(attempt):
         tier, model = attempt["tier"], attempt["model"]
         label = "Premium" if tier == "premium" else "Free"
         report = {}
+        pdf = filing_pdf()
         try:
             fallbacks = None
             if tier == "free":
@@ -866,11 +919,13 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
                     fallbacks = openrouter_models.free_fallbacks(exclude=model, limit=2)
                 if not model:
                     logger.error(f"❌ [AUTO AI OPENROUTER FREE]: no free model configured and the catalogue is unreachable for #{symbol}")
+                    failures.append("no free model set and OpenRouter's model list could not be fetched")
                     return None, None
             logger.info(f"🔬 [AUTO AI OPENROUTER {label.upper()}]: Calling {model} for #{symbol}")
             print(f"🔬 [AUTO AI OPENROUTER {label.upper()}]: Calling {model} for #{symbol}")
             or_res = call_openrouter(prompt, attempt["key"], model=model,
                                      attachment_url=attachment_url,
+                                     attachment_bytes=pdf,
                                      free_only=(tier == "free"), fallbacks=fallbacks,
                                      report=report)
             raw = None
@@ -886,6 +941,7 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
         except Exception as e:
             logger.error(f"❌ [AUTO AI OPENROUTER {label.upper()} ERROR]: {model} failed for #{symbol}: {e}")
             print(f"❌ [AUTO AI OPENROUTER {label.upper()} ERROR]: {model} failed for #{symbol}: {e}")
+            failures.append(f"{label.lower()} {model or 'free pick'}: {str(e)[:160]}")
             return None, None
 
     # Premium ON: the premium account, then the free one if it fails.
@@ -909,7 +965,15 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
                 used_flow, used_provider = f"openrouter_{attempt['tier']}", provider
                 break
 
+    no_reading_reason = ""
     if not result_raw:
+        if plan.get("missing"):
+            no_reading_reason = f"no {plan['missing']} OpenRouter key is set for the model chosen"
+        elif not plan["before_gemcall"] and not plan["after_gemcall"]:
+            no_reading_reason = ("no OpenRouter key is set (premium is off or has no key, and the free "
+                                 "key is empty) — add one under AI settings")
+        else:
+            no_reading_reason = "; ".join(failures) or "every OpenRouter call failed"
         if plan.get("missing"):
             logger.error(f"❌ [AUTO AI]: no {plan['missing']} OpenRouter key set for the model chosen for #{symbol}")
         elif not plan["before_gemcall"] and not plan["after_gemcall"]:
@@ -963,7 +1027,7 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
         ai_suggestion = "NA"
 
     ai_summary = parsed_json.get("summary") or (
-        str(result_raw)[:500] if result_raw else f"AI analysis pending for {symbol}"
+        str(result_raw)[:500] if result_raw else f"No AI reading for {symbol}: {no_reading_reason}"
     )
     ai_sentiment = str(parsed_json.get("sentiment", "neutral")).lower().strip()
 

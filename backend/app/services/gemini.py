@@ -141,7 +141,8 @@ def call_openai(prompt: str, api_key: str) -> dict:
 
 def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url: str = None,
                     pdf_engine: str = None, free_only: bool = False,
-                    fallbacks: list = None, report: dict = None) -> dict:
+                    fallbacks: list = None, report: dict = None,
+                    attachment_bytes: bytes = None) -> dict:
     """
     Call OpenRouter API with dynamic model discovery and document URL attachment support.
 
@@ -152,6 +153,10 @@ def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url
     the caller chose an engine. A paid model on a free key fails anyway.
 
     report: if given, gets "model" set to the model that actually answered.
+
+    attachment_bytes: the PDF itself, sent as a base64 data URL. Preferred over
+    attachment_url, which OpenRouter has to fetch on its own and which BSE and
+    NSE refuse to serve to it.
     """
     key = api_key.strip().rstrip(">").strip('"').strip("'").strip()
     if not key or key.startswith("YOUR_"):
@@ -232,18 +237,23 @@ def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url
     # "file_url" key, which OpenRouter does not recognise, so the attachment was
     # dropped and the model was asked about a document it never received.
     user_content = prompt
-    has_attachment = bool(attachment_url and attachment_url.startswith("http"))
+    has_attachment = bool(attachment_bytes) or bool(attachment_url and attachment_url.startswith("http"))
     if has_attachment:
-        filename = attachment_url.rstrip("/").split("/")[-1] or "filing.pdf"
+        filename = (attachment_url or "").rstrip("/").split("/")[-1] or "filing.pdf"
         if not filename.lower().endswith(".pdf"):
             filename += ".pdf"
+        if attachment_bytes:
+            import base64 as _b64
+            file_data = "data:application/pdf;base64," + _b64.b64encode(attachment_bytes).decode("ascii")
+        else:
+            file_data = attachment_url
         user_content = [
             {"type": "text", "text": prompt},
             {
                 "type": "file",
                 "file": {
                     "filename": filename,
-                    "file_data": attachment_url,
+                    "file_data": file_data,
                 },
             },
         ]

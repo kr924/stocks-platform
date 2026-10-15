@@ -46,6 +46,8 @@ interface LikeForLike {
   current_available: boolean;
   ai_available?: boolean;
   ocr_available?: boolean;
+  // Why the filing read was thrown out as implausible against Screener, or "".
+  ocr_rejected?: string;
   // Screener has published the filing's own quarter.
   screener_published?: boolean;
   message: string;
@@ -3193,6 +3195,7 @@ export function TradingDashboard() {
               // row of n/a.
               const tier = (p.extraction as any)?.confidence?.tier as string | undefined;
               const ocrState = p.like_for_like?.ocr_available ? ""
+                : p.like_for_like?.ocr_rejected ? "read looks wrong vs Screener — not used"
                 : !p.extraction ? (p.attachment_url ? "reading the filing…" : "no PDF to read")
                 : tier === "READING" ? "reading the filing…"
                 : (p.extraction as any)?.ok === false ? "filing read failed its checks — not used"
@@ -3709,6 +3712,13 @@ export function TradingDashboard() {
                                 <div style={{ fontSize: "11px", color: "var(--text-secondary)", lineHeight: 1.55, marginBottom: "10px" }}>
                                   {ex.confidence.reason}
                                 </div>
+                                {pending.like_for_like?.ocr_rejected && (
+                                  <div style={{ fontSize: "11px", color: "var(--negative)", background: "rgba(226,141,131,.08)",
+                                                border: "1px solid rgba(226,141,131,.25)", borderRadius: "6px",
+                                                padding: "6px 10px", marginBottom: "10px", lineHeight: 1.5 }}>
+                                    Not used: {pending.like_for_like.ocr_rejected}. The figures below are shown as read, for checking.
+                                  </div>
+                                )}
 
                                 {Array.isArray(ex.confidence.flags) && ex.confidence.flags.length > 0 && (
                                   <div style={{ display: "flex", flexWrap: "wrap", gap: "5px", marginBottom: "10px" }}>
@@ -3905,7 +3915,9 @@ export function TradingDashboard() {
                               {tab === "ai" && !(pending.ai_status === "done" && ai && pending.like_for_like?.ai_available) && (
                                 <div style={{ fontSize: "10px", color: "var(--text-muted)", marginBottom: "6px" }}>
                                   {pending.ai_status === "done" && ai
-                                    ? "The AI did not read usable figures from this filing — switch to OCR for the filing's own numbers."
+                                    ? (/^(No AI reading|Discarded)/.test(ai.ai_summary || "")
+                                        ? ai.ai_summary
+                                        : "The AI did not read usable figures from this filing — switch to OCR for the filing's own numbers.")
                                     : pending.ai_status === "deferred"
                                       ? "Not analysed by the AI — filed outside 09:00–15:30 Mon–Fri. The OCR tab has the filing's own numbers; Re-analyse above runs it anyway."
                                       : "AI figures appear here when the analysis finishes."}
