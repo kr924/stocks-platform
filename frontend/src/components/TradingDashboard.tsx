@@ -97,7 +97,7 @@ function EstimatesPanel({ est, busy, message, onRefresh }: {
         <button onClick={onRefresh} disabled={busy}
           title="Web search for brokers' published previews of this quarter (premium key, about $0.007). Every figure is checked against its article."
           style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: "4px", padding: "3px 10px",
-                   borderRadius: "5px", background: "transparent", border: "1px solid rgba(160,168,180,.2)",
+                   borderRadius: "5px", background: "transparent", border: "1px solid rgba(var(--neutral-rgb),.2)",
                    color: "var(--text-muted)", fontSize: "10px", cursor: busy ? "wait" : "pointer" }}>
           <RefreshCw size={10} className={busy ? "spin" : undefined} /> {busy ? "Searching…" : brokers.length ? "Search again" : "Find estimates"}
         </button>
@@ -473,10 +473,10 @@ function ResultQuoteStrip({ p, quote, signal, flash, live }: {
 
   const sigColor = signal.tone === "up" ? "var(--positive-strong)"
     : signal.tone === "down" ? "var(--negative-strong)" : "var(--warning)";
-  const sigBg = signal.tone === "up" ? "rgba(91, 190, 147, 0.09)"
-    : signal.tone === "down" ? "rgba(226, 141, 131, 0.09)" : "rgba(216, 174, 100, 0.09)";
-  const sigBorder = signal.tone === "up" ? "rgba(91, 190, 147, 0.18)"
-    : signal.tone === "down" ? "rgba(226, 141, 131, 0.18)" : "rgba(216, 174, 100, 0.18)";
+  const sigBg = signal.tone === "up" ? "rgba(var(--positive-rgb), 0.09)"
+    : signal.tone === "down" ? "rgba(var(--negative-rgb), 0.09)" : "rgba(var(--warning-rgb), 0.09)";
+  const sigBorder = signal.tone === "up" ? "rgba(var(--positive-rgb), 0.18)"
+    : signal.tone === "down" ? "rgba(var(--negative-rgb), 0.18)" : "rgba(var(--warning-rgb), 0.18)";
 
   const num = { fontSize: "13px", fontWeight: 700, fontVariantNumeric: "tabular-nums" as const };
 
@@ -494,7 +494,7 @@ function ResultQuoteStrip({ p, quote, signal, flash, live }: {
     <div style={{
       display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap",
       padding: "8px 10px", borderRadius: "8px",
-      background: "rgba(20, 23, 28, 0.45)", border: "1px solid rgba(255,255,255,0.06)",
+      background: "rgba(var(--bg-sunken-rgb), 0.45)", border: "1px solid rgba(var(--ink-rgb),0.06)",
     }}>
       <span style={{
         fontSize: "16px", fontWeight: 800, fontVariantNumeric: "tabular-nums",
@@ -657,9 +657,9 @@ function MetricsTable({ metrics }: { metrics: MetricGrid | null | undefined }) {
       <table style={{ borderCollapse: "collapse", fontSize: "11px", minWidth: "480px", width: "100%" }}>
         <thead>
           <tr>
-            <th style={{ textAlign: "left", padding: "5px 8px", color: "var(--text-muted)", fontWeight: 600, borderBottom: "1px solid rgba(255,255,255,0.12)" }}></th>
+            <th style={{ textAlign: "left", padding: "5px 8px", color: "var(--text-muted)", fontWeight: 600, borderBottom: "1px solid rgba(var(--ink-rgb),0.12)" }}></th>
             {METRIC_COLS.map(c => (
-              <th key={c.key} style={{ textAlign: "right", padding: "5px 8px", color: "var(--text-muted)", fontWeight: 600, borderBottom: "1px solid rgba(255,255,255,0.12)", whiteSpace: "nowrap" }}>
+              <th key={c.key} style={{ textAlign: "right", padding: "5px 8px", color: "var(--text-muted)", fontWeight: 600, borderBottom: "1px solid rgba(var(--ink-rgb),0.12)", whiteSpace: "nowrap" }}>
                 {c.label}
               </th>
             ))}
@@ -668,7 +668,7 @@ function MetricsTable({ metrics }: { metrics: MetricGrid | null | undefined }) {
         <tbody>
           {METRIC_ROWS.map(r => (
             <tr key={r.key}>
-              <td style={{ padding: "5px 8px", color: "var(--text-primary)", fontWeight: 600, whiteSpace: "nowrap", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+              <td style={{ padding: "5px 8px", color: "var(--text-primary)", fontWeight: 600, whiteSpace: "nowrap", borderBottom: "1px solid rgba(var(--ink-rgb),0.04)" }}>
                 {r.label}
               </td>
               {METRIC_COLS.map(c => {
@@ -676,7 +676,7 @@ function MetricsTable({ metrics }: { metrics: MetricGrid | null | undefined }) {
                 return (
                   <td key={c.key} style={{
                     padding: "5px 8px", textAlign: "right", whiteSpace: "nowrap",
-                    borderBottom: "1px solid rgba(255,255,255,0.04)",
+                    borderBottom: "1px solid rgba(var(--ink-rgb),0.04)",
                     color: na(val) ? "var(--text-faint)" : "var(--text-primary)",
                     fontStyle: na(val) ? "italic" : "normal",
                   }}>
@@ -1042,7 +1042,7 @@ class CardBoundary extends React.Component<
     return (
       <div style={{
         padding: "12px 14px", borderRadius: "8px", fontSize: "11px", lineHeight: 1.55,
-        background: "rgba(226, 141, 131, 0.08)", border: "1px solid rgba(226, 141, 131, 0.18)",
+        background: "rgba(var(--negative-rgb), 0.08)", border: "1px solid rgba(var(--negative-rgb), 0.18)",
         color: "var(--text-secondary)",
       }}>
         <b style={{ color: "var(--negative-strong)" }}>{this.props.label} could not be displayed.</b>
@@ -1098,9 +1098,9 @@ function ConfidenceBadge({ c }: { c: Extraction["confidence"] }) {
   const colour = tone === "good" ? "var(--positive)"
     : tone === "warn" ? "var(--warning)"
     : tone === "bad" ? "var(--negative)" : "var(--text-muted)";
-  const bg = tone === "good" ? "rgba(91, 190, 147, 0.1)"
-    : tone === "warn" ? "rgba(216, 174, 100, 0.1)"
-    : tone === "bad" ? "rgba(226, 141, 131, 0.1)" : "var(--surface-2)";
+  const bg = tone === "good" ? "rgba(var(--positive-rgb), 0.1)"
+    : tone === "warn" ? "rgba(var(--warning-rgb), 0.1)"
+    : tone === "bad" ? "rgba(var(--negative-rgb), 0.1)" : "var(--surface-2)";
   return (
     <span title={c?.reason || ""} style={{
       display: "inline-flex", alignItems: "baseline", gap: "6px",
@@ -1123,8 +1123,8 @@ function VerdictBadge({ verdict }: { verdict?: string | null }) {
   const positive = /BEAT|^BUY$/.test(v);
   const negative = /MISS|^SELL$/.test(v);
   const color = isNA ? "var(--text-muted)" : positive ? "var(--positive-strong)" : negative ? "var(--negative-strong)" : "var(--warning)";
-  const bg = isNA ? "rgba(160, 168, 180, 0.09)" : positive ? "rgba(91, 190, 147, 0.1)"
-    : negative ? "rgba(226, 141, 131, 0.1)" : "rgba(216, 174, 100, 0.1)";
+  const bg = isNA ? "rgba(var(--neutral-rgb), 0.09)" : positive ? "rgba(var(--positive-rgb), 0.1)"
+    : negative ? "rgba(var(--negative-rgb), 0.1)" : "rgba(var(--warning-rgb), 0.1)";
   return (
     <span
       title={isNA ? "Figures could not be extracted — no directional call is given" : undefined}
@@ -2745,9 +2745,9 @@ export function TradingDashboard() {
             borderRadius: "12px",
             fontSize: "11px",
             fontWeight: "700",
-            backgroundColor: "rgba(91, 190, 147, 0.1)",
+            backgroundColor: "rgba(var(--positive-rgb), 0.1)",
             color: "var(--positive)",
-            border: "1px solid rgba(91, 190, 147, 0.18)"
+            border: "1px solid rgba(var(--positive-rgb), 0.18)"
           }}>
             <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: "var(--positive)" }} className="animate-pulse" />
             ARMED & POLLING
@@ -2760,9 +2760,9 @@ export function TradingDashboard() {
             borderRadius: "12px",
             fontSize: "11px",
             fontWeight: "700",
-            backgroundColor: "rgba(176, 155, 217, 0.13)",
+            backgroundColor: "rgba(var(--ai-rgb), 0.13)",
             color: "var(--ai)",
-            border: "1px solid rgba(176, 155, 217, 0.18)"
+            border: "1px solid rgba(var(--ai-rgb), 0.18)"
           }}>
             ⚡ TRIGGERED
           </span>
@@ -2774,9 +2774,9 @@ export function TradingDashboard() {
             borderRadius: "12px",
             fontSize: "11px",
             fontWeight: "700",
-            backgroundColor: "rgba(127, 166, 225, 0.13)",
+            backgroundColor: "rgba(var(--accent-rgb), 0.13)",
             color: "var(--accent)",
-            border: "1px solid rgba(127, 166, 225, 0.18)"
+            border: "1px solid rgba(var(--accent-rgb), 0.18)"
           }}>
             🛒 BOUGHT / HOLDING
           </span>
@@ -2788,9 +2788,9 @@ export function TradingDashboard() {
             borderRadius: "12px",
             fontSize: "11px",
             fontWeight: "700",
-            backgroundColor: "rgba(104, 179, 202, 0.13)",
+            backgroundColor: "rgba(var(--info-rgb), 0.13)",
             color: "var(--info)",
-            border: "1px solid rgba(104, 179, 202, 0.18)"
+            border: "1px solid rgba(var(--info-rgb), 0.18)"
           }}>
             💰 SOLD
           </span>
@@ -2802,9 +2802,9 @@ export function TradingDashboard() {
             borderRadius: "12px",
             fontSize: "11px",
             fontWeight: "700",
-            backgroundColor: "rgba(226, 141, 131, 0.13)",
+            backgroundColor: "rgba(var(--negative-rgb), 0.13)",
             color: "var(--negative-strong)",
-            border: "1px solid rgba(226, 141, 131, 0.18)"
+            border: "1px solid rgba(var(--negative-rgb), 0.18)"
           }}>
             ❌ FAILED
           </span>
@@ -2816,9 +2816,9 @@ export function TradingDashboard() {
             borderRadius: "12px",
             fontSize: "11px",
             fontWeight: "600",
-            backgroundColor: "rgba(160, 168, 180, 0.1)",
+            backgroundColor: "rgba(var(--neutral-rgb), 0.1)",
             color: "var(--text-muted)",
-            border: "1px solid rgba(160, 168, 180, 0.13)"
+            border: "1px solid rgba(var(--neutral-rgb), 0.13)"
           }}>
             DISARMED
           </span>
@@ -2830,9 +2830,9 @@ export function TradingDashboard() {
             borderRadius: "12px",
             fontSize: "11px",
             fontWeight: "600",
-            backgroundColor: "rgba(216, 174, 100, 0.1)",
+            backgroundColor: "rgba(var(--warning-rgb), 0.1)",
             color: "var(--warning)",
-            border: "1px solid rgba(216, 174, 100, 0.13)"
+            border: "1px solid rgba(var(--warning-rgb), 0.13)"
           }}>
             PENDING
           </span>
@@ -2857,8 +2857,8 @@ export function TradingDashboard() {
       }}>
         <div style={{
           background: "var(--surface-2)",
-          border: "1px solid rgba(255, 255, 255, 0.12)",
-          boxShadow: "0 4px 16px rgba(0, 0, 0, 0.2)",
+          border: "1px solid rgba(var(--ink-rgb), 0.12)",
+          boxShadow: "0 4px 16px rgba(var(--shadow-rgb), 0.2)",
           borderRadius: "12px",
           padding: "14px 18px",
           display: "flex",
@@ -2868,7 +2868,7 @@ export function TradingDashboard() {
           <div style={{
             padding: "10px",
             borderRadius: "10px",
-            backgroundColor: pollerStatus?.running ? "rgba(91, 190, 147, 0.13)" : "rgba(226, 141, 131, 0.13)",
+            backgroundColor: pollerStatus?.running ? "rgba(var(--positive-rgb), 0.13)" : "rgba(var(--negative-rgb), 0.13)",
             color: pollerStatus?.running ? "var(--positive-strong)" : "var(--negative)"
           }}>
             <Zap size={22} />
@@ -2883,15 +2883,15 @@ export function TradingDashboard() {
 
         <div style={{
           background: "var(--surface-2)",
-          border: "1px solid rgba(255, 255, 255, 0.12)",
-          boxShadow: "0 4px 16px rgba(0, 0, 0, 0.2)",
+          border: "1px solid rgba(var(--ink-rgb), 0.12)",
+          boxShadow: "0 4px 16px rgba(var(--shadow-rgb), 0.2)",
           borderRadius: "12px",
           padding: "14px 18px",
           display: "flex",
           alignItems: "center",
           gap: "14px"
         }}>
-          <div style={{ padding: "10px", borderRadius: "10px", backgroundColor: "rgba(127, 166, 225, 0.1)", color: "var(--accent)" }}>
+          <div style={{ padding: "10px", borderRadius: "10px", backgroundColor: "rgba(var(--accent-rgb), 0.1)", color: "var(--accent)" }}>
             <Play size={22} />
           </div>
           <div>
@@ -2903,15 +2903,15 @@ export function TradingDashboard() {
         </div>
 
         <div style={{
-          background: "rgba(33, 36, 43, 0.6)",
-          border: "1px solid rgba(255, 255, 255, 0.08)",
+          background: "rgba(var(--surface-1-rgb), 0.6)",
+          border: "1px solid rgba(var(--ink-rgb), 0.08)",
           borderRadius: "12px",
           padding: "14px 18px",
           display: "flex",
           alignItems: "center",
           gap: "14px"
         }}>
-          <div style={{ padding: "10px", borderRadius: "10px", backgroundColor: "rgba(176, 155, 217, 0.1)", color: "var(--ai)" }}>
+          <div style={{ padding: "10px", borderRadius: "10px", backgroundColor: "rgba(var(--ai-rgb), 0.1)", color: "var(--ai)" }}>
             <Cpu size={22} />
           </div>
           <div>
@@ -2923,15 +2923,15 @@ export function TradingDashboard() {
         </div>
 
         <div style={{
-          background: "rgba(33, 36, 43, 0.6)",
-          border: "1px solid rgba(255, 255, 255, 0.08)",
+          background: "rgba(var(--surface-1-rgb), 0.6)",
+          border: "1px solid rgba(var(--ink-rgb), 0.08)",
           borderRadius: "12px",
           padding: "14px 18px",
           display: "flex",
           alignItems: "center",
           gap: "14px"
         }}>
-          <div style={{ padding: "10px", borderRadius: "10px", backgroundColor: "rgba(216, 174, 100, 0.1)", color: "var(--warning)" }}>
+          <div style={{ padding: "10px", borderRadius: "10px", backgroundColor: "rgba(var(--warning-rgb), 0.1)", color: "var(--warning)" }}>
             <ShieldAlert size={22} />
           </div>
           <div>
@@ -2950,8 +2950,11 @@ export function TradingDashboard() {
           *inside* the panel, so an empty day left no way to navigate off it.
           The per-category empty state below already says when a day is empty. */}
       <div style={{
-        background: "var(--warning-bg)",
-        border: "1px solid var(--warning-border)",
+        // A plain card. It was an amber-tinted panel, which on the light
+        // theme read as a muddy beige block; the title keeps the amber.
+        background: "var(--surface-1)",
+        border: "1px solid var(--border-default)",
+        boxShadow: "0 1px 3px rgba(var(--shadow-rgb), 0.06)",
         borderRadius: "14px",
         padding: "18px",
         marginBottom: "20px"
@@ -2968,13 +2971,13 @@ export function TradingDashboard() {
               placeholder="Search symbol, company, filing or ref…"
               style={{
                 padding: "6px 10px", minWidth: "240px", fontSize: "12px",
-                background: "rgba(20, 23, 28,0.8)", border: "1px solid rgba(216, 174, 100, 0.18)",
+                background: "rgba(var(--bg-sunken-rgb),0.8)", border: "1px solid rgba(var(--warning-rgb), 0.18)",
                 borderRadius: "6px", color: "var(--text-primary)",
               }}
             />
             {pendingSearch && (
               <button onClick={() => setPendingSearch("")}
-                style={{ padding: "6px 10px", background: "transparent", border: "1px solid rgba(160, 168, 180, 0.18)", borderRadius: "6px", color: "var(--text-muted)", fontSize: "11px", cursor: "pointer" }}>
+                style={{ padding: "6px 10px", background: "transparent", border: "1px solid rgba(var(--neutral-rgb), 0.18)", borderRadius: "6px", color: "var(--text-muted)", fontSize: "11px", cursor: "pointer" }}>
                 Clear
               </button>
             )}
@@ -2990,7 +2993,7 @@ export function TradingDashboard() {
                   display: "inline-flex", alignItems: "center", gap: "6px",
                   padding: "3px 4px 3px 8px", borderRadius: "8px",
                   background: on ? "var(--ai-bg)" : "transparent",
-                  border: `1px solid ${on ? "rgba(176, 155, 217, 0.35)" : "rgba(160, 168, 180, 0.18)"}`,
+                  border: `1px solid ${on ? "rgba(var(--ai-rgb), 0.35)" : "rgba(var(--neutral-rgb), 0.18)"}`,
                 }}>
                   <button
                     type="button"
@@ -3010,7 +3013,7 @@ export function TradingDashboard() {
                     }}>
                     <span style={{
                       position: "relative", width: "26px", height: "14px", borderRadius: "7px",
-                      background: on ? "var(--ai)" : "rgba(160, 168, 180, 0.3)",
+                      background: on ? "var(--ai)" : "rgba(var(--neutral-rgb), 0.3)",
                       transition: "background 0.15s",
                     }}>
                       <span style={{
@@ -3058,8 +3061,8 @@ export function TradingDashboard() {
                 display: "inline-flex", alignItems: "center", gap: "5px",
                 padding: "6px 10px", borderRadius: "6px", cursor: "pointer",
                 fontSize: "11px", fontWeight: 700,
-                background: alertsOn ? "rgba(91, 190, 147, 0.09)" : "transparent",
-                border: `1px solid ${alertsOn ? "rgba(91, 190, 147, 0.22)" : "rgba(160, 168, 180, 0.18)"}`,
+                background: alertsOn ? "rgba(var(--positive-rgb), 0.09)" : "transparent",
+                border: `1px solid ${alertsOn ? "rgba(var(--positive-rgb), 0.22)" : "rgba(var(--neutral-rgb), 0.18)"}`,
                 color: alertsOn ? "var(--positive)" : "var(--text-muted)",
               }}>
               {alertsOn ? <Bell size={12} /> : <BellOff size={12} />}
@@ -3077,7 +3080,7 @@ export function TradingDashboard() {
                 placeholder="funds"
                 style={{
                   width: "96px", padding: "6px 8px", fontSize: "12px",
-                  background: "rgba(20, 23, 28,0.8)", border: "1px solid rgba(160, 168, 180, 0.18)",
+                  background: "rgba(var(--bg-sunken-rgb),0.8)", border: "1px solid rgba(var(--neutral-rgb), 0.18)",
                   borderRadius: "6px", color: "var(--text-primary)",
                 }}
               />
@@ -3092,8 +3095,8 @@ export function TradingDashboard() {
               title="Trade date to show. Only today carries live prices; earlier days are kept for 30 days."
               style={{
                 padding: "6px 10px", fontSize: "12px",
-                background: "rgba(20, 23, 28,0.8)",
-                border: `1px solid ${isToday ? "rgba(216, 174, 100, 0.18)" : "var(--accent-border)"}`,
+                background: "rgba(var(--bg-sunken-rgb),0.8)",
+                border: `1px solid ${isToday ? "rgba(var(--warning-rgb), 0.18)" : "var(--accent-border)"}`,
                 borderRadius: "6px", color: "var(--text-primary)",
               }}
             />
@@ -3135,7 +3138,7 @@ export function TradingDashboard() {
             <span style={{
               fontSize: "11px", padding: "4px 10px", borderRadius: "20px", whiteSpace: "nowrap",
               color: isToday ? "var(--warning)" : "var(--text-muted)",
-              background: isToday ? "rgba(216, 174, 100, 0.09)" : "rgba(160, 168, 180, 0.09)",
+              background: isToday ? "rgba(var(--warning-rgb), 0.09)" : "rgba(var(--neutral-rgb), 0.09)",
             }}>
               {isToday ? "Today · not armed" : "Past date · prices not fetched"}
             </span>
@@ -3155,8 +3158,8 @@ export function TradingDashboard() {
                 style={{
                   padding: "6px 12px", borderRadius: "6px", cursor: "pointer",
                   fontSize: "11px", fontWeight: 700, letterSpacing: "0.3px",
-                  background: on ? "rgba(216, 174, 100, 0.11)" : "transparent",
-                  border: `1px solid ${on ? "rgba(216, 174, 100, 0.34)" : "rgba(160, 168, 180, 0.16)"}`,
+                  background: on ? "rgba(var(--warning-rgb), 0.11)" : "transparent",
+                  border: `1px solid ${on ? "rgba(var(--warning-rgb), 0.34)" : "rgba(var(--neutral-rgb), 0.16)"}`,
                   color: on ? "var(--warning)" : n ? "var(--text-secondary)" : "var(--text-faint)",
                 }}>
                 {CATEGORY_LABEL[cat]}
@@ -3176,7 +3179,7 @@ export function TradingDashboard() {
         {resultsByHour.length > 0 && (
           <div style={{
             marginBottom: "14px", padding: "10px 12px", borderRadius: "10px",
-            background: "rgba(20, 23, 28, 0.45)", border: "1px solid rgba(255,255,255,0.06)",
+            background: "rgba(var(--bg-sunken-rgb), 0.45)", border: "1px solid rgba(var(--ink-rgb),0.06)",
             maxHeight: "190px", overflowY: "auto",
           }}>
             {resultsByHour.map(bucket => (
@@ -3195,8 +3198,8 @@ export function TradingDashboard() {
                     const tone = item.since == null ? "faint" : item.since > 0 ? "up" : item.since < 0 ? "down" : "flat";
                     const color = tone === "up" ? "var(--positive)"
                       : tone === "down" ? "var(--negative)" : "var(--text-faint)";
-                    const bg = tone === "up" ? "rgba(91, 190, 147, 0.09)"
-                      : tone === "down" ? "rgba(226, 141, 131, 0.09)" : "rgba(160, 168, 180, 0.08)";
+                    const bg = tone === "up" ? "rgba(var(--positive-rgb), 0.09)"
+                      : tone === "down" ? "rgba(var(--negative-rgb), 0.09)" : "rgba(var(--neutral-rgb), 0.08)";
                     const selected = pendingSearch.trim().toLowerCase() === item.symbol.toLowerCase();
                     return (
                       <button
@@ -3245,15 +3248,15 @@ export function TradingDashboard() {
           .od-grid .src{font-size:9.5px;font-weight:800;letter-spacing:.3px;color:var(--text-muted)}
           .od-grid .n{text-align:right;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
           .od-grid .call{text-align:center;justify-self:end;min-width:44px}
-          .od-head{position:sticky;top:0;z-index:1;background:rgba(27,30,37,.97);padding:6px 10px 6px 13px;border-bottom:1px solid rgba(255,255,255,.08)}
+          .od-head{position:sticky;top:0;z-index:1;background:rgba(var(--bg-base-rgb),.97);padding:6px 10px 6px 13px;border-bottom:1px solid rgba(var(--ink-rgb),.08)}
           .od-head span{font-size:9px;font-weight:700;letter-spacing:.3px;color:var(--text-faint);text-align:right}
           .od-sum{font-size:10.5px;color:var(--text-muted);line-height:1.4;margin-top:4px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-          .od-list{overflow-y:auto;border:1px solid rgba(216,174,100,.16);border-radius:10px;background:rgba(20,23,28,.45);outline:none}
-          .od-list:focus-visible{box-shadow:0 0 0 2px rgba(216,174,100,.35)}
+          .od-list{overflow-y:auto;border:1px solid rgba(var(--warning-rgb),.16);border-radius:10px;background:rgba(var(--bg-sunken-rgb),.45);outline:none}
+          .od-list:focus-visible{box-shadow:0 0 0 2px rgba(var(--warning-rgb),.35)}
           .od-detail{overflow-y:auto;min-width:0;padding-right:4px;scroll-behavior:smooth}
-          .od-row{display:block;width:100%;text-align:left;background:transparent;border:none;border-bottom:1px solid rgba(255,255,255,.05);border-left:3px solid transparent;padding:8px 10px;cursor:pointer;color:inherit}
-          .od-row:hover{background:rgba(255,255,255,.035)}
-          .od-row.sel{background:rgba(216,174,100,.10);border-left-color:var(--warning)}
+          .od-row{display:block;width:100%;text-align:left;background:transparent;border:none;border-bottom:1px solid rgba(var(--ink-rgb),.05);border-left:3px solid transparent;padding:8px 10px;cursor:pointer;color:inherit}
+          .od-row:hover{background:rgba(var(--ink-rgb),.035)}
+          .od-row.sel{background:rgba(var(--warning-rgb),.10);border-left-color:var(--warning)}
           .od-chip{font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;white-space:nowrap}
           @media (max-width: 900px){
             .od-split{grid-template-columns:1fr;height:auto}
@@ -3307,7 +3310,7 @@ export function TradingDashboard() {
               const pctTxt = (v: number | null | undefined) => v == null ? "n/a" : `${v > 0 ? "+" : ""}${v.toFixed(1)}%`;
               const pctCol = (v: number | null | undefined) => v == null ? "var(--text-faint)" : v > 0 ? "var(--positive)" : v < 0 ? "var(--negative)" : "var(--text-muted)";
               const toneCol = (tone: string) => tone === "pos" ? "var(--positive)" : tone === "neg" ? "var(--negative)" : "var(--text-muted)";
-              const toneBg = (tone: string) => tone === "pos" ? "rgba(91,190,147,.10)" : tone === "neg" ? "rgba(226,141,131,.10)" : "rgba(255,255,255,.05)";
+              const toneBg = (tone: string) => tone === "pos" ? "rgba(var(--positive-rgb),.10)" : tone === "neg" ? "rgba(var(--negative-rgb),.10)" : "rgba(var(--ink-rgb),.05)";
               const labelTone = (l: string) => { const u = (l || "").toUpperCase();
                 return u.includes("BUY") || u.includes("BEAT") ? "pos" : u.includes("SELL") || u.includes("MISS") ? "neg" : "na"; };
               const nr = p.like_for_like?.numbers_read_ocr ?? p.like_for_like?.numbers_read;
@@ -3344,16 +3347,16 @@ export function TradingDashboard() {
                   onClick={() => setSelectedResultId(p.id)}>
                   <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                     <span style={{ fontSize: "13px", fontWeight: 800, color: p.position ? "var(--accent)" : "var(--text-primary)" }}>{p.symbol}</span>
-                    <span className="od-chip" style={{ color: p.exchange === "nse" ? "var(--accent)" : "var(--ai)", background: "rgba(255,255,255,.05)" }}>
+                    <span className="od-chip" style={{ color: p.exchange === "nse" ? "var(--accent)" : "var(--ai)", background: "rgba(var(--ink-rgb),.05)" }}>
                       {(p.exchange || "").toUpperCase()}
                     </span>
-                    {p.position && <span className="od-chip" style={{ color: "var(--accent)", background: "rgba(127,166,225,.12)" }}>ORDERED</span>}
-                    {p.paused && <span className="od-chip" style={{ color: "var(--text-muted)", background: "rgba(255,255,255,.05)" }}>PAUSED</span>}
+                    {p.position && <span className="od-chip" style={{ color: "var(--accent)", background: "rgba(var(--accent-rgb),.12)" }}>ORDERED</span>}
+                    {p.paused && <span className="od-chip" style={{ color: "var(--text-muted)", background: "rgba(var(--ink-rgb),.05)" }}>PAUSED</span>}
                     {p.like_for_like?.estimates?.overall && (
                       <span className="od-chip" title="Against brokers' verified consensus"
                         style={{ color: p.like_for_like.estimates.overall === "BEAT" ? "var(--positive)"
                                    : p.like_for_like.estimates.overall === "MISS" ? "var(--negative)" : "var(--text-secondary)",
-                                 background: "rgba(255,255,255,.05)" }}>
+                                 background: "rgba(var(--ink-rgb),.05)" }}>
                         EST {p.like_for_like.estimates.overall}
                       </span>
                     )}
@@ -3417,7 +3420,7 @@ export function TradingDashboard() {
                         ) : (
                           <>
                             <span style={{ gridColumn: "2 / 6", color: "var(--text-faint)", fontStyle: "italic" }}>{aiState}</span>
-                            <span className="od-chip call" style={{ color: "var(--text-faint)", background: "rgba(255,255,255,.04)" }}>—</span>
+                            <span className="od-chip call" style={{ color: "var(--text-faint)", background: "rgba(var(--ink-rgb),.04)" }}>—</span>
                           </>
                         )}
                       </div>
@@ -3447,8 +3450,8 @@ export function TradingDashboard() {
             const reanalysing = !!actionLoading[`reanalyse_${pending.id}`];
             return (
               <div key={pending.id} style={{
-                background: "rgba(25, 28, 34, 0.6)",
-                border: "1px solid rgba(216, 174, 100, 0.16)",
+                background: "rgba(var(--bg-base-rgb), 0.6)",
+                border: "1px solid rgba(var(--warning-rgb), 0.16)",
                 borderRadius: "10px",
                 padding: "14px"
               }}>
@@ -3479,7 +3482,7 @@ export function TradingDashboard() {
                   <span style={{
                     fontSize: "10px", fontWeight: 700, letterSpacing: "0.5px",
                     color: pending.exchange === "nse" ? "var(--accent)" : "var(--ai)",
-                    background: pending.exchange === "nse" ? "rgba(127, 166, 225, 0.1)" : "rgba(176, 155, 217, 0.1)",
+                    background: pending.exchange === "nse" ? "rgba(var(--accent-rgb), 0.1)" : "rgba(var(--ai-rgb), 0.1)",
                     padding: "3px 8px", borderRadius: "4px"
                   }}>{pending.exchange.toUpperCase()}</span>
                   {pending.company_name && (
@@ -3498,8 +3501,8 @@ export function TradingDashboard() {
                     <span title="Impact news — good news worth acting on, with no quarterly figures to analyse. No Screener lookup and no earnings AI run on these."
                       style={{
                         fontSize: "10px", fontWeight: 700, letterSpacing: "0.4px",
-                        color: "var(--positive)", background: "rgba(91, 190, 147, 0.1)",
-                        border: "1px solid rgba(91, 190, 147, 0.18)",
+                        color: "var(--positive)", background: "rgba(var(--positive-rgb), 0.1)",
+                        border: "1px solid rgba(var(--positive-rgb), 0.18)",
                         padding: "2px 7px", borderRadius: "4px",
                       }}>
                       {pending.kind.replace(/_/g, " ").toUpperCase()}
@@ -3511,22 +3514,22 @@ export function TradingDashboard() {
                         fontSize: "10px", fontWeight: 700, padding: "2px 7px", borderRadius: "4px",
                         color: pending.screener_signal.tone === "pos" ? "var(--positive)"
                           : pending.screener_signal.tone === "neg" ? "var(--negative)" : "var(--text-muted)",
-                        background: pending.screener_signal.tone === "pos" ? "rgba(91, 190, 147, 0.09)"
-                          : pending.screener_signal.tone === "neg" ? "rgba(226, 141, 131, 0.09)" : "var(--surface-2)",
+                        background: pending.screener_signal.tone === "pos" ? "rgba(var(--positive-rgb), 0.09)"
+                          : pending.screener_signal.tone === "neg" ? "rgba(var(--negative-rgb), 0.09)" : "var(--surface-2)",
                       }}>
                       YoY {pending.screener_signal.label}
                     </span>
                   )}
                   {isResult && pending.all_positive && (
                     <span title="Revenue and profit both up year-on-year and quarter-on-quarter"
-                      style={{ fontSize: "10px", fontWeight: 800, padding: "2px 7px", borderRadius: "4px", color: "var(--positive-strong)", background: "rgba(91, 190, 147, 0.12)" }}>
+                      style={{ fontSize: "10px", fontWeight: 800, padding: "2px 7px", borderRadius: "4px", color: "var(--positive-strong)", background: "rgba(var(--positive-rgb), 0.12)" }}>
                       ALL POSITIVE
                     </span>
                   )}
                   {pending.paused && (
                     <span title="Live pricing is suspended for this row. The price shown is the last one fetched."
                       style={{ fontSize: "10px", fontWeight: 700, color: "var(--text-muted)",
-                               background: "var(--surface-2)", border: "1px solid rgba(160, 168, 180, 0.18)",
+                               background: "var(--surface-2)", border: "1px solid rgba(var(--neutral-rgb), 0.18)",
                                padding: "2px 7px", borderRadius: "4px" }}>
                       PAUSED
                     </span>
@@ -3584,13 +3587,13 @@ export function TradingDashboard() {
                     QTY
                     <NumberField integer min={1} value={form.quantity}
                       onValue={n => updateResultForm(pending.id, { quantity: n })}
-                      style={{ display: "block", width: "70px", marginTop: "3px", padding: "6px 8px", background: "rgba(20, 23, 28,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "12px" }} />
+                      style={{ display: "block", width: "70px", marginTop: "3px", padding: "6px 8px", background: "rgba(var(--bg-sunken-rgb),0.8)", border: "1px solid rgba(var(--ink-rgb),0.12)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "12px" }} />
                   </label>
                   <label style={{ fontSize: "10px", color: "var(--text-muted)" }}>
                     TYPE
                     <select value={form.order_type}
                       onChange={e => updateResultForm(pending.id, { order_type: e.target.value })}
-                      style={{ display: "block", marginTop: "3px", padding: "6px 8px", background: "rgba(20, 23, 28,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "12px" }}>
+                      style={{ display: "block", marginTop: "3px", padding: "6px 8px", background: "rgba(var(--bg-sunken-rgb),0.8)", border: "1px solid rgba(var(--ink-rgb),0.12)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "12px" }}>
                       <option value="MARKET">MARKET</option>
                       <option value="LIMIT">LIMIT</option>
                     </select>
@@ -3600,20 +3603,20 @@ export function TradingDashboard() {
                       LIMIT ₹
                       <input type="number" step="0.05" value={form.limit_price}
                         onChange={e => updateResultForm(pending.id, { limit_price: e.target.value })}
-                        style={{ display: "block", width: "90px", marginTop: "3px", padding: "6px 8px", background: "rgba(20, 23, 28,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "12px" }} />
+                        style={{ display: "block", width: "90px", marginTop: "3px", padding: "6px 8px", background: "rgba(var(--bg-sunken-rgb),0.8)", border: "1px solid rgba(var(--ink-rgb),0.12)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "12px" }} />
                     </label>
                   )}
                   <label style={{ fontSize: "10px", color: "var(--text-muted)" }}>
                     SL %
                     <NumberField step="0.5" min={0.5} value={form.stoploss_pct}
                       onValue={n => updateResultForm(pending.id, { stoploss_pct: n })}
-                      style={{ display: "block", width: "70px", marginTop: "3px", padding: "6px 8px", background: "rgba(20, 23, 28,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "12px" }} />
+                      style={{ display: "block", width: "70px", marginTop: "3px", padding: "6px 8px", background: "rgba(var(--bg-sunken-rgb),0.8)", border: "1px solid rgba(var(--ink-rgb),0.12)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "12px" }} />
                   </label>
                   <label style={{ fontSize: "10px", color: "var(--text-muted)" }}>
                     BROKER
                     <select value={form.broker}
                       onChange={e => updateResultForm(pending.id, { broker: e.target.value })}
-                      style={{ display: "block", marginTop: "3px", padding: "6px 8px", background: "rgba(20, 23, 28,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "12px" }}>
+                      style={{ display: "block", marginTop: "3px", padding: "6px 8px", background: "rgba(var(--bg-sunken-rgb),0.8)", border: "1px solid rgba(var(--ink-rgb),0.12)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "12px" }}>
                       <option value="upstox">Upstox</option>
                       <option value="zerodha">Zerodha</option>
                     </select>
@@ -3624,7 +3627,7 @@ export function TradingDashboard() {
                   {!pending.position && (
                     <button onClick={() => handlePlaceResultOrder(pending)} disabled={busy}
                       style={{
-                        padding: "8px 16px", background: busy ? "rgba(91, 190, 147, 0.26)" : "var(--positive)",
+                        padding: "8px 16px", background: busy ? "rgba(var(--positive-rgb), 0.26)" : "var(--positive)",
                         border: "none", borderRadius: "6px", color: "var(--on-accent)", fontSize: "12px", fontWeight: 700,
                         cursor: busy ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: "6px"
                       }}>
@@ -3637,7 +3640,7 @@ export function TradingDashboard() {
                       disabled={!!actionLoading[`sell_${pending.id}`]}
                       style={{
                         padding: "8px 16px",
-                        background: actionLoading[`sell_${pending.id}`] ? "rgba(226, 141, 131, 0.26)" : "var(--negative)",
+                        background: actionLoading[`sell_${pending.id}`] ? "rgba(var(--negative-rgb), 0.26)" : "var(--negative)",
                         border: "none", borderRadius: "6px", color: "var(--on-accent)", fontSize: "12px", fontWeight: 700,
                         cursor: actionLoading[`sell_${pending.id}`] ? "not-allowed" : "pointer",
                         display: "flex", alignItems: "center", gap: "6px"
@@ -3695,7 +3698,7 @@ export function TradingDashboard() {
                       : "Stop refreshing this row's live price. The card stays; the last price is kept."}
                     style={{
                       padding: "8px 14px", background: "transparent",
-                      border: `1px solid ${pending.paused ? "rgba(216, 174, 100, 0.34)" : "rgba(160, 168, 180, 0.22)"}`,
+                      border: `1px solid ${pending.paused ? "rgba(var(--warning-rgb), 0.34)" : "rgba(var(--neutral-rgb), 0.22)"}`,
                       borderRadius: "6px",
                       color: pending.paused ? "var(--warning)" : "var(--text-muted)",
                       fontSize: "12px", fontWeight: 600,
@@ -3760,7 +3763,7 @@ export function TradingDashboard() {
                               padding: "4px 12px", borderRadius: "5px", cursor: "pointer",
                               fontSize: "10px", fontWeight: 700, letterSpacing: "0.4px",
                               background: tab === t ? "var(--ai-bg)" : "transparent",
-                              border: `1px solid ${tab === t ? "rgba(176, 155, 217, 0.34)" : "rgba(160, 168, 180, 0.16)"}`,
+                              border: `1px solid ${tab === t ? "rgba(var(--ai-rgb), 0.34)" : "rgba(var(--neutral-rgb), 0.16)"}`,
                               color: tab === t ? "var(--ai)" : "var(--text-muted)",
                             }}>
                             {t.toUpperCase()}
@@ -3807,7 +3810,7 @@ export function TradingDashboard() {
                                 style={{
                                   display: "inline-flex", alignItems: "center", gap: "5px",
                                   padding: "5px 12px", borderRadius: "6px",
-                                  background: "var(--ai-bg)", border: "1px solid rgba(176, 155, 217, 0.3)",
+                                  background: "var(--ai-bg)", border: "1px solid rgba(var(--ai-rgb), 0.3)",
                                   color: "var(--ai)", fontSize: "11px", fontWeight: 700,
                                   cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.6 : 1,
                                 }}>
@@ -3827,7 +3830,7 @@ export function TradingDashboard() {
 
                             {!ex ? (
                               <div style={{ padding: "16px", borderRadius: "8px", textAlign: "center",
-                                            background: "var(--surface-2)", border: "1px dashed rgba(160, 168, 180, 0.18)",
+                                            background: "var(--surface-2)", border: "1px dashed rgba(var(--neutral-rgb), 0.18)",
                                             fontSize: "11px", color: "var(--text-muted)", lineHeight: 1.6 }}>
                                 {reading ? (
                                   <>
@@ -3852,8 +3855,8 @@ export function TradingDashboard() {
                                   </div>
                                 )}
                                 {pending.like_for_like?.ocr_rejected && (
-                                  <div style={{ fontSize: "11px", color: "var(--negative)", background: "rgba(226,141,131,.08)",
-                                                border: "1px solid rgba(226,141,131,.25)", borderRadius: "6px",
+                                  <div style={{ fontSize: "11px", color: "var(--negative)", background: "rgba(var(--negative-rgb),.08)",
+                                                border: "1px solid rgba(var(--negative-rgb),.25)", borderRadius: "6px",
                                                 padding: "6px 10px", marginBottom: "10px", lineHeight: 1.5 }}>
                                     Not used: {pending.like_for_like.ocr_rejected}. The figures below are shown as read, for checking.
                                   </div>
@@ -3936,7 +3939,7 @@ export function TradingDashboard() {
                             style={{
                               display: "inline-flex", alignItems: "center", gap: "5px",
                               padding: "5px 12px", borderRadius: "6px",
-                              background: "var(--ai-bg)", border: "1px solid rgba(176, 155, 217, 0.3)",
+                              background: "var(--ai-bg)", border: "1px solid rgba(var(--ai-rgb), 0.3)",
                               color: "var(--ai)", fontSize: "11px", fontWeight: 700,
                               cursor: screenerCheck[pending.id]?.busy ? "not-allowed" : "pointer",
                               opacity: screenerCheck[pending.id]?.busy ? 0.6 : 1,
@@ -3947,7 +3950,7 @@ export function TradingDashboard() {
                           <span style={{
                             fontSize: "10px", fontWeight: 700, padding: "3px 8px", borderRadius: "5px",
                             color: pending.like_for_like?.screener_published ? "var(--positive)" : "var(--warning)",
-                            background: pending.like_for_like?.screener_published ? "rgba(91,190,147,.10)" : "var(--warning-bg)",
+                            background: pending.like_for_like?.screener_published ? "rgba(var(--positive-rgb),.10)" : "var(--warning-bg)",
                           }}>
                             {pending.like_for_like?.screener_published
                               ? `${pending.like_for_like?.quarter || "Quarter"} published`
@@ -4008,7 +4011,7 @@ export function TradingDashboard() {
                               style={{
                                 display: "inline-flex", alignItems: "center", gap: "5px",
                                 padding: "5px 12px", borderRadius: "6px",
-                                background: "var(--ai-bg)", border: "1px solid rgba(176, 155, 217, 0.3)",
+                                background: "var(--ai-bg)", border: "1px solid rgba(var(--ai-rgb), 0.3)",
                                 color: "var(--ai)", fontSize: "11px", fontWeight: 700,
                                 cursor: (reanalysing || pending.ai_status === "running") ? "not-allowed" : "pointer",
                                 opacity: (reanalysing || pending.ai_status === "running") ? 0.6 : 1,
@@ -4156,8 +4159,8 @@ export function TradingDashboard() {
 
       {/* UPCOMING EARNINGS CALENDAR SECTION */}
       <div style={{
-        background: "rgba(33, 36, 43, 0.6)",
-        border: "1px solid rgba(127, 166, 225, 0.13)",
+        background: "rgba(var(--surface-1-rgb), 0.6)",
+        border: "1px solid rgba(var(--accent-rgb), 0.13)",
         borderRadius: "14px",
         padding: "18px",
         marginBottom: "20px"
@@ -4166,13 +4169,13 @@ export function TradingDashboard() {
           <h3 style={{ fontSize: "15px", fontWeight: "700", color: "var(--accent)", display: "flex", alignItems: "center", gap: "8px", margin: 0 }}>
             <Calendar size={18} /> 📊 Upcoming Earnings Calendar ({processedUpcomingEarnings.length})
           </h3>
-          <span style={{ fontSize: "11px", color: "var(--text-muted)", background: "rgba(127, 166, 225, 0.08)", padding: "4px 10px", borderRadius: "20px" }}>
+          <span style={{ fontSize: "11px", color: "var(--text-muted)", background: "rgba(var(--accent-rgb), 0.08)", padding: "4px 10px", borderRadius: "20px" }}>
             Real-Time Corporate Earnings Disclosures
           </span>
         </div>
 
         {/* Toolbar: Search, Date Filter, Quick Filter Pills & Sort */}
-        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "14px", backgroundColor: "rgba(25, 28, 34, 0.5)", padding: "10px 12px", borderRadius: "10px", border: "1px solid rgba(255, 255, 255, 0.05)" }}>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "14px", backgroundColor: "rgba(var(--bg-base-rgb), 0.5)", padding: "10px 12px", borderRadius: "10px", border: "1px solid rgba(var(--ink-rgb), 0.05)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
             {/* Search Input */}
             <input
@@ -4181,8 +4184,8 @@ export function TradingDashboard() {
               value={earningsSearch}
               onChange={(e) => setEarningsSearch(e.target.value)}
               style={{
-                backgroundColor: "rgba(25, 28, 34, 0.9)",
-                border: "1px solid rgba(127, 166, 225, 0.18)",
+                backgroundColor: "rgba(var(--bg-base-rgb), 0.9)",
+                border: "1px solid rgba(var(--accent-rgb), 0.18)",
                 borderRadius: "8px",
                 color: "var(--text-primary)",
                 fontSize: "12px",
@@ -4201,7 +4204,7 @@ export function TradingDashboard() {
                 onChange={(e) => setEarningsDateFilter(e.target.value)}
                 style={{
                   backgroundColor: "var(--bg-base)",
-                  border: "1px solid rgba(127, 166, 225, 0.26)",
+                  border: "1px solid rgba(var(--accent-rgb), 0.26)",
                   borderRadius: "8px",
                   color: "var(--info)",
                   fontSize: "11px",
@@ -4217,8 +4220,8 @@ export function TradingDashboard() {
             <button
               onClick={() => setEarningsDateFilter(todayStr)}
               style={{
-                backgroundColor: earningsDateFilter === todayStr ? "rgba(104, 179, 202, 0.16)" : "rgba(25, 28, 34, 0.6)",
-                border: earningsDateFilter === todayStr ? "1px solid var(--info)" : "1px solid rgba(255, 255, 255, 0.1)",
+                backgroundColor: earningsDateFilter === todayStr ? "rgba(var(--info-rgb), 0.16)" : "rgba(var(--bg-base-rgb), 0.6)",
+                border: earningsDateFilter === todayStr ? "1px solid var(--info)" : "1px solid rgba(var(--ink-rgb), 0.1)",
                 color: earningsDateFilter === todayStr ? "var(--info)" : "var(--text-muted)",
                 fontSize: "11px",
                 fontWeight: "700",
@@ -4234,8 +4237,8 @@ export function TradingDashboard() {
             <button
               onClick={() => setEarningsDateFilter("")}
               style={{
-                backgroundColor: earningsDateFilter === "" ? "rgba(127, 166, 225, 0.16)" : "rgba(25, 28, 34, 0.6)",
-                border: earningsDateFilter === "" ? "1px solid var(--accent)" : "1px solid rgba(255, 255, 255, 0.1)",
+                backgroundColor: earningsDateFilter === "" ? "rgba(var(--accent-rgb), 0.16)" : "rgba(var(--bg-base-rgb), 0.6)",
+                border: earningsDateFilter === "" ? "1px solid var(--accent)" : "1px solid rgba(var(--ink-rgb), 0.1)",
                 color: earningsDateFilter === "" ? "var(--accent)" : "var(--text-muted)",
                 fontSize: "11px",
                 fontWeight: "700",
@@ -4253,7 +4256,7 @@ export function TradingDashboard() {
               disabled={syncingQuotes}
               title="Click to manually register all earnings stocks into Upstox live streaming quote feed"
               style={{
-                backgroundColor: "rgba(91, 190, 147, 0.13)",
+                backgroundColor: "rgba(var(--positive-rgb), 0.13)",
                 border: "1px solid var(--positive)",
                 color: "var(--positive-strong)",
                 fontSize: "11px",
@@ -4265,7 +4268,7 @@ export function TradingDashboard() {
                 alignItems: "center",
                 gap: "5px",
                 transition: "all 0.15s",
-                boxShadow: "0 2px 8px rgba(91, 190, 147, 0.16)"
+                boxShadow: "0 2px 8px rgba(var(--positive-rgb), 0.16)"
               }}
             >
               <RefreshCw size={12} className={syncingQuotes ? "animate-spin" : ""} />
@@ -4283,8 +4286,8 @@ export function TradingDashboard() {
                 display: "inline-flex", alignItems: "center", gap: "5px",
                 padding: "5px 10px", borderRadius: "8px", cursor: "pointer",
                 fontSize: "11px", fontWeight: 700,
-                background: earningsPaused ? "rgba(216, 174, 100, 0.09)" : "rgba(91, 190, 147, 0.09)",
-                border: `1px solid ${earningsPaused ? "rgba(216, 174, 100, 0.22)" : "rgba(91, 190, 147, 0.22)"}`,
+                background: earningsPaused ? "rgba(var(--warning-rgb), 0.09)" : "rgba(var(--positive-rgb), 0.09)",
+                border: `1px solid ${earningsPaused ? "rgba(var(--warning-rgb), 0.22)" : "rgba(var(--positive-rgb), 0.22)"}`,
                 color: earningsPaused ? "var(--warning)" : "var(--positive)",
               }}
             >
@@ -4301,7 +4304,7 @@ export function TradingDashboard() {
               onChange={(e: any) => setEarningsSortBy(e.target.value)}
               style={{
                 backgroundColor: "var(--bg-base)",
-                border: "1px solid rgba(127, 166, 225, 0.18)",
+                border: "1px solid rgba(var(--accent-rgb), 0.18)",
                 color: "var(--text-primary)",
                 fontSize: "11px",
                 fontWeight: "700",
@@ -4329,10 +4332,10 @@ export function TradingDashboard() {
             No earnings disclosures match the selected date ({earningsDateFilter || 'All Dates'}) / search filter.
           </div>
         ) : (
-          <div style={{ maxHeight: "420px", overflowY: "auto", border: "1px solid rgba(255, 255, 255, 0.08)", borderRadius: "10px" }}>
+          <div style={{ maxHeight: "420px", overflowY: "auto", border: "1px solid rgba(var(--ink-rgb), 0.08)", borderRadius: "10px" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: "11px" }}>
               <thead>
-                <tr style={{ background: "rgba(25, 28, 34, 0.95)", borderBottom: "1px solid rgba(255, 255, 255, 0.1)", color: "var(--text-muted)" }}>
+                <tr style={{ background: "rgba(var(--bg-base-rgb), 0.95)", borderBottom: "1px solid rgba(var(--ink-rgb), 0.1)", color: "var(--text-muted)" }}>
                   <th style={{ padding: "10px 12px" }}>SYMBOL</th>
                   <th style={{ padding: "10px 12px" }}>COMPANY</th>
                   <th style={{ padding: "10px 12px", textAlign: "right" }}>LTP</th>
@@ -4382,11 +4385,11 @@ export function TradingDashboard() {
                   // Same 2m order-book signal as the watchlist and the result prompts
                   const sig = get2MinSignal(sym, q);
                   const sigColor = sig.tone === "up" ? "var(--positive-strong)" : sig.tone === "down" ? "var(--negative-strong)" : "var(--warning)";
-                  const sigBg = sig.tone === "up" ? "rgba(91, 190, 147, 0.09)" : sig.tone === "down" ? "rgba(226, 141, 131, 0.09)" : "rgba(216, 174, 100, 0.09)";
-                  const sigBorder = sig.tone === "up" ? "rgba(91, 190, 147, 0.18)" : sig.tone === "down" ? "rgba(226, 141, 131, 0.18)" : "rgba(216, 174, 100, 0.18)";
+                  const sigBg = sig.tone === "up" ? "rgba(var(--positive-rgb), 0.09)" : sig.tone === "down" ? "rgba(var(--negative-rgb), 0.09)" : "rgba(var(--warning-rgb), 0.09)";
+                  const sigBorder = sig.tone === "up" ? "rgba(var(--positive-rgb), 0.18)" : sig.tone === "down" ? "rgba(var(--negative-rgb), 0.18)" : "rgba(var(--warning-rgb), 0.18)";
 
                   return (
-                    <tr key={item.id || item.symbol} style={{ borderBottom: "1px solid rgba(255, 255, 255, 0.05)", background: "var(--surface-1)" }}>
+                    <tr key={item.id || item.symbol} style={{ borderBottom: "1px solid rgba(var(--ink-rgb), 0.05)", background: "var(--surface-1)" }}>
                       {/* 1. SYMBOL */}
                       <td style={{ padding: "10px 12px", fontWeight: "800", color: "var(--text-primary)", fontSize: "12px" }}>
                         <span
@@ -4405,7 +4408,7 @@ export function TradingDashboard() {
                                 fontSize: "9px",
                                 fontWeight: "700",
                                 color: ex === "NSE" ? "var(--accent)" : "var(--ai)",
-                                background: ex === "NSE" ? "rgba(127, 166, 225, 0.1)" : "rgba(176, 155, 217, 0.1)",
+                                background: ex === "NSE" ? "rgba(var(--accent-rgb), 0.1)" : "rgba(var(--ai-rgb), 0.1)",
                                 padding: "1px 4px",
                                 borderRadius: "3px"
                               }}>{ex}</span>
@@ -4516,7 +4519,7 @@ export function TradingDashboard() {
 
                       {/* 10. MEETING DATE */}
                       <td style={{ padding: "10px 12px", textAlign: "center" }}>
-                        <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--info)", background: "rgba(104, 179, 202, 0.09)", padding: "3px 8px", borderRadius: "6px" }}>
+                        <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--info)", background: "rgba(var(--info-rgb), 0.09)", padding: "3px 8px", borderRadius: "6px" }}>
                           📅 {item.display_date || item.meeting_date}
                         </span>
                       </td>
@@ -4531,9 +4534,9 @@ export function TradingDashboard() {
                               fontSize: "10px",
                               fontWeight: "700",
                               borderRadius: "6px",
-                              backgroundColor: "rgba(127, 166, 225, 0.1)",
+                              backgroundColor: "rgba(var(--accent-rgb), 0.1)",
                               color: "var(--accent)",
-                              border: "1px solid rgba(127, 166, 225, 0.18)",
+                              border: "1px solid rgba(var(--accent-rgb), 0.18)",
                               cursor: "pointer",
                               display: "flex",
                               alignItems: "center",
@@ -4556,7 +4559,7 @@ export function TradingDashboard() {
                               display: "flex",
                               alignItems: "center",
                               gap: "3px",
-                              boxShadow: "0 2px 6px rgba(91, 190, 147, 0.18)"
+                              boxShadow: "0 2px 6px rgba(var(--positive-rgb), 0.18)"
                             }}
                           >
                             <Zap size={11} /> Add &amp; Arm
@@ -4600,7 +4603,7 @@ export function TradingDashboard() {
 
             return (
               <svg width={width} height={height} style={{ overflow: "visible" }}>
-                <line x1={0} y1={height / 2} x2={width} y2={height / 2} stroke="rgba(255,255,255,0.06)" strokeDasharray="3 3" />
+                <line x1={0} y1={height / 2} x2={width} y2={height / 2} stroke="rgba(var(--ink-rgb),0.06)" strokeDasharray="3 3" />
                 <polyline fill="none" stroke={strokeColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" points={points} />
               </svg>
             );
@@ -4613,16 +4616,16 @@ export function TradingDashboard() {
               top: `${hoveredSentiment.y}px`,
               width: "360px",
               zIndex: 99999,
-              background: "linear-gradient(135deg, rgba(40, 44, 52, 0.98) 0%, rgba(25, 28, 34, 0.99) 100%)",
-              border: "1px solid rgba(255, 255, 255, 0.15)",
+              background: "linear-gradient(135deg, rgba(var(--surface-2-rgb), 0.98) 0%, rgba(var(--bg-base-rgb), 0.99) 100%)",
+              border: "1px solid rgba(var(--ink-rgb), 0.15)",
               borderRadius: "12px",
-              boxShadow: "0 20px 50px rgba(0, 0, 0, 0.9), 0 0 30px rgba(104, 179, 202, 0.1)",
+              boxShadow: "0 20px 50px rgba(var(--shadow-rgb), 0.9), 0 0 30px rgba(var(--info-rgb), 0.1)",
               padding: "16px",
               pointerEvents: "none",
               backdropFilter: "blur(20px)"
             }}>
               {/* Popover Header */}
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid rgba(255, 255, 255, 0.08)", paddingBottom: "10px", marginBottom: "12px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid rgba(var(--ink-rgb), 0.08)", paddingBottom: "10px", marginBottom: "12px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                   <span style={{ padding: "3px 8px", borderRadius: "6px", background: "var(--info)", color: "var(--bg-base)", fontWeight: "800", fontSize: "12px" }}>
                     {hoveredSentiment.symbol}
@@ -4650,18 +4653,18 @@ export function TradingDashboard() {
 
               {/* Metrics Grid: Daily Range vs Order Book */}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "14px" }}>
-                <div style={{ backgroundColor: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: "8px", padding: "8px 10px" }}>
+                <div style={{ backgroundColor: "rgba(var(--ink-rgb),0.03)", border: "1px solid rgba(var(--ink-rgb),0.06)", borderRadius: "8px", padding: "8px 10px" }}>
                   <div style={{ fontSize: "9px", color: "var(--text-muted)", fontWeight: "700", marginBottom: "2px" }}>DAILY RANGE (15% WT)</div>
                   <div style={{ fontSize: "12px", fontWeight: "800", color: "var(--text-primary)" }}>{priceBuyPct}% B / {100 - priceBuyPct}% S</div>
                 </div>
-                <div style={{ backgroundColor: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: "8px", padding: "8px 10px" }}>
+                <div style={{ backgroundColor: "rgba(var(--ink-rgb),0.03)", border: "1px solid rgba(var(--ink-rgb),0.06)", borderRadius: "8px", padding: "8px 10px" }}>
                   <div style={{ fontSize: "9px", color: "var(--text-muted)", fontWeight: "700", marginBottom: "2px" }}>ORDER BOOK (85% WT)</div>
                   <div style={{ fontSize: "12px", fontWeight: "800", color: "var(--text-primary)" }}>{depthBuyPct}% B / {100 - depthBuyPct}% S</div>
                 </div>
               </div>
 
               {/* Buyer Sentiment Sparkline Chart */}
-              <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: "10px" }}>
+              <div style={{ borderTop: "1px solid rgba(var(--ink-rgb),0.08)", paddingTop: "10px" }}>
                 <div style={{ fontSize: "9px", color: "var(--text-faint)", fontWeight: "700", letterSpacing: "0.5px", marginBottom: "6px" }}>
                   BUYER SENTIMENT SPARKLINE (LAST 15 UPDATES)
                 </div>
@@ -4677,7 +4680,7 @@ export function TradingDashboard() {
         <div style={{
           position: "fixed",
           top: 0, left: 0, right: 0, bottom: 0,
-          backgroundColor: "rgba(0, 0, 0, 0.75)",
+          backgroundColor: "rgba(var(--shadow-rgb), 0.75)",
           backdropFilter: "blur(4px)",
           display: "flex",
           alignItems: "center",
@@ -4687,14 +4690,14 @@ export function TradingDashboard() {
         }}>
           <div style={{
             backgroundColor: "var(--bg-base)",
-            border: "1px solid rgba(176, 155, 217, 0.18)",
+            border: "1px solid rgba(var(--ai-rgb), 0.18)",
             borderRadius: "16px",
             width: "100%",
             maxWidth: "560px",
             maxHeight: "90vh",
             overflowY: "auto",
             padding: "24px",
-            boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.5)"
+            boxShadow: "0 20px 25px -5px rgba(var(--shadow-rgb), 0.5)"
           }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "18px" }}>
               <h3 style={{ fontSize: "16px", fontWeight: "800", color: "var(--text-primary)", display: "flex", alignItems: "center", gap: "8px" }}>
@@ -4723,7 +4726,7 @@ export function TradingDashboard() {
                     padding: "10px 12px",
                     borderRadius: "8px",
                     backgroundColor: "var(--surface-2)",
-                    border: "1px solid rgba(255, 255, 255, 0.1)",
+                    border: "1px solid rgba(var(--ink-rgb), 0.1)",
                     color: "var(--text-primary)",
                     fontSize: "12px",
                     fontFamily: "monospace"
@@ -4737,11 +4740,11 @@ export function TradingDashboard() {
               {(() => {
                 const inputStyle: React.CSSProperties = {
                   width: "100%", padding: "9px 12px", borderRadius: "8px",
-                  backgroundColor: "var(--surface-2)", border: "1px solid rgba(255, 255, 255, 0.1)",
+                  backgroundColor: "var(--surface-2)", border: "1px solid rgba(var(--ink-rgb), 0.1)",
                   color: "var(--text-primary)", fontSize: "12px",
                 };
                 const section: React.CSSProperties = {
-                  border: "1px solid rgba(255, 255, 255, 0.08)", borderRadius: "10px",
+                  border: "1px solid rgba(var(--ink-rgb), 0.08)", borderRadius: "10px",
                   padding: "12px", display: "flex", flexDirection: "column", gap: "10px",
                 };
                 const label: React.CSSProperties = { display: "block", fontSize: "11px", fontWeight: 700, color: "var(--text-secondary)", marginBottom: "5px" };
@@ -4765,13 +4768,13 @@ export function TradingDashboard() {
                         />
                         {isSet && draft === undefined && (
                           <button type="button" onClick={() => setKeyDrafts(prev => ({ ...prev, [tier]: "" }))}
-                            style={{ padding: "0 10px", borderRadius: "8px", background: "transparent", border: "1px solid rgba(160, 168, 180, 0.2)", color: "var(--text-muted)", fontSize: "11px", cursor: "pointer" }}>
+                            style={{ padding: "0 10px", borderRadius: "8px", background: "transparent", border: "1px solid rgba(var(--neutral-rgb), 0.2)", color: "var(--text-muted)", fontSize: "11px", cursor: "pointer" }}>
                             Remove
                           </button>
                         )}
                         {draft !== undefined && (
                           <button type="button" onClick={() => setKeyDrafts(prev => { const n = { ...prev }; delete n[tier]; return n; })}
-                            style={{ padding: "0 10px", borderRadius: "8px", background: "transparent", border: "1px solid rgba(160, 168, 180, 0.2)", color: "var(--text-muted)", fontSize: "11px", cursor: "pointer" }}>
+                            style={{ padding: "0 10px", borderRadius: "8px", background: "transparent", border: "1px solid rgba(var(--neutral-rgb), 0.2)", color: "var(--text-muted)", fontSize: "11px", cursor: "pointer" }}>
                             Undo
                           </button>
                         )}
@@ -4882,7 +4885,7 @@ export function TradingDashboard() {
                     cursor: "pointer",
                     fontSize: "12px",
                     fontWeight: "700",
-                    boxShadow: "0 2px 8px rgba(176, 155, 217, 0.26)"
+                    boxShadow: "0 2px 8px rgba(var(--ai-rgb), 0.26)"
                   }}
                 >
                   {savingSettings ? "Saving..." : "Save AI Settings"}
@@ -4901,10 +4904,10 @@ export function TradingDashboard() {
           alignItems: "center",
           justifyContent: "space-between",
           marginBottom: "16px",
-          background: "rgba(33, 36, 43, 0.4)",
+          background: "rgba(var(--surface-1-rgb), 0.4)",
           padding: "12px 18px",
           borderRadius: "12px",
-          border: "1px solid rgba(255, 255, 255, 0.05)"
+          border: "1px solid rgba(var(--ink-rgb), 0.05)"
         }}
       >
         <h2 id="auto-trading-configs" style={{ fontSize: "16px", fontWeight: "700", color: "var(--text-primary)", display: "flex", alignItems: "center", gap: "8px", scrollMarginTop: "16px" }}>
@@ -4921,9 +4924,9 @@ export function TradingDashboard() {
               fontSize: "12px",
               fontWeight: "700",
               borderRadius: "8px",
-              backgroundColor: "rgba(176, 155, 217, 0.1)",
+              backgroundColor: "rgba(var(--ai-rgb), 0.1)",
               color: "var(--ai)",
-              border: "1px solid rgba(176, 155, 217, 0.18)",
+              border: "1px solid rgba(var(--ai-rgb), 0.18)",
               cursor: "pointer"
             }}
           >
@@ -4941,9 +4944,9 @@ export function TradingDashboard() {
               fontSize: "12px",
               fontWeight: "700",
               borderRadius: "8px",
-              backgroundColor: "rgba(127, 166, 225, 0.13)",
+              backgroundColor: "rgba(var(--accent-rgb), 0.13)",
               color: "var(--accent)",
-              border: "1px solid rgba(127, 166, 225, 0.18)",
+              border: "1px solid rgba(var(--accent-rgb), 0.18)",
               cursor: "pointer",
               transition: "all 0.2s"
             }}
@@ -4965,7 +4968,7 @@ export function TradingDashboard() {
               color: "var(--on-accent)",
               border: "none",
               cursor: "pointer",
-              boxShadow: "0 2px 8px rgba(127, 166, 225, 0.18)"
+              boxShadow: "0 2px 8px rgba(var(--accent-rgb), 0.18)"
             }}
           >
             <Plus size={15} />
@@ -4979,7 +4982,7 @@ export function TradingDashboard() {
               padding: "8px 16px", fontSize: "12px", fontWeight: 700, borderRadius: "8px",
               backgroundColor: showBuyForm ? "var(--text-faint)" : "var(--positive)",
               color: "var(--on-accent)", border: "none", cursor: "pointer",
-              boxShadow: "0 2px 8px rgba(91, 190, 147, 0.18)",
+              boxShadow: "0 2px 8px rgba(var(--positive-rgb), 0.18)",
             }}
           >
             <ShoppingBag size={15} />
@@ -4990,9 +4993,9 @@ export function TradingDashboard() {
             style={{
               padding: "8px 12px",
               borderRadius: "8px",
-              backgroundColor: "rgba(255, 255, 255, 0.05)",
+              backgroundColor: "rgba(var(--ink-rgb), 0.05)",
               color: "var(--text-muted)",
-              border: "1px solid rgba(255, 255, 255, 0.08)",
+              border: "1px solid rgba(var(--ink-rgb), 0.08)",
               cursor: "pointer"
             }}
           >
@@ -5005,7 +5008,7 @@ export function TradingDashboard() {
       {/* ADD TARGET STOCK FORM */}
       {showBuyForm && (
         <form onSubmit={handleDirectBuy} style={{
-          background: "var(--surface-1)", border: "1px solid rgba(91, 190, 147, 0.18)",
+          background: "var(--surface-1)", border: "1px solid rgba(var(--positive-rgb), 0.18)",
           borderRadius: "12px", padding: "16px", marginBottom: "16px",
           display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: "12px",
         }}>
@@ -5061,7 +5064,7 @@ export function TradingDashboard() {
           <button type="submit" disabled={buyBusy || !buyForm.symbol.trim()}
             style={{
               padding: "9px 18px", borderRadius: "8px", border: "none",
-              background: buyBusy ? "rgba(91, 190, 147, 0.26)" : "var(--positive)",
+              background: buyBusy ? "rgba(var(--positive-rgb), 0.26)" : "var(--positive)",
               color: "var(--on-accent)", fontSize: "12px", fontWeight: 700,
               cursor: buyBusy ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: "6px",
             }}>
@@ -5080,8 +5083,8 @@ export function TradingDashboard() {
 
       {showAddForm && (
         <form onSubmit={handleAddConfig} style={{
-          background: "rgba(33, 36, 43, 0.8)",
-          border: "1px solid rgba(127, 166, 225, 0.18)",
+          background: "rgba(var(--surface-1-rgb), 0.8)",
+          border: "1px solid rgba(var(--accent-rgb), 0.18)",
           borderRadius: "12px",
           padding: "20px",
           marginBottom: "20px",
@@ -5103,7 +5106,7 @@ export function TradingDashboard() {
                 padding: "8px 12px",
                 fontSize: "12px",
                 borderRadius: "6px",
-                border: "1px solid rgba(255, 255, 255, 0.1)",
+                border: "1px solid rgba(var(--ink-rgb), 0.1)",
                 backgroundColor: "var(--surface-1)",
                 color: "var(--text-primary)"
               }}
@@ -5115,7 +5118,7 @@ export function TradingDashboard() {
                 left: 0,
                 right: 0,
                 backgroundColor: "var(--bg-base)",
-                border: "1px solid rgba(255, 255, 255, 0.1)",
+                border: "1px solid rgba(var(--ink-rgb), 0.1)",
                 borderRadius: "6px",
                 maxHeight: "150px",
                 overflowY: "auto",
@@ -5130,10 +5133,10 @@ export function TradingDashboard() {
                       padding: "8px 12px",
                       fontSize: "12px",
                       cursor: "pointer",
-                      borderBottom: "1px solid rgba(255, 255, 255, 0.05)",
+                      borderBottom: "1px solid rgba(var(--ink-rgb), 0.05)",
                       color: "var(--text-primary)"
                     }}
-                    onMouseOver={(e) => e.currentTarget.style.backgroundColor = "rgba(127, 166, 225, 0.13)"}
+                    onMouseOver={(e) => e.currentTarget.style.backgroundColor = "rgba(var(--accent-rgb), 0.13)"}
                     onMouseOut={(e) => e.currentTarget.style.backgroundColor = "transparent"}
                   >
                     <strong>{item.symbol}</strong> — {item.name}
@@ -5156,7 +5159,7 @@ export function TradingDashboard() {
                 padding: "8px 12px",
                 fontSize: "12px",
                 borderRadius: "6px",
-                border: "1px solid rgba(255, 255, 255, 0.1)",
+                border: "1px solid rgba(var(--ink-rgb), 0.1)",
                 backgroundColor: "var(--surface-1)",
                 color: "var(--text-primary)"
               }}
@@ -5177,7 +5180,7 @@ export function TradingDashboard() {
                 padding: "8px 12px",
                 fontSize: "12px",
                 borderRadius: "6px",
-                border: "1px solid rgba(255, 255, 255, 0.1)",
+                border: "1px solid rgba(var(--ink-rgb), 0.1)",
                 backgroundColor: "var(--surface-1)",
                 color: "var(--text-primary)"
               }}
@@ -5199,7 +5202,7 @@ export function TradingDashboard() {
                 padding: "8px 12px",
                 fontSize: "12px",
                 borderRadius: "6px",
-                border: "1px solid rgba(255, 255, 255, 0.1)",
+                border: "1px solid rgba(var(--ink-rgb), 0.1)",
                 backgroundColor: "var(--surface-1)",
                 color: "var(--text-primary)"
               }}
@@ -5217,7 +5220,7 @@ export function TradingDashboard() {
                 padding: "8px 12px",
                 fontSize: "12px",
                 borderRadius: "6px",
-                border: "1px solid rgba(255, 255, 255, 0.1)",
+                border: "1px solid rgba(var(--ink-rgb), 0.1)",
                 backgroundColor: "var(--surface-1)",
                 color: "var(--text-primary)"
               }}
@@ -5238,7 +5241,7 @@ export function TradingDashboard() {
                 padding: "8px 12px",
                 fontSize: "12px",
                 borderRadius: "6px",
-                border: "1px solid rgba(255, 255, 255, 0.1)",
+                border: "1px solid rgba(var(--ink-rgb), 0.1)",
                 backgroundColor: "var(--surface-1)",
                 color: "var(--text-primary)"
               }}
@@ -5263,7 +5266,7 @@ export function TradingDashboard() {
                   padding: "8px 12px",
                   fontSize: "12px",
                   borderRadius: "6px",
-                  border: "1px solid rgba(255, 255, 255, 0.1)",
+                  border: "1px solid rgba(var(--ink-rgb), 0.1)",
                   backgroundColor: "var(--surface-1)",
                   color: "var(--text-primary)"
                 }}
@@ -5282,7 +5285,7 @@ export function TradingDashboard() {
                 padding: "8px 12px",
                 fontSize: "12px",
                 borderRadius: "6px",
-                border: "1px solid rgba(255, 255, 255, 0.1)",
+                border: "1px solid rgba(var(--ink-rgb), 0.1)",
                 backgroundColor: "var(--surface-1)",
                 color: "var(--text-primary)"
               }}
@@ -5320,7 +5323,7 @@ export function TradingDashboard() {
                 color: "var(--on-accent)",
                 border: "none",
                 cursor: "pointer",
-                boxShadow: "0 2px 10px rgba(91, 190, 147, 0.18)"
+                boxShadow: "0 2px 10px rgba(var(--positive-rgb), 0.18)"
               }}
             >
               Save Target Config
@@ -5331,15 +5334,15 @@ export function TradingDashboard() {
 
       {/* CONFIGS TABLE */}
       <div style={{
-        background: "rgba(33, 36, 43, 0.6)",
-        border: "1px solid rgba(255, 255, 255, 0.08)",
+        background: "rgba(var(--surface-1-rgb), 0.6)",
+        border: "1px solid rgba(var(--ink-rgb), 0.08)",
         borderRadius: "12px",
         overflow: "hidden",
         marginBottom: "30px"
       }}>
         <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: "12px" }}>
           <thead>
-            <tr style={{ background: "rgba(25, 28, 34, 0.8)", borderBottom: "1px solid rgba(255, 255, 255, 0.08)", color: "var(--text-muted)" }}>
+            <tr style={{ background: "rgba(var(--bg-base-rgb), 0.8)", borderBottom: "1px solid rgba(var(--ink-rgb), 0.08)", color: "var(--text-muted)" }}>
               <th style={{ padding: "12px 16px" }}>Stock Symbol</th>
               <th style={{ padding: "12px 16px" }}>Target Date</th>
               <th style={{ padding: "12px 16px" }}>Qty</th>
@@ -5360,7 +5363,7 @@ export function TradingDashboard() {
               </tr>
             ) : (
               configs.map((c) => (
-                <tr key={c.id} style={{ borderBottom: "1px solid rgba(255, 255, 255, 0.05)" }}>
+                <tr key={c.id} style={{ borderBottom: "1px solid rgba(var(--ink-rgb), 0.05)" }}>
                   <td style={{ padding: "14px 16px", fontWeight: "700", color: "var(--text-primary)" }}>
                     {c.symbol}
                     {c.buy_price && <div style={{ fontSize: "10px", color: "var(--positive-strong)" }}>Bought @ ₹{c.buy_price}</div>}
@@ -5453,7 +5456,7 @@ export function TradingDashboard() {
                         style={{
                           padding: "5px 8px",
                           borderRadius: "6px",
-                          backgroundColor: "rgba(226, 141, 131, 0.08)",
+                          backgroundColor: "rgba(var(--negative-rgb), 0.08)",
                           color: "var(--negative-strong)",
                           border: "none",
                           cursor: "pointer"
@@ -5474,8 +5477,8 @@ export function TradingDashboard() {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
         {/* Executed Broker Orders */}
         <div style={{
-          background: "rgba(33, 36, 43, 0.6)",
-          border: "1px solid rgba(255, 255, 255, 0.08)",
+          background: "rgba(var(--surface-1-rgb), 0.6)",
+          border: "1px solid rgba(var(--ink-rgb), 0.08)",
           borderRadius: "12px",
           padding: "16px"
         }}>
@@ -5499,9 +5502,9 @@ export function TradingDashboard() {
                       if (el) {
                         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
                         el.style.border = "1px solid var(--ai)";
-                        el.style.boxShadow = "0 0 20px rgba(176, 155, 217, 0.8)";
+                        el.style.boxShadow = "0 0 20px rgba(var(--ai-rgb), 0.8)";
                         setTimeout(() => {
-                          el.style.border = "1px solid rgba(255, 255, 255, 0.08)";
+                          el.style.border = "1px solid rgba(var(--ink-rgb), 0.08)";
                           el.style.boxShadow = "";
                         }, 2500);
                       }
@@ -5510,7 +5513,7 @@ export function TradingDashboard() {
                       padding: "10px 12px",
                       borderRadius: "8px",
                       backgroundColor: "var(--surface-1)",
-                      border: "1px solid rgba(255, 255, 255, 0.08)",
+                      border: "1px solid rgba(var(--ink-rgb), 0.08)",
                       marginBottom: "8px",
                       fontSize: "12px",
                       cursor: "pointer",
@@ -5518,12 +5521,12 @@ export function TradingDashboard() {
                       position: "relative" as const
                     }}
                     onMouseEnter={(e) => {
-                      e.currentTarget.style.borderColor = "rgba(127, 166, 225, 0.34)";
+                      e.currentTarget.style.borderColor = "rgba(var(--accent-rgb), 0.34)";
                       const rect = e.currentTarget.getBoundingClientRect();
                       setHoveredOrder({ order: o, x: rect.right + 8, y: rect.top });
                     }}
                     onMouseLeave={(e) => {
-                      e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.08)";
+                      e.currentTarget.style.borderColor = "rgba(var(--ink-rgb), 0.08)";
                       setHoveredOrder(null);
                     }}
                   >
@@ -5534,9 +5537,9 @@ export function TradingDashboard() {
                         fontWeight: "700",
                         padding: "2px 8px",
                         borderRadius: "4px",
-                        backgroundColor: o.status === "filled" || o.status === "placed" ? "rgba(91, 190, 147, 0.1)" : "rgba(226, 141, 131, 0.1)",
+                        backgroundColor: o.status === "filled" || o.status === "placed" ? "rgba(var(--positive-rgb), 0.1)" : "rgba(var(--negative-rgb), 0.1)",
                         color: o.status === "filled" || o.status === "placed" ? "var(--positive-strong)" : "var(--negative-strong)",
-                        border: o.status === "filled" || o.status === "placed" ? "1px solid rgba(91, 190, 147, 0.18)" : "1px solid rgba(226, 141, 131, 0.18)"
+                        border: o.status === "filled" || o.status === "placed" ? "1px solid rgba(var(--positive-rgb), 0.18)" : "1px solid rgba(var(--negative-rgb), 0.18)"
                       }}>
                         {o.status.toUpperCase()}
                       </span>
@@ -5582,10 +5585,10 @@ export function TradingDashboard() {
               top: `${popY}px`,
               width: `${popWidth}px`,
               zIndex: 99999,
-              background: "linear-gradient(135deg, rgba(40, 44, 52, 0.98) 0%, rgba(25, 28, 34, 0.99) 100%)",
-              border: "1px solid rgba(127, 166, 225, 0.18)",
+              background: "linear-gradient(135deg, rgba(var(--surface-2-rgb), 0.98) 0%, rgba(var(--bg-base-rgb), 0.99) 100%)",
+              border: "1px solid rgba(var(--accent-rgb), 0.18)",
               borderRadius: "12px",
-              boxShadow: "0 20px 50px rgba(0, 0, 0, 0.9), 0 0 30px rgba(127, 166, 225, 0.1)",
+              boxShadow: "0 20px 50px rgba(var(--shadow-rgb), 0.9), 0 0 30px rgba(var(--accent-rgb), 0.1)",
               padding: "16px",
               pointerEvents: "none" as const,
               backdropFilter: "blur(20px)",
@@ -5593,7 +5596,7 @@ export function TradingDashboard() {
               overflowY: "auto" as const
             }}>
               {/* Header */}
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid rgba(255,255,255,0.08)", paddingBottom: "10px", marginBottom: "10px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid rgba(var(--ink-rgb),0.08)", paddingBottom: "10px", marginBottom: "10px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                   <span style={{ padding: "3px 8px", borderRadius: "6px", background: o.status === "filled" || o.status === "placed" ? "var(--positive)" : "var(--negative)", color: "var(--on-accent)", fontWeight: "800", fontSize: "11px" }}>
                     {o.symbol}
@@ -5626,14 +5629,14 @@ export function TradingDashboard() {
 
               {/* Error Message */}
               {o.error_message && (
-                <div style={{ background: "rgba(226, 141, 131, 0.08)", border: "1px solid rgba(226, 141, 131, 0.18)", borderRadius: "6px", padding: "8px", marginBottom: "8px", fontSize: "10px", color: "var(--negative-strong)", fontWeight: "600" }}>
+                <div style={{ background: "rgba(var(--negative-rgb), 0.08)", border: "1px solid rgba(var(--negative-rgb), 0.18)", borderRadius: "6px", padding: "8px", marginBottom: "8px", fontSize: "10px", color: "var(--negative-strong)", fontWeight: "600" }}>
                   ⚠️ {o.error_message}
                 </div>
               )}
 
               {/* AI Analysis Summary (if available) */}
               {matchingAiLog && (
-                <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: "8px" }}>
+                <div style={{ borderTop: "1px solid rgba(var(--ink-rgb),0.08)", paddingTop: "8px" }}>
                   <div style={{ fontSize: "10px", fontWeight: "800", color: "var(--ai)", marginBottom: "6px", letterSpacing: "0.5px" }}>
                     🤖 AI ANALYSIS
                   </div>
@@ -5667,7 +5670,7 @@ export function TradingDashboard() {
 
               {/* Broker Raw Response (if no AI log) */}
               {!matchingAiLog && brokerResp && (
-                <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: "8px" }}>
+                <div style={{ borderTop: "1px solid rgba(var(--ink-rgb),0.08)", paddingTop: "8px" }}>
                   <div style={{ fontSize: "10px", fontWeight: "800", color: "var(--info)", marginBottom: "4px" }}>BROKER RESPONSE</div>
                   <div style={{ fontSize: "10px", color: "var(--text-muted)", lineHeight: "1.3", maxHeight: "60px", overflow: "hidden" }}>
                     {JSON.stringify(brokerResp, null, 1).substring(0, 200)}
@@ -5683,8 +5686,8 @@ export function TradingDashboard() {
           
           {/* Real-Time NSE Corporate Announcements */}
           <div style={{
-            background: "rgba(33, 36, 43, 0.6)",
-            border: "1px solid rgba(127, 166, 225, 0.13)",
+            background: "rgba(var(--surface-1-rgb), 0.6)",
+            border: "1px solid rgba(var(--accent-rgb), 0.13)",
             borderRadius: "12px",
             padding: "16px"
           }}>
@@ -5692,7 +5695,7 @@ export function TradingDashboard() {
               <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                 <Sparkles size={16} className="text-blue-400" /> Live Results & Corporate Announcements ({nseAnnouncements.length})
               </span>
-              <span style={{ fontSize: "10px", color: "var(--accent)", background: "rgba(127, 166, 225, 0.08)", padding: "2px 8px", borderRadius: "12px" }}>
+              <span style={{ fontSize: "10px", color: "var(--accent)", background: "rgba(var(--accent-rgb), 0.08)", padding: "2px 8px", borderRadius: "12px" }}>
                 Real-Time AI
               </span>
             </h3>
@@ -5712,7 +5715,7 @@ export function TradingDashboard() {
                       padding: "12px",
                       borderRadius: "8px",
                       backgroundColor: "var(--surface-1)",
-                      border: isPendingArm ? "1px dashed rgba(176, 155, 217, 0.26)" : isBeat ? "1px solid rgba(91, 190, 147, 0.16)" : isMiss ? "1px solid rgba(226, 141, 131, 0.16)" : "1px solid rgba(255,255,255,0.06)",
+                      border: isPendingArm ? "1px dashed rgba(var(--ai-rgb), 0.26)" : isBeat ? "1px solid rgba(var(--positive-rgb), 0.16)" : isMiss ? "1px solid rgba(var(--negative-rgb), 0.16)" : "1px solid rgba(var(--ink-rgb),0.06)",
                       marginBottom: "10px",
                       fontSize: "12px"
                     }}>
@@ -5728,7 +5731,7 @@ export function TradingDashboard() {
                             <span style={{ 
                               fontSize: "9px", 
                               color: ann.source === "nse" ? "var(--accent)" : "var(--negative)", 
-                              backgroundColor: ann.source === "nse" ? "rgba(127, 166, 225, 0.1)" : "rgba(226, 141, 131, 0.1)",
+                              backgroundColor: ann.source === "nse" ? "rgba(var(--accent-rgb), 0.1)" : "rgba(var(--negative-rgb), 0.1)",
                               padding: "1px 5px", 
                               borderRadius: "3px",
                               fontWeight: "800",
@@ -5744,7 +5747,7 @@ export function TradingDashboard() {
                           )}
                         </div>
                         {isPendingArm ? (
-                          <span style={{ fontSize: "10px", fontWeight: "700", color: "var(--ai)", background: "rgba(176, 155, 217, 0.1)", padding: "2px 6px", borderRadius: "4px" }}>
+                          <span style={{ fontSize: "10px", fontWeight: "700", color: "var(--ai)", background: "rgba(var(--ai-rgb), 0.1)", padding: "2px 6px", borderRadius: "4px" }}>
                             ⏳ Awaiting Arm AI
                           </span>
                         ) : ann.ai_sentiment ? (
@@ -5762,7 +5765,7 @@ export function TradingDashboard() {
                         {ann.title}
                       </div>
                       {ann.ai_summary && (
-                        <div style={{ fontSize: "11px", color: "var(--text-muted)", fontStyle: "italic", borderTop: "1px dashed rgba(255,255,255,0.06)", paddingTop: "6px", marginTop: "6px" }}>
+                        <div style={{ fontSize: "11px", color: "var(--text-muted)", fontStyle: "italic", borderTop: "1px dashed rgba(var(--ink-rgb),0.06)", paddingTop: "6px", marginTop: "6px" }}>
                           💡 {ann.ai_summary}
                         </div>
                       )}
@@ -5782,8 +5785,8 @@ export function TradingDashboard() {
 
           {/* Premium 2-Step AI Earnings Analysis Logs */}
           <div style={{
-            background: "rgba(33, 36, 43, 0.6)",
-            border: "1px solid rgba(176, 155, 217, 0.13)",
+            background: "rgba(var(--surface-1-rgb), 0.6)",
+            border: "1px solid rgba(var(--ai-rgb), 0.13)",
             borderRadius: "12px",
             padding: "16px"
           }}>
@@ -5797,8 +5800,8 @@ export function TradingDashboard() {
                   style={{
                     fontSize: "11px",
                     color: "var(--negative-strong)",
-                    background: "rgba(226, 141, 131, 0.09)",
-                    border: "1px solid rgba(226, 141, 131, 0.16)",
+                    background: "rgba(var(--negative-rgb), 0.09)",
+                    border: "1px solid rgba(var(--negative-rgb), 0.16)",
                     padding: "3px 8px",
                     borderRadius: "6px",
                     cursor: "pointer",
@@ -5807,7 +5810,7 @@ export function TradingDashboard() {
                 >
                   🧹 Clear / Reset Logs
                 </button>
-                <span style={{ fontSize: "10px", color: "var(--ai)", background: "rgba(176, 155, 217, 0.08)", padding: "2px 8px", borderRadius: "12px" }}>
+                <span style={{ fontSize: "10px", color: "var(--ai)", background: "rgba(var(--ai-rgb), 0.08)", padding: "2px 8px", borderRadius: "12px" }}>
                   Auto-Triggered
                 </span>
               </div>
@@ -5815,26 +5818,26 @@ export function TradingDashboard() {
 
             {/* Filters — applied server-side so the range covers all history,
                 not just the rows already loaded. */}
-            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px", marginBottom: "12px", padding: "8px 10px", background: "rgba(25, 28, 34,0.5)", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.05)" }}>
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px", marginBottom: "12px", padding: "8px 10px", background: "rgba(var(--bg-base-rgb),0.5)", borderRadius: "8px", border: "1px solid rgba(var(--ink-rgb),0.05)" }}>
               <input
                 value={aiLogSearch}
                 onChange={e => setAiLogSearch(e.target.value)}
                 placeholder="Search symbol, company, summary or ref…"
-                style={{ flex: 1, minWidth: "170px", padding: "6px 10px", fontSize: "11px", background: "rgba(20, 23, 28,0.8)", border: "1px solid rgba(176, 155, 217, 0.18)", borderRadius: "6px", color: "var(--text-primary)" }}
+                style={{ flex: 1, minWidth: "170px", padding: "6px 10px", fontSize: "11px", background: "rgba(var(--bg-sunken-rgb),0.8)", border: "1px solid rgba(var(--ai-rgb), 0.18)", borderRadius: "6px", color: "var(--text-primary)" }}
               />
               <label style={{ fontSize: "10px", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "4px" }}>
                 From
                 <input type="date" value={aiLogDateFrom} onChange={e => setAiLogDateFrom(e.target.value)}
-                  style={{ padding: "5px 7px", fontSize: "11px", background: "rgba(20, 23, 28,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "var(--text-primary)" }} />
+                  style={{ padding: "5px 7px", fontSize: "11px", background: "rgba(var(--bg-sunken-rgb),0.8)", border: "1px solid rgba(var(--ink-rgb),0.12)", borderRadius: "6px", color: "var(--text-primary)" }} />
               </label>
               <label style={{ fontSize: "10px", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "4px" }}>
                 To
                 <input type="date" value={aiLogDateTo} onChange={e => setAiLogDateTo(e.target.value)}
-                  style={{ padding: "5px 7px", fontSize: "11px", background: "rgba(20, 23, 28,0.8)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "6px", color: "var(--text-primary)" }} />
+                  style={{ padding: "5px 7px", fontSize: "11px", background: "rgba(var(--bg-sunken-rgb),0.8)", border: "1px solid rgba(var(--ink-rgb),0.12)", borderRadius: "6px", color: "var(--text-primary)" }} />
               </label>
               {(aiLogSearch || aiLogDateFrom || aiLogDateTo) && (
                 <button onClick={() => { setAiLogSearch(""); setAiLogDateFrom(""); setAiLogDateTo(""); }}
-                  style={{ padding: "6px 10px", background: "transparent", border: "1px solid rgba(160, 168, 180, 0.18)", borderRadius: "6px", color: "var(--text-muted)", fontSize: "11px", cursor: "pointer" }}>
+                  style={{ padding: "6px 10px", background: "transparent", border: "1px solid rgba(var(--neutral-rgb), 0.18)", borderRadius: "6px", color: "var(--text-muted)", fontSize: "11px", cursor: "pointer" }}>
                   Reset
                 </button>
               )}
@@ -5861,7 +5864,7 @@ export function TradingDashboard() {
                       padding: "14px",
                       borderRadius: "10px",
                       backgroundColor: "var(--surface-1)",
-                      border: isBeat ? "1px solid rgba(91, 190, 147, 0.18)" : isMiss ? "1px solid rgba(226, 141, 131, 0.18)" : "1px solid rgba(176, 155, 217, 0.16)",
+                      border: isBeat ? "1px solid rgba(var(--positive-rgb), 0.18)" : isMiss ? "1px solid rgba(var(--negative-rgb), 0.18)" : "1px solid rgba(var(--ai-rgb), 0.16)",
                       marginBottom: "14px",
                       fontSize: "12px"
                     }}>
@@ -5910,10 +5913,10 @@ export function TradingDashboard() {
                           fontSize: "10px",
                           fontWeight: "600",
                           color: log.flow_used === "custom_rest_api" ? "var(--accent)" : "var(--ai)",
-                          background: log.flow_used === "custom_rest_api" ? "rgba(127, 166, 225, 0.08)" : "rgba(176, 155, 217, 0.08)",
+                          background: log.flow_used === "custom_rest_api" ? "rgba(var(--accent-rgb), 0.08)" : "rgba(var(--ai-rgb), 0.08)",
                           padding: "2px 8px",
                           borderRadius: "10px",
-                          border: log.flow_used === "custom_rest_api" ? "1px solid rgba(127, 166, 225, 0.13)" : "1px solid rgba(176, 155, 217, 0.13)"
+                          border: log.flow_used === "custom_rest_api" ? "1px solid rgba(var(--accent-rgb), 0.13)" : "1px solid rgba(var(--ai-rgb), 0.13)"
                         }}>
                           {log.flow_used === "custom_rest_api" ? "Flow 1: Custom REST API" : `Flow 2: ${log.provider}`}
                         </span>
@@ -5949,7 +5952,7 @@ export function TradingDashboard() {
                         </div>
                       )}
 
-                      <div style={{ fontSize: "11px", color: "var(--text-muted)", fontStyle: "italic", lineHeight: "1.4", borderTop: "1px dashed rgba(255,255,255,0.08)", paddingTop: "8px", marginTop: "8px" }}>
+                      <div style={{ fontSize: "11px", color: "var(--text-muted)", fontStyle: "italic", lineHeight: "1.4", borderTop: "1px dashed rgba(var(--ink-rgb),0.08)", paddingTop: "8px", marginTop: "8px" }}>
                         📝 "{log.ai_summary}"
                       </div>
 
@@ -5983,7 +5986,7 @@ export function TradingDashboard() {
             right: 0,
             bottom: 0,
             zIndex: 100000,
-            background: "rgba(0, 0, 0, 0.85)",
+            background: "rgba(var(--shadow-rgb), 0.85)",
             backdropFilter: "blur(10px)",
             display: "flex",
             justifyContent: "center",
@@ -5996,10 +5999,10 @@ export function TradingDashboard() {
               width: "90vw",
               maxWidth: "1100px",
               maxHeight: "85vh",
-              background: "linear-gradient(135deg, rgba(25, 28, 34, 0.98) 0%, rgba(20, 23, 28, 0.99) 100%)",
-              border: "1px solid rgba(127, 166, 225, 0.16)",
+              background: "linear-gradient(135deg, rgba(var(--bg-base-rgb), 0.98) 0%, rgba(var(--bg-sunken-rgb), 0.99) 100%)",
+              border: "1px solid rgba(var(--accent-rgb), 0.16)",
               borderRadius: "16px",
-              boxShadow: "0 25px 80px rgba(0, 0, 0, 0.8), 0 0 40px rgba(127, 166, 225, 0.09)",
+              boxShadow: "0 25px 80px rgba(var(--shadow-rgb), 0.8), 0 0 40px rgba(var(--accent-rgb), 0.09)",
               padding: "24px",
               overflowY: "auto"
             }}
@@ -6028,10 +6031,10 @@ export function TradingDashboard() {
                 <div style={{
                   display: "flex",
                   gap: "4px",
-                  backgroundColor: "rgba(255,255,255,0.03)",
+                  backgroundColor: "rgba(var(--ink-rgb),0.03)",
                   padding: "3px",
                   borderRadius: "8px",
-                  border: "1px solid rgba(255,255,255,0.06)"
+                  border: "1px solid rgba(var(--ink-rgb),0.06)"
                 }}>
                   {["1D", "5D", "1M", "3M", "6M", "1Y", "5Y"].map((p) => (
                     <button
@@ -6061,9 +6064,9 @@ export function TradingDashboard() {
                     fontSize: "11px",
                     fontWeight: "700",
                     borderRadius: "6px",
-                    backgroundColor: "rgba(226, 141, 131, 0.1)",
+                    backgroundColor: "rgba(var(--negative-rgb), 0.1)",
                     color: "var(--negative-strong)",
-                    border: "1px solid rgba(226, 141, 131, 0.18)",
+                    border: "1px solid rgba(var(--negative-rgb), 0.18)",
                     cursor: "pointer"
                   }}
                 >

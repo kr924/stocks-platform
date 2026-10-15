@@ -6,7 +6,22 @@ interface ChartProps {
   period: string;
 }
 
+/**
+ * lightweight-charts paints on a canvas and cannot read CSS variables, so the
+ * theme's colours are read off the document when the chart is built, and the
+ * chart is rebuilt when the theme changes ("themechange", fired by the toggle).
+ */
+const cssVar = (name: string) =>
+  getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const rgbaVar = (name: string, alpha: number) => `rgba(${cssVar(name)}, ${alpha})`;
+
 export const Chart: React.FC<ChartProps> = ({ candles, period }) => {
+  const [themeTick, setThemeTick] = useState(0);
+  useEffect(() => {
+    const onTheme = () => setThemeTick(t => t + 1);
+    window.addEventListener("themechange", onTheme);
+    return () => window.removeEventListener("themechange", onTheme);
+  }, []);
   const priceChartContainerRef = useRef<HTMLDivElement>(null);
   const interestChartContainerRef = useRef<HTMLDivElement>(null);
   const [tooltip, setTooltip] = useState<any>(null);
@@ -25,11 +40,11 @@ export const Chart: React.FC<ChartProps> = ({ candles, period }) => {
     const priceChart = createChart(priceContainer, {
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
-        textColor: "#8f97a5",
+        textColor: cssVar("--text-faint"),
       },
       grid: {
-        vertLines: { color: "rgba(255, 255, 255, 0.03)" },
-        horzLines: { color: "rgba(255, 255, 255, 0.03)" },
+        vertLines: { color: rgbaVar("--ink-rgb", 0.03) },
+        horzLines: { color: rgbaVar("--ink-rgb", 0.03) },
       },
       width: priceContainer.clientWidth,
       height: 250,
@@ -58,16 +73,16 @@ export const Chart: React.FC<ChartProps> = ({ candles, period }) => {
     const interestChart = createChart(interestContainer, {
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
-        textColor: "#8f97a5",
+        textColor: cssVar("--text-faint"),
       },
       grid: {
-        vertLines: { color: "rgba(255, 255, 255, 0.03)" },
-        horzLines: { color: "rgba(255, 255, 255, 0.03)" },
+        vertLines: { color: rgbaVar("--ink-rgb", 0.03) },
+        horzLines: { color: rgbaVar("--ink-rgb", 0.03) },
       },
       width: interestContainer.clientWidth,
       height: 120,
       timeScale: {
-        borderColor: "rgba(255, 255, 255, 0.08)",
+        borderColor: rgbaVar("--ink-rgb", 0.08),
         timeVisible: period === "1D" || period === "5D",
         tickMarkFormatter: (time: any) => {
           if (typeof time === "number") {
@@ -114,15 +129,15 @@ export const Chart: React.FC<ChartProps> = ({ candles, period }) => {
 
     // Add Candlestick and Volume to Price Chart
     const candlestickSeries = priceChart.addSeries(CandlestickSeries, {
-      upColor: "#5bbe93",
-      downColor: "#e28d83",
+      upColor: cssVar("--positive"),
+      downColor: cssVar("--negative"),
       borderVisible: false,
-      wickUpColor: "#5bbe93",
-      wickDownColor: "#e28d83",
+      wickUpColor: cssVar("--positive"),
+      wickDownColor: cssVar("--negative"),
     });
 
     const volumeSeries = priceChart.addSeries(HistogramSeries, {
-      color: "rgba(127, 166, 225, 0.13)",
+      color: rgbaVar("--accent-rgb", 0.13),
       priceFormat: { type: "volume" },
       priceScaleId: "",
     });
@@ -136,17 +151,17 @@ export const Chart: React.FC<ChartProps> = ({ candles, period }) => {
 
     // Add Area series for Buyer & Seller Interest to bottom chart
     const buyerSeries = interestChart.addSeries(AreaSeries, {
-      lineColor: "#5bbe93",
-      topColor: "rgba(91, 190, 147, 0.26)",
-      bottomColor: "rgba(91, 190, 147, 0.0)",
+      lineColor: cssVar("--positive"),
+      topColor: rgbaVar("--positive-rgb", 0.26),
+      bottomColor: rgbaVar("--positive-rgb", 0.0),
       lineWidth: 2,
       title: "Buy Interest %",
     });
 
     const sellerSeries = interestChart.addSeries(AreaSeries, {
-      lineColor: "#e28d83",
-      topColor: "rgba(226, 141, 131, 0.16)",
-      bottomColor: "rgba(226, 141, 131, 0.0)",
+      lineColor: cssVar("--negative"),
+      topColor: rgbaVar("--negative-rgb", 0.16),
+      bottomColor: rgbaVar("--negative-rgb", 0.0),
       lineWidth: 1.5,
       title: "Sell Interest %",
     });
@@ -186,7 +201,7 @@ export const Chart: React.FC<ChartProps> = ({ candles, period }) => {
     const volumeData = uniqueCandles.map((c: any) => ({
       time: c.timeKey,
       value: Number(c[5]),
-      color: Number(c[4]) >= Number(c[1]) ? "rgba(91, 190, 147, 0.16)" : "rgba(226, 141, 131, 0.16)",
+      color: Number(c[4]) >= Number(c[1]) ? rgbaVar("--positive-rgb", 0.16) : rgbaVar("--negative-rgb", 0.16),
     }));
 
     const buyerData = uniqueCandles.map((c: any) => {
@@ -315,7 +330,7 @@ export const Chart: React.FC<ChartProps> = ({ candles, period }) => {
       priceChart.remove();
       interestChart.remove();
     };
-  }, [candles, period]);
+  }, [candles, period, themeTick]);
 
   return (
     <div style={{ position: "relative", width: "100%", display: "flex", flexDirection: "column", gap: "8px" }}>
@@ -329,8 +344,8 @@ export const Chart: React.FC<ChartProps> = ({ candles, period }) => {
             Buyer vs Seller Interest Timeline
           </span>
           <div style={{ display: "flex", gap: "12px", fontSize: "9px", fontWeight: "700" }}>
-            <span style={{ color: "#5bbe93" }}>● BUY INTEREST</span>
-            <span style={{ color: "#e28d83" }}>● SELL INTEREST</span>
+            <span style={{ color: "var(--positive)" }}>● BUY INTEREST</span>
+            <span style={{ color: "var(--negative)" }}>● SELL INTEREST</span>
           </div>
         </div>
         <div ref={interestChartContainerRef} style={{ width: "100%" }} />
@@ -345,28 +360,28 @@ export const Chart: React.FC<ChartProps> = ({ candles, period }) => {
           pointerEvents: "none",
           zIndex: 1000,
           padding: "10px 14px",
-          backgroundColor: "rgba(20, 23, 28, 0.95)",
-          border: "1px solid rgba(255, 255, 255, 0.1)",
+          backgroundColor: "rgba(var(--bg-sunken-rgb), 0.95)",
+          border: "1px solid rgba(var(--ink-rgb), 0.1)",
           borderRadius: "8px",
           fontSize: "11px",
-          color: "#dde1e8",
-          boxShadow: "0 10px 30px rgba(0, 0, 0, 0.6)",
+          color: "var(--text-primary)",
+          boxShadow: "0 10px 30px rgba(var(--shadow-rgb), 0.6)",
           backdropFilter: "blur(4px)",
           display: "flex",
           flexDirection: "column",
           gap: "6px",
         }}>
-          <span style={{ fontWeight: "800", color: "#7fa6e1", borderBottom: "1px solid rgba(255,255,255,0.06)", paddingBottom: "4px", display: "block" }}>
+          <span style={{ fontWeight: "800", color: "var(--accent)", borderBottom: "1px solid rgba(var(--ink-rgb),0.06)", paddingBottom: "4px", display: "block" }}>
             {tooltip.time}
           </span>
           <div style={{ display: "grid", gridTemplateColumns: "auto auto", gap: "4px 16px" }}>
-            <span style={{ color: "#8f97a5" }}>Open:</span>
+            <span style={{ color: "var(--text-faint)" }}>Open:</span>
             <span style={{ fontWeight: "700", textAlign: "right" }}>₹{tooltip.open.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
-            <span style={{ color: "#8f97a5" }}>High:</span>
-            <span style={{ fontWeight: "700", textAlign: "right", color: "#7ccfa8" }}>₹{tooltip.high.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
-            <span style={{ color: "#8f97a5" }}>Low:</span>
-            <span style={{ fontWeight: "700", textAlign: "right", color: "#f0a49c" }}>₹{tooltip.low.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
-            <span style={{ color: "#8f97a5" }}>Close:</span>
+            <span style={{ color: "var(--text-faint)" }}>High:</span>
+            <span style={{ fontWeight: "700", textAlign: "right", color: "var(--positive-strong)" }}>₹{tooltip.high.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+            <span style={{ color: "var(--text-faint)" }}>Low:</span>
+            <span style={{ fontWeight: "700", textAlign: "right", color: "var(--negative-strong)" }}>₹{tooltip.low.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+            <span style={{ color: "var(--text-faint)" }}>Close:</span>
             <span style={{ fontWeight: "700", textAlign: "right" }}>₹{tooltip.close.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
           </div>
         </div>

@@ -5,7 +5,6 @@
   line-height: 1.5;
   font-weight: 400;
 
-  color-scheme: dark;
   color: var(--text-primary);
   background-color: var(--bg-base);
 
@@ -15,7 +14,7 @@
   -moz-osx-font-smoothing: grayscale;
 
   /* ===================================================================
-     COLOUR SYSTEM
+     COLOUR SYSTEM — the DARK theme's rationale (light is described below)
      Tuned for long sessions in front of a dark screen. Four rules:
 
      1. The base is not near-black. It was #0f1319 — 7% lightness — and a
@@ -40,71 +39,94 @@
      colour vision deficiency — which matters when the colour IS the signal.
      =================================================================== */
 
-  /* Surfaces — elevation ladder, never pure black */
-  --bg-base:       #191c22;
-  --bg-sunken:     #14171c;
-  --surface-1:     #21242b;
-  --surface-2:     #282c34;
-  --surface-3:     #30353e;
-  --surface-hover: #383d47;
+  /* ── LIGHT (default) ─────────────────────────────────────────────────
+     A soft paper theme, chosen 15 Oct 2026 after the dark one was found
+     tiring over a full session. The page is a cool light grey, not white,
+     and cards sit just above it at near-white, so no large area is a full
+     #fff glare and depth still reads. Text is slate, not black. Accents are
+     darkened to clear 4.5:1 on the cards. Gain and loss stay apart by hue
+     (green leans teal, red leans orange) as well as by colour, for red-green
+     colour vision deficiency. The dark theme is kept under
+     [data-theme="dark"] and the toggle is in the header.
+
+     Every translucent tint in the components is written as
+     rgba(var(--X-rgb), alpha), so one set of triplets per theme recolours
+     the whole app. */
+  color-scheme: light;
+
+  --bg-base:       #eceff3;
+  --bg-sunken:     #f5f7f9;
+  --surface-1:     #fbfcfd;
+  --surface-2:     #f3f5f8;
+  --surface-3:     #e8ecf1;
+  --surface-hover: #e1e6ed;
+
+  --bg-base-rgb:    236, 239, 243;
+  --bg-sunken-rgb:  245, 247, 249;
+  --surface-1-rgb:  251, 252, 253;
+  --surface-2-rgb:  243, 245, 248;
+  --ink-rgb:        24, 32, 48;      /* overlays, hairlines, hovers */
+  --shadow-rgb:     30, 41, 59;
+
+  --positive-rgb:   13, 128, 86;
+  --negative-rgb:   204, 61, 46;
+  --warning-rgb:    148, 98, 10;
+  --accent-rgb:     43, 103, 201;
+  --info-rgb:       11, 120, 149;
+  --ai-rgb:         109, 79, 194;
+  --neutral-rgb:    100, 112, 127;
 
   /* Borders */
-  --border-subtle:  rgba(255, 255, 255, 0.05);
-  --border-default: rgba(255, 255, 255, 0.09);
-  --border-strong:  rgba(255, 255, 255, 0.14);
-  --border-color:   rgba(255, 255, 255, 0.09);
+  --border-subtle:  rgba(var(--ink-rgb), 0.07);
+  --border-default: rgba(var(--ink-rgb), 0.11);
+  --border-strong:  rgba(var(--ink-rgb), 0.17);
+  --border-color:   rgba(var(--ink-rgb), 0.11);
 
-  /* Text. Ratios are given against --bg-base and against --surface-2, because
-     most small labels sit on a card rather than on the page — targeting the
-     base alone put ten-pixel labels at ~4.1:1, under AA. Every step now clears
-     4.5:1 on both, and the top step stops short of the 15:1 that was making
-     glyph edges bloom (worse with astigmatism). */
-  --text-primary:   #dde1e8;   /* 13.0:1 base / 10.7:1 card */
-  --text-secondary: #aeb5c1;   /*  8.3:1      /  6.8:1 */
-  --text-muted:     #9ba3b0;   /*  6.7:1      /  5.5:1 */
-  --text-faint:     #8f97a5;   /*  5.8:1      /  4.8:1 */
+  /* Text: slate, all >= 4.5:1 on the cards */
+  --text-primary:   #1f2937;
+  --text-secondary: #424d5e;
+  --text-muted:     #586273;
+  --text-faint:     #6b7584;
 
-  /* Text placed ON a filled accent/semantic button. The fills are light, so
-     white lands at 2.2-2.9:1 there — worse than the dark surfaces it was
-     borrowed from. Near-black gives 7.3-8.8:1 on every fill. */
-  --on-accent: #12151a;
+  --on-accent: #ffffff;
+
+  --positive:        rgb(var(--positive-rgb));
+  --positive-strong: #0a6e49;
+  --negative:        rgb(var(--negative-rgb));
+  --negative-strong: #a52f22;
+  --warning:         rgb(var(--warning-rgb));
+  --accent:          rgb(var(--accent-rgb));
+  --accent-strong:   #1f52a8;
+  --info:            rgb(var(--info-rgb));
+  --ai:              rgb(var(--ai-rgb));
+  --neutral:         rgb(var(--neutral-rgb));
 
   /* Positive / gain */
-  --positive:        #5bbe93;  /* 7.5:1 base / 6.2:1 card */
-  --positive-strong: #7ccfa8;
-  --positive-bg:     rgba(91, 190, 147, 0.09);
-  --positive-border: rgba(91, 190, 147, 0.18);
+  --positive-bg:     rgba(var(--positive-rgb), 0.09);
+  --positive-border: rgba(var(--positive-rgb), 0.18);
 
   /* Negative / loss */
-  --negative:        #e28d83;  /* 6.8:1      / 5.6:1 */
-  --negative-strong: #f0a49c;
-  --negative-bg:     rgba(226, 141, 131, 0.09);
-  --negative-border: rgba(226, 141, 131, 0.18);
+  --negative-bg:     rgba(var(--negative-rgb), 0.09);
+  --negative-border: rgba(var(--negative-rgb), 0.18);
 
   /* Warning / pending */
-  --warning:        #d8ae64;  /* 8.3:1      / 6.8:1 */
-  --warning-bg:     rgba(216, 174, 100, 0.09);
-  --warning-border: rgba(216, 174, 100, 0.18);
+  --warning-bg:     rgba(var(--warning-rgb), 0.09);
+  --warning-border: rgba(var(--warning-rgb), 0.18);
 
   /* Primary action */
-  --accent:        #7fa6e1;  /* 6.9:1      / 5.6:1 */
-  --accent-strong: #9ab8e9;
-  --accent-bg:     rgba(127, 166, 225, 0.09);
-  --accent-border: rgba(127, 166, 225, 0.18);
-  --accent-glow:   rgba(127, 166, 225, 0.18);
+  --accent-bg:     rgba(var(--accent-rgb), 0.09);
+  --accent-border: rgba(var(--accent-rgb), 0.18);
+  --accent-glow:   rgba(var(--accent-rgb), 0.18);
 
   /* Informational */
-  --info:    #68b3ca;
-  --info-bg: rgba(104, 179, 202, 0.09);
+  --info-bg: rgba(var(--info-rgb), 0.09);
 
   /* AI / analysis */
-  --ai:        #b09bd9;  /* 6.9:1      / 5.7:1 */
-  --ai-bg:     rgba(176, 155, 217, 0.09);
-  --ai-border: rgba(176, 155, 217, 0.18);
+  --ai-bg:     rgba(var(--ai-rgb), 0.09);
+  --ai-border: rgba(var(--ai-rgb), 0.18);
 
   /* Neutral / hold — a signal that deliberately reads as "no signal" */
-  --neutral:    #9ba3b0;
-  --neutral-bg: rgba(160, 168, 180, 0.09);
+  --neutral-bg: rgba(var(--neutral-rgb), 0.09);
 
   /* Legacy aliases so older rules keep resolving */
   --bg-main:       var(--bg-base);
@@ -115,6 +137,52 @@
   --success-glow:  var(--positive-bg);
   --danger-color:  var(--negative);
   --danger-glow:   var(--negative-bg);
+}
+
+/* ── DARK ────────────────────────────────────────────────────────────────
+   The original palette, tuned for long sessions on a dark screen: the base
+   is 12% lightness rather than near-black, accents are 43-62% saturated,
+   and surfaces step in even increments. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg-base:       #191c22;
+  --bg-sunken:     #14171c;
+  --surface-1:     #21242b;
+  --surface-2:     #282c34;
+  --surface-3:     #30353e;
+  --surface-hover: #383d47;
+
+  --bg-base-rgb:    25, 28, 34;
+  --bg-sunken-rgb:  20, 23, 28;
+  --surface-1-rgb:  33, 36, 43;
+  --surface-2-rgb:  40, 44, 52;
+  --ink-rgb:        255, 255, 255;
+  --shadow-rgb:     0, 0, 0;
+
+  --positive-rgb:   91, 190, 147;
+  --negative-rgb:   226, 141, 131;
+  --warning-rgb:    216, 174, 100;
+  --accent-rgb:     127, 166, 225;
+  --info-rgb:       104, 179, 202;
+  --ai-rgb:         176, 155, 217;
+  --neutral-rgb:    155, 163, 176;
+
+  --border-subtle:  rgba(var(--ink-rgb), 0.05);
+  --border-default: rgba(var(--ink-rgb), 0.09);
+  --border-strong:  rgba(var(--ink-rgb), 0.14);
+  --border-color:   rgba(var(--ink-rgb), 0.09);
+
+  --text-primary:   #dde1e8;
+  --text-secondary: #aeb5c1;
+  --text-muted:     #9ba3b0;
+  --text-faint:     #8f97a5;
+
+  --on-accent: #12151a;
+
+  --positive-strong: #7ccfa8;
+  --negative-strong: #f0a49c;
+  --accent-strong:   #9ab8e9;
 }
 
 * {
@@ -137,12 +205,12 @@ body {
 
 /* ===== ANIMATIONS ===== */
 @keyframes flash-green {
-  0% { background-color: rgba(91, 190, 147, 0.22); }
+  0% { background-color: rgba(var(--positive-rgb), 0.22); }
   100% { background-color: transparent; }
 }
 
 @keyframes flash-red {
-  0% { background-color: rgba(226, 141, 131, 0.22); }
+  0% { background-color: rgba(var(--negative-rgb), 0.22); }
   100% { background-color: transparent; }
 }
 
@@ -150,7 +218,7 @@ body {
 .tick-down { animation: flash-red 0.8s ease-out; }
 
 .shimmer {
-  background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.03) 50%, rgba(255,255,255,0) 100%);
+  background: linear-gradient(90deg, rgba(var(--ink-rgb),0) 0%, rgba(var(--ink-rgb),0.03) 50%, rgba(var(--ink-rgb),0) 100%);
   background-size: 200% 100%;
   animation: loading-shimmer 1.5s infinite;
 }
@@ -214,7 +282,7 @@ input {
 .search-dropdown::-webkit-scrollbar-thumb,
 .news-scroll-area::-webkit-scrollbar-thumb,
 .modal-scroll-area::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(var(--ink-rgb), 0.08);
   border-radius: 10px;
 }
 
@@ -223,7 +291,7 @@ input {
 .search-dropdown::-webkit-scrollbar-thumb:hover,
 .news-scroll-area::-webkit-scrollbar-thumb:hover,
 .modal-scroll-area::-webkit-scrollbar-thumb:hover {
-  background: rgba(127, 166, 225, 0.26);
+  background: rgba(var(--accent-rgb), 0.26);
 }
 
 /* ===== APP LAYOUT ===== */
@@ -242,7 +310,7 @@ input {
   justify-content: space-between;
   padding: 0 24px;
   border-bottom: 1px solid var(--border-color);
-  background: rgba(25, 28, 34, 0.85);
+  background: rgba(var(--bg-base-rgb), 0.85);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   height: 52px;
@@ -271,7 +339,7 @@ input {
   padding: 7px 12px;
   border-radius: 8px;
   border: 1px solid var(--border-color);
-  background: rgba(20, 23, 28, 0.7);
+  background: rgba(var(--bg-sunken-rgb), 0.7);
   transition: all 0.2s ease;
 }
 
@@ -287,9 +355,9 @@ input {
   top: 100%;
   margin-top: 6px;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(var(--ink-rgb), 0.12);
   background: var(--surface-1);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 16px 40px rgba(var(--shadow-rgb), 0.45);
   z-index: 1000;
   max-height: 220px;
   overflow-y: auto;
@@ -300,12 +368,12 @@ input {
   flex-direction: column;
   padding: 8px 14px;
   cursor: pointer;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid rgba(var(--ink-rgb), 0.02);
   transition: background 0.15s;
 }
 
 .search-item:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(var(--ink-rgb), 0.05);
 }
 
 .search-item:last-child {
@@ -314,7 +382,7 @@ input {
 
 /* ===== DATA SECTION (Watchlist / Movers) ===== */
 .data-section {
-  background: rgba(33, 36, 43, 0.6);
+  background: rgba(var(--surface-1-rgb), 0.6);
   border: 1px solid var(--border-color);
   border-radius: 10px;
   backdrop-filter: blur(8px);
@@ -329,7 +397,7 @@ input {
   gap: 14px;
   padding: 8px 16px;
   border-bottom: 1px solid var(--border-color);
-  background: rgba(25, 28, 34, 0.5);
+  background: rgba(var(--bg-base-rgb), 0.5);
   flex-wrap: wrap;
 }
 
@@ -355,7 +423,7 @@ input {
 /* Toggle group for Gainers/Losers */
 .toggle-group {
   display: flex;
-  background: rgba(0, 0, 0, 0.25);
+  background: rgba(var(--shadow-rgb), 0.25);
   border-radius: 6px;
   padding: 2px;
 }
@@ -373,12 +441,12 @@ input {
 }
 
 .toggle-btn.active-gain {
-  background: rgba(91, 190, 147, 0.1);
+  background: rgba(var(--positive-rgb), 0.1);
   color: var(--success-color);
 }
 
 .toggle-btn.active-loss {
-  background: rgba(226, 141, 131, 0.1);
+  background: rgba(var(--negative-rgb), 0.1);
   color: var(--danger-color);
 }
 
@@ -386,7 +454,7 @@ input {
 .period-bar {
   display: flex;
   gap: 1px;
-  background: rgba(0, 0, 0, 0.25);
+  background: rgba(var(--shadow-rgb), 0.25);
   border-radius: 6px;
   padding: 2px;
   margin-left: auto;
@@ -405,7 +473,7 @@ input {
 .period-pill.active {
   background: var(--accent-color);
   color: var(--on-accent);
-  box-shadow: 0 2px 6px rgba(127, 166, 225, 0.18);
+  box-shadow: 0 2px 6px rgba(var(--accent-rgb), 0.18);
 }
 
 .period-pill:hover:not(.active) {
@@ -430,7 +498,7 @@ input {
   text-transform: uppercase;
   color: var(--text-muted);
   border-bottom: 1px solid var(--border-color);
-  background: rgba(25, 28, 34, 0.4);
+  background: rgba(var(--bg-base-rgb), 0.4);
   letter-spacing: 0.05em;
   white-space: nowrap;
   position: sticky;
@@ -440,7 +508,7 @@ input {
 
 .stock-data-table td {
   padding: 7px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.025);
+  border-bottom: 1px solid rgba(var(--ink-rgb), 0.025);
   font-size: 12px;
   white-space: nowrap;
   vertical-align: middle;
@@ -454,11 +522,11 @@ input {
 }
 
 .stock-data-table tbody tr:hover {
-  background: rgba(255, 255, 255, 0.025);
+  background: rgba(var(--ink-rgb), 0.025);
 }
 
 .stock-data-table tbody tr.active {
-  background: rgba(127, 166, 225, 0.06);
+  background: rgba(var(--accent-rgb), 0.06);
   box-shadow: inset 3px 0 0 var(--accent-color);
 }
 
@@ -493,33 +561,33 @@ input {
 }
 
 .trend-badge.strong-buy {
-  background: rgba(91, 190, 147, 0.14);
+  background: rgba(var(--positive-rgb), 0.14);
   color: var(--positive);
-  border: 1px solid rgba(91, 190, 147, 0.3);
+  border: 1px solid rgba(var(--positive-rgb), 0.3);
 }
 
 .trend-badge.buy {
-  background: rgba(91, 190, 147, 0.1);
+  background: rgba(var(--positive-rgb), 0.1);
   color: var(--positive-strong);
-  border: 1px solid rgba(91, 190, 147, 0.18);
+  border: 1px solid rgba(var(--positive-rgb), 0.18);
 }
 
 .trend-badge.hold {
-  background: rgba(160, 168, 180, 0.1);
+  background: rgba(var(--neutral-rgb), 0.1);
   color: var(--text-muted);
-  border: 1px solid rgba(160, 168, 180, 0.18);
+  border: 1px solid rgba(var(--neutral-rgb), 0.18);
 }
 
 .trend-badge.sell {
-  background: rgba(226, 141, 131, 0.1);
+  background: rgba(var(--negative-rgb), 0.1);
   color: var(--negative-strong);
-  border: 1px solid rgba(226, 141, 131, 0.18);
+  border: 1px solid rgba(var(--negative-rgb), 0.18);
 }
 
 .trend-badge.strong-sell {
-  background: rgba(226, 141, 131, 0.14);
+  background: rgba(var(--negative-rgb), 0.14);
   color: var(--negative);
-  border: 1px solid rgba(226, 141, 131, 0.3);
+  border: 1px solid rgba(var(--negative-rgb), 0.3);
 }
 
 
@@ -535,21 +603,21 @@ input {
 }
 
 .ai-badge.buy {
-  background: rgba(91, 190, 147, 0.1);
+  background: rgba(var(--positive-rgb), 0.1);
   color: var(--success-color);
-  border: 1px solid rgba(91, 190, 147, 0.18);
+  border: 1px solid rgba(var(--positive-rgb), 0.18);
 }
 
 .ai-badge.sell {
-  background: rgba(226, 141, 131, 0.1);
+  background: rgba(var(--negative-rgb), 0.1);
   color: var(--danger-color);
-  border: 1px solid rgba(226, 141, 131, 0.18);
+  border: 1px solid rgba(var(--negative-rgb), 0.18);
 }
 
 .ai-badge.hold {
-  background: rgba(216, 174, 100, 0.1);
+  background: rgba(var(--warning-rgb), 0.1);
   color: var(--warning);
-  border: 1px solid rgba(216, 174, 100, 0.18);
+  border: 1px solid rgba(var(--warning-rgb), 0.18);
 }
 
 /* ===== ACTION BUTTONS ===== */
@@ -568,7 +636,7 @@ input {
 
 .action-btn-danger:hover {
   color: var(--danger-color);
-  background: rgba(226, 141, 131, 0.09);
+  background: rgba(var(--negative-rgb), 0.09);
 }
 
 .action-btn-add {
@@ -586,7 +654,7 @@ input {
 
 .action-btn-add:hover {
   color: var(--accent-color);
-  background: rgba(127, 166, 225, 0.09);
+  background: rgba(var(--accent-rgb), 0.09);
 }
 
 .action-btn-add.in-watchlist {
@@ -609,7 +677,7 @@ input {
 
 .action-btn-refresh:hover:not(:disabled) {
   color: var(--success-color);
-  background: rgba(91, 190, 147, 0.09);
+  background: rgba(var(--positive-rgb), 0.09);
 }
 
 .action-btn-refresh:disabled {
@@ -637,10 +705,10 @@ input {
   font-size: 9px;
   font-weight: 700;
   color: var(--text-secondary);
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(var(--ink-rgb), 0.05);
   padding: 2px 6px;
   border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(var(--ink-rgb), 0.03);
 }
 
 .pill-change {
@@ -653,12 +721,12 @@ input {
 }
 
 .pill-change.positive {
-  background: rgba(91, 190, 147, 0.09);
+  background: rgba(var(--positive-rgb), 0.09);
   color: var(--success-color);
 }
 
 .pill-change.negative {
-  background: rgba(226, 141, 131, 0.09);
+  background: rgba(var(--negative-rgb), 0.09);
   color: var(--danger-color);
 }
 
@@ -670,8 +738,8 @@ input {
 }
 
 .stats-card {
-  background: rgba(40, 44, 52, 0.45);
-  border: 1px solid rgba(255, 255, 255, 0.04);
+  background: rgba(var(--surface-2-rgb), 0.45);
+  border: 1px solid rgba(var(--ink-rgb), 0.04);
   padding: 12px 14px;
   border-radius: 8px;
   display: flex;
@@ -695,8 +763,8 @@ input {
 
 /* ===== MODAL: CHART CARD ===== */
 .chart-card {
-  background: rgba(40, 44, 52, 0.25);
-  border: 1px solid rgba(255, 255, 255, 0.04);
+  background: rgba(var(--surface-2-rgb), 0.25);
+  border: 1px solid rgba(var(--ink-rgb), 0.04);
   padding: 16px;
   border-radius: 10px;
   display: flex;
@@ -716,8 +784,8 @@ input {
 }
 
 .info-card {
-  background: rgba(40, 44, 52, 0.35);
-  border: 1px solid rgba(255, 255, 255, 0.04);
+  background: rgba(var(--surface-2-rgb), 0.35);
+  border: 1px solid rgba(var(--ink-rgb), 0.04);
   padding: 16px;
   border-radius: 10px;
   display: flex;
@@ -747,17 +815,17 @@ input {
 }
 
 .modal-scroll-area::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.15);
+  background: rgba(var(--shadow-rgb), 0.15);
   border-radius: 8px;
 }
 
 .modal-scroll-area::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(var(--ink-rgb), 0.12);
   border-radius: 8px;
 }
 
 .modal-scroll-area::-webkit-scrollbar-thumb:hover {
-  background: rgba(127, 166, 225, 0.34);
+  background: rgba(var(--accent-rgb), 0.34);
 }
 
 /* ===== CHATBOT STYLES ===== */
@@ -792,13 +860,13 @@ input {
   background: linear-gradient(135deg, var(--accent) 0%, var(--accent) 100%);
   color: var(--on-accent);
   border-bottom-right-radius: 2px;
-  box-shadow: 0 4px 12px rgba(127, 166, 225, 0.13);
+  box-shadow: 0 4px 12px rgba(var(--accent-rgb), 0.13);
 }
 
 .chat-bubble.assistant {
   align-self: flex-start;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(var(--ink-rgb), 0.05);
+  border: 1px solid rgba(var(--ink-rgb), 0.06);
   color: var(--text-primary);
   border-bottom-left-radius: 2px;
 }
@@ -812,8 +880,8 @@ input {
 
 .chat-input-field {
   flex: 1;
-  background: rgba(25, 28, 34, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(var(--bg-base-rgb), 0.6);
+  border: 1px solid rgba(var(--ink-rgb), 0.08);
   border-radius: 8px;
   padding: 8px 12px;
   font-size: 12px;
@@ -824,8 +892,8 @@ input {
 
 .chat-input-field:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(127, 166, 225, 0.13);
-  background: rgba(25, 28, 34, 0.85);
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.13);
+  background: rgba(var(--bg-base-rgb), 0.85);
 }
 
 .chat-send-btn {
@@ -843,12 +911,12 @@ input {
 
 .chat-send-btn:hover:not(:disabled) {
   background: var(--accent);
-  box-shadow: 0 4px 12px rgba(127, 166, 225, 0.18);
+  box-shadow: 0 4px 12px rgba(var(--accent-rgb), 0.18);
   transform: translateY(-1px);
 }
 
 .chat-send-btn:disabled {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(var(--ink-rgb), 0.04);
   color: var(--text-muted);
   cursor: not-allowed;
 }
@@ -901,7 +969,7 @@ input {
 }
 
 .index-card {
-  background: rgba(40, 44, 52, 0.45);
+  background: rgba(var(--surface-2-rgb), 0.45);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   padding: 6px 14px;

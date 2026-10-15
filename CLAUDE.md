@@ -637,6 +637,18 @@ bounded by two symbols swallowed a component defined between them and shipped.
 Run `npx tsc --noEmit -p tsconfig.app.json` and grep for TS2304/TS2552; the file
 carries pre-existing errors, so grep those codes rather than expecting silence.
 
+**Colours are theme tokens; never write a literal colour.** Light is the
+default and dark is kept (`<html data-theme>`, header toggle, `src/theme.ts`,
+remembered in localStorage). `index.css` defines each palette twice: hex
+tokens (`--surface-1`, `--text-primary`, …) and RGB triplets (`--ink-rgb`,
+`--positive-rgb`, `--accent-rgb`, `--bg-sunken-rgb`, `--shadow-rgb`, …).
+Every translucent tint in the components is `rgba(var(--X-rgb), a)`; 800
+literals were converted mechanically on 15 Oct 2026. `--ink-rgb` is white in
+dark and slate in light, so hairlines and hovers flip with the theme. One
+exception: lightweight-charts paints on a canvas and cannot read CSS
+variables. `Chart.tsx` reads them with `getComputedStyle` (`cssVar`,
+`rgbaVar`) and rebuilds on the `themechange` event.
+
 **Number inputs go through `NumberField`.** `parseInt(value) || 1` straight
 into state made a quantity impossible to clear (empty → NaN → 1 before the next
 key) and a stop-loss of 0.5 impossible to type ("0." → 0 → 2). The field keeps
