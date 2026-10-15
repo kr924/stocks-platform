@@ -776,7 +776,9 @@ longer in the automatic chain (`skip_gemcall`). Its code path remains in
 - **An empty analysis says why.** With no reading, `ai_summary` is
   `"No AI reading for X: <reason>"`: no key set, rate limited, PDF not
   downloaded, or the model's own error. The AI tab shows that line instead of
-  "did not read usable figures".
+  "did not read usable figures". OpenRouter answers HTTP 200 with `{"error": …}` and no
+  `choices` when a provider fails; that used to surface as just `'choices'`.
+  Each model's own message, code and provider are now reported.
 - `flow_used` is `openrouter_premium` / `openrouter_free` / `custom_rest_api`;
   `provider` names the model that actually answered, fallbacks included.
 - Env fallbacks: `OPENROUTER_PREMIUM_API_KEY` for premium, `OPENROUTER_API_KEY`
