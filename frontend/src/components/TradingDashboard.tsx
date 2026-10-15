@@ -1044,6 +1044,15 @@ interface AutoTradingSettings {
   free_openrouter_key_set?: boolean;
 }
 
+/**
+ * Today's date in India, YYYY-MM-DD. The server files every result under its
+ * IST trade date; `new Date().toISOString()` is the UTC date, which is still
+ * yesterday until 05:30 IST.
+ */
+function istDateStr(d: Date = new Date()): string {
+  return new Date(d.getTime() + 330 * 60000).toISOString().slice(0, 10);
+}
+
 /** One model from OpenRouter's live catalogue (/api/trading/openrouter/models). */
 interface OrModel {
   id: string;
@@ -1237,7 +1246,9 @@ export function TradingDashboard() {
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
 
   // Form State
-  const todayStr = new Date().toISOString().split("T")[0];
+  // Kept current by the effect below: a tab left open overnight must move to
+  // the new day, not keep showing (and quoting) yesterday as "today".
+  const [todayStr, setTodayStr] = useState<string>(() => istDateStr());
   const [formData, setFormData] = useState({
     symbol: "",
     instrument_key: "",
@@ -1282,10 +1293,10 @@ export function TradingDashboard() {
   // be read back, so the picker reaches as far as the retention does.
   const PANEL_RETENTION_DAYS = 30;
   const oldestStr = useMemo(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - PANEL_RETENTION_DAYS);
+    const d = new Date(`${todayStr}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() - PANEL_RETENTION_DAYS);
     return d.toISOString().slice(0, 10);
-  }, []);
+  }, [todayStr]);
   const [resultsDate, setResultsDate] = useState<string>(todayStr);
   const resultsDateRef = useRef<string>(todayStr);
   const isToday = resultsDate === todayStr;
@@ -1477,6 +1488,22 @@ export function TradingDashboard() {
   const [earningsSortBy, setEarningsSortBy] = useState<"date" | "return_desc" | "return_asc" | "change_desc" | "change_asc">("change_desc");
   const [earningsSearch, setEarningsSearch] = useState<string>("");
   const [earningsDateFilter, setEarningsDateFilter] = useState<string>(todayStr);
+
+  // At midnight IST, whatever was showing "today" moves to the new day. A date
+  // picked by hand stays where it was put.
+  useEffect(() => {
+    let shown = istDateStr();
+    const t = setInterval(() => {
+      const now = istDateStr();
+      if (now === shown) return;
+      const prev = shown;
+      shown = now;
+      setTodayStr(now);
+      setResultsDate(d => (d === prev ? now : d));
+      setEarningsDateFilter(d => (d === prev ? now : d));
+    }, 30000);
+    return () => clearInterval(t);
+  }, []);
 
   const processedUpcomingEarnings = useMemo(() => {
     let list = [...upcomingEarnings];
@@ -1784,7 +1811,7 @@ export function TradingDashboard() {
         const rows: PendingResult[] = data.pending || [];
         // Only today's view announces arrivals; browsing an earlier date is
         // reading history, not watching for something to act on.
-        if (resultsDateRef.current === todayStr) {
+        if (resultsDateRef.current === istDateStr()) {
           notifyNewResults(rows.filter(r => r.status === "pending"));
         }
         setPendingResults(rows);
@@ -2252,7 +2279,7 @@ export function TradingDashboard() {
         // Only today's results carry live prices — see resultsDate. A paused row
         // is skipped here, which is the whole of what pausing does: on a heavy
         // results day the symbol list is what the Upstox budget is spent on.
-        ...(resultsDateRef.current === todayStr
+        ...(resultsDateRef.current === istDateStr()
           ? pendingResultsRef.current.filter(p => !p.paused).map(p => p.symbol)
           : []),
       ].filter(Boolean);
