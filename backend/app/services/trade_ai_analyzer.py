@@ -889,18 +889,31 @@ def _do_analyze_earnings_disclosure_2step(
         logger.debug(f"[AUTO AI] trend context unavailable for {symbol}: {e}")
 
     # What brokers forecast for this quarter, verified against the articles
-    # (services/consensus.py). Usually cached by the 08:40 job; fetched now
-    # when it is not.
+    # (services/consensus.py). Usually stored by the 08:40 job. When it is
+    # not, the analysis does not wait: our own search reads several articles
+    # and runs a model, which could hold a result back by a minute. It runs
+    # in the background instead and fills the panel's estimates when done.
     estimates_block = ""
     try:
         from app.database import SessionLocal as _SL2
         from app.services import consensus
         from app.services.result_compare import infer_quarter as _iq
+        _quarter = _iq(datetime.utcnow())
         _db2 = _SL2()
         try:
-            est = consensus.get_or_fetch(_db2, symbol, company_name, _iq(datetime.utcnow()))
+            est = consensus.get_or_fetch(_db2, symbol, company_name, _quarter, allow_fetch=False)
         finally:
             _db2.close()
+        if not est or est.get("error"):
+            def _lookup_later(sym=symbol, name=company_name, q=_quarter):
+                _db3 = _SL2()
+                try:
+                    consensus.get_or_fetch(_db3, sym, name, q)
+                except Exception as _e:
+                    logger.info(f"[ESTIMATES] background lookup for {sym} failed: {_e}")
+                finally:
+                    _db3.close()
+            threading.Thread(target=_lookup_later, daemon=True, name=f"estimates-{symbol}").start()
         estimates_block = consensus.prompt_block(est)
     except Exception as e:
         logger.debug(f"[AUTO AI] broker estimates unavailable for {symbol}: {e}")

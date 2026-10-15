@@ -75,18 +75,33 @@ interface EstimatesView {
   dropped_unverified?: number;
   fetched_at?: string | null;
   error?: string;
+  method?: string;            // "own search" | "web search"
+  model?: string;
+  sources_seen?: number;
 }
 
 /** The quarter against what brokers forecast, with the articles it came from. */
-function EstimatesPanel({ est, busy, message, onRefresh }: {
-  est?: EstimatesView | null; busy: boolean; message?: string; onRefresh: () => void;
+function EstimatesPanel({ est, busy, message, onRefresh, models }: {
+  est?: EstimatesView | null; busy: boolean; message?: string;
+  onRefresh: (method: "own" | "web", model: string) => void;
+  models: { premium: OrModel[]; free: OrModel[] };
 }) {
   const rows = Array.isArray(est?.rows) ? est!.rows : [];
   const brokers = Array.isArray(est?.brokers) ? est!.brokers : [];
+  // How to search again. Own search on a free model costs nothing; a paid
+  // model there costs only its tokens; OpenRouter's web search ~$0.03.
+  const [method, setMethod] = useState<"own" | "web">("own");
+  const [model, setModel] = useState("");
   const tone = (c: string) => c === "beat" || c === "BEAT" ? "var(--positive)"
     : c === "miss" || c === "MISS" ? "var(--negative)" : "var(--text-secondary)";
   const fmt = (v: number | null | undefined) => v == null ? "—" : v.toLocaleString(undefined, { maximumFractionDigits: 0 });
   const cell = { padding: "4px 8px", textAlign: "right" as const, whiteSpace: "nowrap" as const };
+  const sel = { padding: "3px 6px", fontSize: "10px", background: "var(--bg-sunken)", border: "1px solid var(--border-default)",
+                borderRadius: "5px", color: "var(--text-primary)", maxWidth: "220px" };
+  const free = Array.isArray(models?.free) ? models.free : [];
+  const premium = Array.isArray(models?.premium) ? models.premium : [];
+  const cost = method === "web" ? "about $0.03 (paid web search)"
+    : !model || model.endsWith(":free") ? "free" : "model tokens only, about $0.001";
   return (
     <div style={{ marginTop: "12px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: "6px" }}>
@@ -94,19 +109,45 @@ function EstimatesPanel({ est, busy, message, onRefresh }: {
         {est?.overall && (
           <span style={{ fontSize: "11px", fontWeight: 800, color: tone(est.overall) }}>{est.overall}</span>
         )}
-        <button onClick={onRefresh} disabled={busy}
-          title="Web search for brokers' published previews of this quarter (premium key, about $0.03). Every figure is checked against its article."
-          style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: "4px", padding: "3px 10px",
-                   borderRadius: "5px", background: "transparent", border: "1px solid rgba(var(--neutral-rgb),.2)",
-                   color: "var(--text-muted)", fontSize: "10px", cursor: busy ? "wait" : "pointer" }}>
-          <RefreshCw size={10} className={busy ? "spin" : undefined} /> {busy ? "Searching…" : brokers.length ? "Search again" : "Find estimates"}
-        </button>
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+          <select value={method} onChange={e => setMethod(e.target.value as "own" | "web")} disabled={busy} style={sel}
+            title="Own search: news articles found and read here. Web search: OpenRouter's paid search.">
+            <option value="own">Own search</option>
+            <option value="web">Web search (paid)</option>
+          </select>
+          <select value={model} onChange={e => setModel(e.target.value)} disabled={busy} style={sel}>
+            <option value="">{method === "web" ? "Default — premium model" : "Default — free model"}</option>
+            {free.length > 0 && (
+              <optgroup label="Free account">
+                {free.map(m => <option key={m.id} value={m.id}>{orModelLabel(m)}</option>)}
+              </optgroup>
+            )}
+            {premium.length > 0 && (
+              <optgroup label="Premium account">
+                {premium.map(m => <option key={m.id} value={m.id}>{orModelLabel(m)}</option>)}
+              </optgroup>
+            )}
+          </select>
+          <button onClick={() => onRefresh(method, model)} disabled={busy}
+            title={`Search for brokers' published previews of this quarter: ${cost}. Every figure is checked against its article.`}
+            style={{ display: "inline-flex", alignItems: "center", gap: "4px", padding: "3px 10px",
+                     borderRadius: "5px", background: "transparent", border: "1px solid rgba(var(--neutral-rgb),.2)",
+                     color: "var(--text-muted)", fontSize: "10px", cursor: busy ? "wait" : "pointer" }}>
+            <RefreshCw size={10} className={busy ? "spin" : undefined} /> {busy ? "Searching…" : brokers.length ? "Search again" : "Find estimates"}
+          </button>
+        </div>
       </div>
+      {est && (est.method || est.model) && (
+        <div style={{ fontSize: "10px", color: "var(--text-faint)", marginBottom: "4px" }}>
+          Found by {est.method || "search"}{est.model ? ` · ${est.model}` : ""}
+          {typeof est.sources_seen === "number" ? ` · ${est.sources_seen} article(s) read` : ""}
+        </div>
+      )}
       {message && <div style={{ fontSize: "10px", color: "var(--text-muted)", marginBottom: "6px" }}>{message}</div>}
       {brokers.length === 0 ? (
         <div style={{ fontSize: "11px", color: "var(--text-faint)", fontStyle: "italic" }}>
           {est ? (est.error ? `Search failed: ${est.error}` : "No published broker estimates found for this quarter.")
-               : "Not looked up yet. Companies on the day's results calendar are looked up at 08:40."}
+               : "Not looked up yet. Companies on the day's results calendar are looked up at 08:40 (own search, free key)."}
         </div>
       ) : (
         <>
@@ -2122,11 +2163,14 @@ export function TradingDashboard() {
   };
 
   /** Search for brokers' published estimates of this filing's quarter. */
-  const handleEstimatesRefresh = async (pending: PendingResult) => {
+  const handleEstimatesRefresh = async (pending: PendingResult, method: "own" | "web" = "own", model = "") => {
     setEstimatesCheck(prev => ({ ...prev, [pending.id]: { busy: true } }));
     let message = "";
     try {
-      const res = await fetch(`${API_BASE}/api/trading/pending-results/${pending.id}/estimates-refresh`, { method: "POST" });
+      const res = await fetch(`${API_BASE}/api/trading/pending-results/${pending.id}/estimates-refresh`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ method, model: model || null }),
+      });
       const data = await res.json().catch(() => ({}));
       message = (res.ok ? data.message : data.detail) || "";
       if (res.ok && data.pending) {
@@ -4081,7 +4125,8 @@ export function TradingDashboard() {
                                 est={pending.like_for_like?.estimates}
                                 busy={!!estimatesCheck[pending.id]?.busy}
                                 message={estimatesCheck[pending.id]?.message}
-                                onRefresh={() => handleEstimatesRefresh(pending)}
+                                onRefresh={(method, model) => handleEstimatesRefresh(pending, method, model)}
+                                models={orModels}
                               />
 
                               {/* The two reads next to each other: rules on the
@@ -4816,9 +4861,10 @@ export function TradingDashboard() {
                         <input type="checkbox" checked={aiSettings.broker_estimates_enabled !== false}
                           onChange={e => setAiSettings({ ...aiSettings, broker_estimates_enabled: e.target.checked })} />
                         <span>
-                          <b>Look up broker estimates</b> by web search on this key (about $0.03 a company): each
-                          results-day company at 08:40, and any filing analysed without them. Only figures found in
-                          the cited article are kept. Works whether premium analysis is on or off.
+                          <b>Look up broker estimates</b>: each results-day company at 08:40, and any filing analysed
+                          without them, by our own news search read on the <b>free</b> key (costs nothing). Each company
+                          is searched once per quarter. "Search again" on a filing can use any model or OpenRouter's paid
+                          web search (about $0.03). Only figures found in the article are kept.
                         </span>
                       </label>
                     </div>

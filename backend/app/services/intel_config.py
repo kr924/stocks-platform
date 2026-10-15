@@ -358,8 +358,9 @@ class IntelConfig:
             # An empty model means: pick from the live catalogue.
             "free_openrouter_api_key": "",
             "free_openrouter_model": "",
-            # Broker estimates by web search on the premium key
-            # (services/consensus.py), about $0.03 a company ($4 per 1,000 results, 8 results).
+            # Broker estimates (services/consensus.py): our own news search
+            # read on the free key, ₹0; OpenRouter's paid web search (~$0.03)
+            # only when picked by hand with "Search again".
             "broker_estimates_enabled": True,
         })
         ai_cfg = dict(ai_cfg)

@@ -847,26 +847,36 @@ in-line quarter with high reaction risk is NA. These go into
 `highlights_json` and appear on the AI card (⚠ flags, trend and risk lines),
 the list ("⚠ High reaction risk —"), the Telegram verdict and the digest.
 **Broker estimates are looked up and checked** (`services/consensus.py`, table
-`broker_estimates`). One OpenRouter call on the **premium** key uses the web
-plugin (≈$0.03 a search: $4 per 1,000 results, 8 results; charged whatever the model, so a free model saves only the ~$0.0005 of tokens),
-restricted to Indian financial news domains, and asks for the brokers'
-published previews for the quarter (`fiscal_label`: "Q2 FY27 (quarter ended
-30 September 2026)"). **Every figure must appear in the cited article's
-text**, either OpenRouter's citation content or the page fetched here, or it
-is dropped (`verify`). Models invent plausible estimates, and a consensus
-built from them is worse than none. The consensus is the median per line.
+`broker_estimates`). Two ways to search; the checks after are the same:
+- **Own search, ₹0 — the default and the only automatic one** (owner's call,
+  15 Oct 2026). Bing News RSS for "<company> Q2 FY27 results preview" and
+  "… estimates brokerage" (no key; the publisher URL sits in each link's
+  `url=` parameter), articles on the Indian financial domains from the last
+  45 days downloaded on the VM (Chrome-impersonating client), cut to the
+  paragraphs carrying figures, and read by a model. On the **free key** with
+  a free model it costs nothing.
+- **OpenRouter web search** (Exa) on the premium key: ≈$0.03 a search ($4 per
+  1,000 results, 8 results), charged whatever the model — a free model saves
+  only ~$0.0005 of tokens. Only when picked by hand.
+**Every figure must appear in the article's text** or it is dropped
+(`verify`). Models invent plausible estimates, and a consensus built from them
+is worse than none. The consensus is the median per line, and `fiscal_label`
+names the quarter ("Q2 FY27 (quarter ended 30 September 2026)").
 When it runs:
-- 08:40 IST Mon–Fri, for every company on that day's results calendar
-  (`cache_results_day`).
-- On analysis, if nothing is on file.
-- On demand, via "Find estimates" (`POST /pending-results/{id}/estimates-refresh`).
-**Searched once, kept** (owner's call, 15 Oct 2026): a search that completed,
-brokers found or not, is never repeated by the analysis, a re-analyse or the
-next 08:40 run. Only a call that failed outright is retried; "Search again"
-forces one, and a forced search that fails keeps the earlier result.
-Limit: 80 searches a day. The toggle
-is `broker_estimates_enabled` in AI settings (on by default; needs the
-premium key).
+- 08:40 IST Mon–Fri, every company on that day's results calendar
+  (`cache_results_day`): own search, **free key only**, paced 4 s per model
+  call for the free tier's 20/min. No free key → skipped, nothing paid.
+- When an analysis finds nothing on file: own search **in the background** —
+  the analysis does not wait for it, so the panel fills in afterwards and
+  that analysis's prompt goes without estimates.
+- By hand: "Search again" on the panel, with a method (own / paid web) and
+  any model. A `:free` model or none runs on the free key; a paid model on
+  the premium key (tokens only, ~$0.001, for own search).
+**Searched once, kept**: a search that completed, brokers found or not, is
+never repeated by the analysis, a re-analyse or the next 08:40 run. Only a
+call that failed outright is retried. A forced search that fails or finds
+nothing keeps the brokers found before. `DAILY_CAP` (80) bounds paid searches.
+The toggle is `broker_estimates_enabled` in AI settings (on by default).
 
 The comparison is arithmetic (`result_compare.estimates_view`). The actual
 figure is Screener's, else the filing read's, else the AI's. Bands are

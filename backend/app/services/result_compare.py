@@ -690,5 +690,7 @@ def estimates_view(db, symbol: str, quarter: str, rows: list) -> Optional[dict]:
         overall = "IN LINE"
     return {"quarter": quarter, "fiscal": data.get("fiscal"), "rows": lines, "overall": overall,
             "brokers": data.get("brokers") or [], "dropped_unverified": data.get("dropped_unverified", 0),
-            "fetched_at": data.get("fetched_at"), "error": data.get("error") or ""}
+            "fetched_at": data.get("fetched_at"), "error": data.get("error") or "",
+            "method": data.get("method") or "web search", "model": data.get("model") or "",
+            "sources_seen": data.get("sources_seen", 0)}
 

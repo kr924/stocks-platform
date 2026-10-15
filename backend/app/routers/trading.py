@@ -94,6 +94,14 @@ class ReanalyseRequest(BaseModel):
     flow: Optional[str] = "ai"
 
 
+class EstimatesRefreshRequest(BaseModel):
+    # "own": our news search, the model reads the articles (free key for a
+    # ":free" model or none chosen, premium key for a paid one).
+    # "web": OpenRouter's paid web search (~$0.03) on the premium key.
+    method: str = "own"
+    model: Optional[str] = None
+
+
 class PendingResultOrderRequest(BaseModel):
     """Order details supplied from the results order screen."""
     quantity: int = 1
@@ -1363,13 +1371,15 @@ def dismiss_pending_result(pending_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/pending-results/{pending_id}/estimates-refresh")
-def estimates_refresh_pending(pending_id: int, db: Session = Depends(get_db)):
+def estimates_refresh_pending(pending_id: int, req: Optional[EstimatesRefreshRequest] = None,
+                              db: Session = Depends(get_db)):
     """
-    Search again for brokers' published estimates of this filing's quarter.
-
-    One web search on the premium key (about $0.03: $4 per 1,000 results, 8 results), with every figure checked
-    against its article. See services/consensus.py.
+    Search again for brokers' published estimates of this filing's quarter,
+    with the method and model the operator picked. Own search on a free
+    model costs nothing; OpenRouter's web search costs about $0.03. Every
+    figure is checked against its article. See services/consensus.py.
     """
+    req = req or EstimatesRefreshRequest()
     pending = db.query(PendingResultOrder).filter(PendingResultOrder.id == pending_id).first()
     if not pending:
         raise HTTPException(status_code=404, detail="Pending result not found")
@@ -1379,21 +1389,27 @@ def estimates_refresh_pending(pending_id: int, db: Session = Depends(get_db)):
     from app.services.result_compare import filing_quarter
     extraction = json.loads(pending.extraction_json) if getattr(pending, "extraction_json", None) else None
     quarter, _, _ = filing_quarter(extraction, pending.event_time)
-    enabled, key, _ = consensus._settings()
-    if not key:
-        raise HTTPException(status_code=400,
-                            detail="Broker estimates need the premium OpenRouter key: web search is not free.")
-    if not enabled:
-        raise HTTPException(status_code=400, detail="Broker estimates are switched off in AI settings.")
-    data = consensus.get_or_fetch(db, pending.symbol, pending.company_name or "", quarter, force=True) or {}
+    method = "web" if (req.method or "").lower() == "web" else "own"
+    data = consensus.get_or_fetch(db, pending.symbol, pending.company_name or "", quarter,
+                                  force=True, method=method, model=req.model) or {}
+    if data.get("_refused"):
+        raise HTTPException(status_code=400, detail=f"Not searched: {data['_refused']}.")
     item = _serialize_pending(pending, None, db)
     _attach_screener(db, [pending], [item])
+    ran = data.get("_kept") or data
+    how = f"{ran.get('method', 'search')}, {ran.get('model', '')}".strip(", ")
     n = len(data.get("brokers") or [])
-    msg = (f"{n} broker estimate(s) found and checked against their articles." if n else
-           (f"Search failed: {data.get('error')}" if data.get("error") else
-            "No published broker estimates found for this quarter."))
-    if data.get("dropped_unverified"):
-        msg += f" {data['dropped_unverified']} figure(s) dropped: not found in the cited article."
+    if data.get("_kept"):
+        msg = (f"New {how} " + (f"failed: {ran.get('error')}" if ran.get("error") else "found no estimates")
+               + f"; kept the {n} broker estimate(s) found before.")
+    elif n:
+        msg = f"{n} broker estimate(s) found ({how}) and checked against their articles."
+    elif data.get("error"):
+        msg = f"Search failed ({how}): {data.get('error')}"
+    else:
+        msg = f"No published broker estimates found for this quarter ({how}, {ran.get('sources_seen', 0)} article(s) read)."
+    if ran.get("dropped_unverified"):
+        msg += f" {ran['dropped_unverified']} figure(s) dropped: not found in the article."
     return {"message": msg, "pending": item}
 
 

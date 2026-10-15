@@ -7,23 +7,27 @@ fell up to 9%. Brokers had forecast ₹6,765-6,809 Cr revenue and ₹1,022-1,035
 Cr PAT, and that is what it printed. A price moves on the surprise, and the
 filing alone cannot say what was expected.
 
-How:
-  1. One OpenRouter call on the PREMIUM key with the web plugin (Exa, about
-     $0.03 a search: $4 per 1,000 results, 8 results plus the model's tokens), restricted to Indian financial
-     news sites. It asks for the brokers' published estimates for the
-     quarter, with source URLs.
-  2. Every figure is checked against the cited article's text: OpenRouter's
-     citation content, or the page itself fetched here. A figure that does
+How (two ways to search; step 2 and 3 are the same for both):
+  1a. Own search, the default and the only automatic one. Bing News RSS for
+      "<company> Q2 FY27 results preview", the articles on Indian financial
+      sites downloaded here, and a model reading them. On the free key with
+      a free model it costs nothing.
+  1b. OpenRouter's web search (Exa) on the premium key: about $0.03 a search
+      ($4 per 1,000 results, 8 results) whatever the model. Only when the
+      operator picks it with "Search again".
+  2. Every figure is checked against the article's text. A figure that does
      not appear there is dropped. Models invent plausible numbers; a
      consensus built from them would be worse than none.
   3. The consensus is the median of what survives, per line.
 
 When: 08:40 IST on a results day, for every company on that day's calendar
-(cache_results_day), and on demand when an analysis runs with nothing on
-file. At most DAILY_CAP searches a day. Rows are kept per symbol and quarter
+(cache_results_day, own search, free key only), and when an analysis runs
+with nothing on file (own search too). Rows are kept per symbol and quarter
 in broker_estimates. A completed search is never repeated automatically,
-even when it found nothing; only a failed call is retried, and "Search
-again" on the panel forces a new one.
+even when it found nothing; only a failed call is retried. "Search again"
+on the panel forces a new one with the method and model chosen there, and
+keeps the earlier brokers if the new search finds none. DAILY_CAP bounds
+the paid searches.
 
 Comparison against the actual figures is arithmetic, in
 result_compare.estimates_view, not the model's opinion.
@@ -164,6 +168,7 @@ def consensus_of(brokers: list) -> dict:
 # ─── the search ────────────────────────────────────────────────────────────
 
 def _settings():
+    """(enabled, premium key, premium model) — the paid web search's account."""
     from app.services.intel_config import get_intel_config
     cfg = get_intel_config().auto_trading_ai
     key = (cfg.get("premium_openrouter_api_key") or "").strip() \
@@ -171,6 +176,15 @@ def _settings():
     model = (cfg.get("premium_openrouter_model") or "").strip() or "google/gemini-2.5-flash-lite"
     enabled = bool(cfg.get("broker_estimates_enabled", True))
     return enabled, key, model
+
+
+def _free_settings():
+    """(free key, free model or "" for the best free pick) — the ₹0 search."""
+    from app.services.intel_config import get_intel_config
+    from app.services.openrouter_models import _clean_key
+    cfg = get_intel_config().auto_trading_ai
+    key = _clean_key(cfg.get("free_openrouter_api_key")) or _clean_key(os.getenv("OPENROUTER_API_KEY"))
+    return key, (cfg.get("free_openrouter_model") or "").strip()
 
 
 def search(symbol: str, company_name: str, quarter: str, key: str, model: str) -> dict:
@@ -230,6 +244,175 @@ Rules:
         return {"estimates": [], "citations": [], "error": str(e)[:200]}
 
 
+# ─── our own search: ₹0 ────────────────────────────────────────────────────
+#
+# OpenRouter's web plugin bills $4 per 1,000 results whatever the model, so
+# a free key with a free model still pays about $0.03 a search. The default
+# search is done here instead: Bing News RSS (no key, publisher URLs in its
+# redirect links), the matching articles downloaded on the VM, and a model
+# reading them. On the free key with a free model the whole lookup costs
+# nothing. Every figure still has to appear in the article text (verify).
+
+NEWS_RSS = "https://www.bing.com/news/search"
+MAX_ARTICLES = 6
+ARTICLE_CHARS = 5000
+_RELEVANT = re.compile(r"crore|\bcr\b|estimat|expect|forecast|preview|seen at|likely|consensus|"
+                       r"brokerage|analyst|revenue|profit|ebitda|\bpat\b|margin|net sales|"
+                       r"kotak|motilal|mofsl|axis|hdfc sec|icici sec|nuvama|jm financial|emkay|"
+                       r"elara|prabhudas|nirmal bang|sharekhan|antique|centrum|yes sec|choice", re.I)
+
+
+def _allowed(url: str) -> bool:
+    from urllib.parse import urlparse
+    host = (urlparse(url).hostname or "").lower()
+    return any(host == d or host.endswith("." + d) for d in FINANCE_DOMAINS)
+
+
+def _publisher_url(link: str) -> str:
+    """Bing wraps each result in apiclick.aspx?...&url=<publisher URL>."""
+    from urllib.parse import urlparse, parse_qs
+    q = parse_qs(urlparse(link).query)
+    return (q.get("url") or [link])[0]
+
+
+def _http_get(url: str, timeout: float = 12):
+    """A browser-like GET; Chrome's TLS handshake where curl_cffi is present."""
+    try:
+        from app.services import bse_http
+        if bse_http.HAVE_CFFI:
+            return bse_http.get(url, headers={"Accept": "text/html,application/xhtml+xml,application/rss+xml,*/*"},
+                                timeout=timeout)
+    except Exception:
+        pass
+    return requests.get(url, timeout=timeout, headers={
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/rss+xml,*/*"})
+
+
+def news_links(company_name: str, symbol: str, quarter: str) -> list:
+    """Candidate preview articles from Indian financial news sites, newest first."""
+    import xml.etree.ElementTree as ET
+    from email.utils import parsedate_to_datetime
+    name = company_name or symbol
+    short = fiscal_label(quarter).split(" (")[0]          # "Q2 FY27"
+    queries = [f"{name} {short} results preview", f"{name} {short} estimates brokerage"]
+    seen, out = set(), []
+    cutoff = datetime.utcnow() - timedelta(days=45)
+    for q in queries:
+        try:
+            r = _http_get(f"{NEWS_RSS}?q={requests.utils.quote(q)}&format=rss&setlang=en-IN", timeout=10)
+            if r.status_code != 200:
+                continue
+            items = [{"link": (i.findtext("link") or "").strip(),
+                      "title": (i.findtext("title") or "").strip(),
+                      "published": (i.findtext("pubDate") or "").strip()}
+                     for i in ET.fromstring(r.content).iter("item")]
+        except Exception as e:
+            logger.info(f"[ESTIMATES] news search failed for {q!r}: {e}")
+            continue
+        for it in items:
+            url = _publisher_url(it.get("link") or "")
+            if not url.startswith("http") or url in seen or not _allowed(url):
+                continue
+            try:
+                when = parsedate_to_datetime(it.get("published")).replace(tzinfo=None)
+            except Exception:
+                when = None
+            if when and when < cutoff:
+                continue
+            seen.add(url)
+            out.append({"url": url, "title": it.get("title") or "",
+                        "published": when.strftime("%Y-%m-%d") if when else ""})
+    return out[:MAX_ARTICLES * 2]
+
+
+def article_text(url: str) -> str:
+    """The article's own text, cut to the paragraphs that carry figures."""
+    try:
+        r = _http_get(url, timeout=12)
+        if r.status_code != 200 or not r.text:
+            return ""
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(r.text, "lxml")
+        bodies = []
+        for tag in soup.find_all("script", type="application/ld+json"):
+            for m in re.finditer(r'"articleBody"\s*:\s*"((?:[^"\\]|\\.)*)"', tag.string or ""):
+                try:
+                    bodies.append(json.loads('"' + m.group(1) + '"'))
+                except Exception:
+                    pass
+        for t in soup(["script", "style", "nav", "footer", "header", "aside", "form"]):
+            t.decompose()
+        root = soup.find("article") or soup.body or soup
+        parts = [el.get_text(" ", strip=True) for el in root.find_all(["p", "li", "td", "h1", "h2", "h3"])]
+        paras = [re.sub(r"\s+", " ", x) for x in bodies + parts if x]
+        keep = [x for x in dict.fromkeys(paras) if re.search(r"\d", x) and _RELEVANT.search(x)]
+        return "\n".join(keep)[:ARTICLE_CHARS]
+    except Exception as e:
+        logger.info(f"[ESTIMATES] could not read {url}: {e}")
+        return ""
+
+
+def own_search(symbol: str, company_name: str, quarter: str, key: str, model: str,
+               free_only: bool = True) -> dict:
+    """
+    Search the news ourselves and have `model` read the articles. Same shape
+    as search(): {"estimates", "citations", "error"}. An empty list with no
+    error means the search completed and found nothing.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    from app.services.gemini import call_openrouter
+    label = fiscal_label(quarter)
+    name = company_name or symbol
+    links = news_links(name, symbol, quarter)
+    if not links:
+        return {"estimates": [], "citations": [], "error": "", "method": "own_search"}
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        texts = list(ex.map(lambda l: article_text(l["url"]), links))
+    cites = [{**l, "content": t} for l, t in zip(links, texts) if t][:MAX_ARTICLES]
+    if not cites:
+        return {"estimates": [], "citations": [], "method": "own_search",
+                "error": f"{len(links)} article(s) found but none could be read"}
+
+    blocks = "\n\n".join(f"[{i + 1}] {c['title']}\nURL: {c['url']}\nPublished: {c['published'] or 'unknown'}\n{c['content']}"
+                          for i, c in enumerate(cites))
+    prompt = f"""Below are news articles about {name} (NSE/BSE: {symbol}). Extract brokerage and
+analyst ESTIMATES (previews, forecasts) for {label}, published BEFORE the company announced its results.
+
+Return ONLY JSON:
+{{"estimates": [
+  {{"broker": "<brokerage name>", "revenue_cr": <number or null>, "ebitda_cr": <number or null>,
+    "ebitda_margin_pct": <number or null>, "pat_cr": <number or null>,
+    "source_url": "<the URL line of the article it came from, exactly>", "source_title": "<title>",
+    "published": "<YYYY-MM-DD>"}}
+]}}
+
+Rules:
+- One entry per brokerage per article. Figures in Rs crore exactly as the article states them
+  (convert only if it states lakh or million).
+- Only figures the article states for THIS quarter. Never compute, guess or fill in.
+- Not the actual results: if an article reports what the company announced, skip it.
+- An estimate with no brokerage named may use "Consensus" only if the article says consensus or poll.
+- If there are no estimates, return {{"estimates": []}}.
+
+{blocks}"""
+    try:
+        fallbacks = []
+        if free_only:
+            from app.services.openrouter_models import free_fallbacks
+            fallbacks = free_fallbacks(exclude=model)
+            if not model and fallbacks:
+                model, fallbacks = fallbacks[0], fallbacks[1:]
+        parsed = call_openrouter(prompt, key, model=model or None, free_only=free_only,
+                                 fallbacks=fallbacks or None)
+    except Exception as e:
+        return {"estimates": [], "citations": cites, "method": "own_search", "error": str(e)[:200]}
+    ests = parsed.get("estimates") if isinstance(parsed, dict) else None
+    return {"estimates": ests if isinstance(ests, list) else [], "citations": cites,
+            "error": "", "method": "own_search"}
+
+
 def _take_budget() -> bool:
     today = datetime.utcnow().strftime("%Y-%m-%d")
     with _lock:
@@ -255,9 +438,42 @@ def stored(db, symbol: str, quarter: str) -> Optional[dict]:
     return data
 
 
+def _plan(method: str, model: Optional[str]):
+    """
+    (key, model, free_only, method) for one lookup, or (None, reason, ...).
+
+    own  our news search; the model reads the articles. A ":free" model (or
+         none chosen) runs on the free key and costs nothing; a paid model
+         runs on the premium key and costs only its tokens (~$0.001).
+    web  OpenRouter's web search on the premium key (~$0.03), any model.
+    """
+    from app.services.openrouter_models import is_free_model
+    enabled, premium_key, premium_model = _settings()
+    if not enabled:
+        return None, "broker estimates are switched off in AI settings", False, method
+    model = (model or "").strip()
+    if method == "web":
+        if not premium_key:
+            return None, "the paid web search needs the premium OpenRouter key", False, method
+        return premium_key, model or premium_model, False, method
+    free_key, free_model = _free_settings()
+    if not model or is_free_model(model):
+        if not free_key:
+            return None, "no free OpenRouter key is set (AI settings)", True, "own"
+        return free_key, model or free_model, True, "own"
+    if not premium_key:
+        return None, f"{model} is a paid model and no premium key is set", False, "own"
+    return premium_key, model, False, "own"
+
+
 def get_or_fetch(db, symbol: str, company_name: str, quarter: str,
-                 force: bool = False, allow_fetch: bool = True) -> Optional[dict]:
-    """The stored estimates; searched only if none were ever found (or the last call failed)."""
+                 force: bool = False, allow_fetch: bool = True,
+                 method: str = "own", model: Optional[str] = None) -> Optional[dict]:
+    """
+    The stored estimates; searched only if none were ever found (or the last
+    call failed). Automatic lookups use our own ₹0 search on the free key;
+    "Search again" passes force with the method and model the operator chose.
+    """
     from app.database import BrokerEstimate
     if not symbol or not quarter:
         return None
@@ -278,30 +494,35 @@ def get_or_fetch(db, symbol: str, company_name: str, quarter: str,
     already = bool(data) and not data.get("error")
     if (already and not force) or not allow_fetch:
         return data
-    enabled, key, model = _settings()
-    if not enabled:
-        return data
+
+    key, chosen, free_only, method = _plan(method, model)
     if not key:
-        logger.info(f"[ESTIMATES] {sym}: no premium OpenRouter key; web search needs credit")
+        logger.info(f"[ESTIMATES] {sym}: not searched — {chosen}")
+        if force:
+            return {**(data or {}), "_refused": chosen}
         return data
-    if not _take_budget():
-        logger.warning(f"[ESTIMATES] daily cap of {DAILY_CAP} searches reached; {sym} skipped")
+    if method == "web" and not _take_budget():
+        logger.warning(f"[ESTIMATES] daily cap of {DAILY_CAP} paid searches reached; {sym} skipped")
         return data
 
-    found = search(sym, company_name, quarter, key, model)
+    if method == "web":
+        found = search(sym, company_name, quarter, key, chosen)
+    else:
+        found = own_search(sym, company_name, quarter, key, chosen, free_only=free_only)
     brokers, dropped = verify(found["estimates"], found["citations"])
     out = {
         "quarter": quarter, "fiscal": fiscal_label(quarter),
         "brokers": brokers, "consensus": consensus_of(brokers),
-        "dropped_unverified": dropped, "model": model,
+        "dropped_unverified": dropped, "model": chosen or "best free model",
+        "method": "web search" if method == "web" else "own search",
         "sources_seen": len(found["citations"]), "error": found["error"],
     }
-    logger.info(f"[ESTIMATES] {sym} {quarter}: {len(brokers)} broker(s) verified, "
-                f"{dropped} figure(s) dropped as not in the source"
+    logger.info(f"[ESTIMATES] {sym} {quarter} ({out['method']}, {out['model']}): "
+                f"{len(brokers)} broker(s) verified, {dropped} figure(s) dropped as not in the source"
                 f"{'; error ' + found['error'] if found['error'] else ''}")
-    if found["error"] and data and not data.get("error"):
-        # A forced search that failed keeps what was already found.
-        return data
+    if data and data.get("brokers") and (found["error"] or not brokers):
+        # A forced search that failed or found nothing keeps what was found before.
+        return {**data, "_kept": out}
     try:
         if row is None:
             row = BrokerEstimate(symbol=sym, quarter=quarter)
@@ -316,11 +537,18 @@ def get_or_fetch(db, symbol: str, company_name: str, quarter: str,
 
 
 def cache_results_day(db) -> int:
-    """08:40 IST: estimates for every company on today's results calendar."""
+    """
+    08:40 IST: estimates for every company on today's results calendar, by
+    our own search on the free key only. Nothing here is paid. Paced to stay
+    under the free models' 20 requests a minute.
+    """
+    import time
     from app.services.results_calendar import collect_results_calendar, ist_today
     from app.services.result_compare import infer_quarter
-    enabled, key, _ = _settings()
-    if not enabled or not key:
+    enabled, _, _ = _settings()
+    free_key, _ = _free_settings()
+    if not enabled or not free_key:
+        logger.info("[ESTIMATES] 08:40 lookup skipped: estimates off or no free key")
         return 0
     quarter = infer_quarter(datetime.utcnow())
     today = ist_today()
@@ -330,8 +558,11 @@ def cache_results_day(db) -> int:
         if not sym:
             continue
         try:
-            get_or_fetch(db, sym, row.get("company_name") or "", quarter)
+            before = stored(db, sym, quarter)
+            get_or_fetch(db, sym, row.get("company_name") or "", quarter, method="own")
             n += 1
+            if not before or before.get("error"):
+                time.sleep(4)          # a model call was made; free tier allows 20/min
         except Exception as e:
             db.rollback()
             logger.warning(f"[ESTIMATES] {sym}: {e}")
