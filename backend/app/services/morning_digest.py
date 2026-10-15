@@ -402,6 +402,8 @@ def render_html(rows: List[dict], for_date: str) -> str:
                    + (f'<div class="na">{e((log.ai_summary or "")[:400])}</div>' if r["analysed"] and log else
                       '<div class="na">not analysed — filed outside 09:00-15:30</div>')
                    + _points(hl.get("positives"), "ok", "+") + _points(hl.get("negatives"), "bad", "−")
+                   + _points(hl.get("red_flags"), "bad", "⚠")
+                   + (f'<div class="na">{e(hl.get("reaction_risk") or "")}</div>' if hl.get("reaction_risk") else "")
                    + '</div>')
         reads = f'<div class="reads">{nr_html}{ai_html}</div>'
 

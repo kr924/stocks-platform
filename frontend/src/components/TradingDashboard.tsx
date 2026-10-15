@@ -326,6 +326,11 @@ interface TradeAILog {
   // What the filing itself shows went well and badly, as the AI read it.
   positives?: string[];
   negatives?: string[];
+  // What the market may sell on, the result against the recent trend, and the
+  // risk the stock falls on it (e.g. a strong but in-line quarter).
+  red_flags?: string[];
+  versus_trend?: string;
+  reaction_risk?: string;
 }
 
 /** One labelled readout in the quote strip, matching the tracker's column head. */
@@ -745,9 +750,10 @@ function NumberField({ value, onValue, min, max, step, integer, style, required 
  * negatives behind it. Used twice, side by side — the rules applied to the
  * figures, and the AI's reading of the whole filing.
  */
-function ReadCard({ title, label, reason, positives, negatives, empty }: {
+function ReadCard({ title, label, reason, positives, negatives, empty, flags, notes }: {
   title: string; label: string; reason?: string | null;
   positives?: string[] | null; negatives?: string[] | null; empty?: string;
+  flags?: string[] | null; notes?: (string | null | undefined)[];
 }) {
   const up = (label || "").toUpperCase();
   const tone = up.includes("BUY") || up.includes("BEAT") ? "var(--positive)"
@@ -766,6 +772,12 @@ function ReadCard({ title, label, reason, positives, negatives, empty }: {
       ))}
       {neg.map((t, i) => (
         <div key={`n${i}`} style={{ fontSize: "11px", color: "var(--negative)", lineHeight: 1.5 }}>− {t}</div>
+      ))}
+      {(Array.isArray(flags) ? flags : []).map((t, i) => (
+        <div key={`f${i}`} style={{ fontSize: "11px", color: "var(--warning)", lineHeight: 1.5 }}>⚠ {t}</div>
+      ))}
+      {(Array.isArray(notes) ? notes : []).filter(Boolean).map((t, i) => (
+        <div key={`t${i}`} style={{ fontSize: "11px", color: "var(--text-secondary)", lineHeight: 1.5, marginTop: "4px" }}>{t}</div>
       ))}
       {pos.length === 0 && neg.length === 0 && empty && (
         <div style={{ fontSize: "11px", color: "var(--text-faint)", fontStyle: "italic" }}>{empty}</div>
@@ -3212,8 +3224,10 @@ export function TradingDashboard() {
               const snr = p.like_for_like?.numbers_read_screener;
               const aiDone = p.ai_status === "done" && !!p.ai_analysis;
               const aiSug = aiDone ? (p.ai_analysis!.ai_suggestion || "NA") : null;
-              const aiSummary = aiDone && p.ai_analysis!.ai_summary && !/^AI analysis pending/i.test(p.ai_analysis!.ai_summary)
-                ? p.ai_analysis!.ai_summary : "";
+              const risk = aiDone ? (p.ai_analysis!.reaction_risk || "") : "";
+              const aiSummary = (/^high/i.test(risk) ? "⚠ High reaction risk — " : "")
+                + (aiDone && p.ai_analysis!.ai_summary && !/^AI analysis pending/i.test(p.ai_analysis!.ai_summary)
+                  ? p.ai_analysis!.ai_summary : "");
               const aiState = aiDone ? "" : p.ai_status === "failed" ? "AI failed"
                 : p.ai_status === "deferred" ? "not analysed — outside 09:00–15:30" : "AI running…";
               const isRes = categoryOf(p) === "results";
@@ -3980,6 +3994,11 @@ export function TradingDashboard() {
                                     : null}
                                   positives={pending.ai_status === "done" && ai ? ai.positives : []}
                                   negatives={pending.ai_status === "done" && ai ? ai.negatives : []}
+                                  flags={pending.ai_status === "done" && ai ? ai.red_flags : []}
+                                  notes={pending.ai_status === "done" && ai
+                                    ? [ai.versus_trend ? `Vs trend: ${ai.versus_trend}` : null,
+                                       ai.reaction_risk ? `Reaction risk: ${ai.reaction_risk}` : null]
+                                    : []}
                                   empty={pending.ai_status === "done" && ai
                                     ? "The AI listed no positives or negatives for this filing."
                                     : pending.ai_status === "failed" ? "AI analysis failed."

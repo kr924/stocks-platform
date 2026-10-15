@@ -592,3 +592,43 @@ def read_numbers(lfl: dict) -> dict:
         "note": note,
         "basis": f"{q} vs {yq} and {qq}" if q else "",
     }
+
+
+def trend_context(db, symbol: str, quarter: str, n: int = 6) -> str:
+    """
+    The company's recent published quarters, as lines for the earnings AI.
+
+    A results filing on its own cannot say whether +20% revenue is news. On
+    15 Oct 2026 Nestle India grew revenue 20% and PAT 36% and the stock fell
+    up to 9%: brokers had forecast ₹6,765-6,809 Cr revenue and ₹1,022-1,035 Cr
+    PAT, and that is what it printed. The market prices the trend in, so the
+    model is shown the trend: the n quarters before this one, from Screener,
+    with YoY growth and EBITDA margin. Empty when Screener has nothing stored.
+    """
+    if not quarter:
+        return ""
+    qs = [shift_quarter(quarter, -3 * k) for k in range(n, 0, -1)]
+    older = [shift_quarter(q, -12) for q in qs]
+    figs = screener_figures(db, symbol, qs + older)
+    lines = []
+    for q, oq in zip(qs, older):
+        cur, old = figs.get(q), figs.get(oq)
+        if not cur:
+            continue
+        rev, pat, ebitda = comparable(cur, "revenue"), comparable(cur, "pat"), comparable(cur, "ebitda")
+        parts = [q]
+        if rev is not None:
+            parts.append(f"revenue {rev:,.0f} Cr")
+            g = _pct(rev, comparable(old, "revenue"))
+            if g is not None:
+                parts.append(f"({g:+.1f}% YoY)")
+        if pat is not None:
+            parts.append(f"PAT {pat:,.0f} Cr")
+            g = _pct(pat, comparable(old, "pat"))
+            if g is not None:
+                parts.append(f"({g:+.1f}% YoY)")
+        if ebitda is not None and rev:
+            parts.append(f"EBITDA margin {ebitda / rev * 100:.1f}%")
+        lines.append("  " + " ".join(parts))
+    return "\n".join(lines)
+

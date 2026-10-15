@@ -159,7 +159,11 @@ def _highlights(a: TradeAILog) -> dict:
         h = json.loads(getattr(a, "highlights_json", None) or "{}")
     except Exception:
         h = {}
-    return {"positives": h.get("positives") or [], "negatives": h.get("negatives") or []}
+    return {"positives": h.get("positives") or [], "negatives": h.get("negatives") or [],
+            # What the market may sell on, and the result against the recent trend.
+            "red_flags": h.get("red_flags") or [],
+            "versus_trend": h.get("versus_trend") or "",
+            "reaction_risk": h.get("reaction_risk") or ""}
 
 
 def _serialize_ai_log(a: TradeAILog) -> dict:

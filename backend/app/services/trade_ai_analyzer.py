@@ -794,6 +794,23 @@ def _do_analyze_earnings_disclosure_2step(
         document_block = "THE FILING is attached as a PDF."
         doc_word = "attached filing"
 
+    # The recent trend, from Screener's stored quarters. A strong quarter that
+    # matches the trend is what the market already expects (see trend_context).
+    trend_block = ""
+    try:
+        from app.database import SessionLocal as _SL
+        from app.services.result_compare import trend_context, infer_quarter
+        _db = _SL()
+        try:
+            trend = trend_context(_db, symbol, infer_quarter(datetime.utcnow()))
+        finally:
+            _db.close()
+        if trend:
+            trend_block = ("=== RECENT TREND (published quarters, from Screener; NOT this filing) ===\n"
+                           + trend + "\n")
+    except Exception as e:
+        logger.debug(f"[AUTO AI] trend context unavailable for {symbol}: {e}")
+
     # The prompt is written for what a model can actually do with one filing.
     # It used to ask the model to "refer to screener.in and public broker
     # research", which a model with no browsing cannot do, and weak models
@@ -834,11 +851,30 @@ Convert every figure to ₹ crore (₹ lakh / 100; ₹ million / 10; ₹ thousan
 Compute the percentages from the figures you wrote. They are checked against each other, and a
 mismatch discards the whole analysis. Any figure you cannot read with certainty is "NA". Never guess.
 
+{trend_block}
+=== HOW THE MARKET WILL READ IT (judge this before the verdict) ===
+Good growth is not enough: a price moves on the SURPRISE against what was expected, and the
+expectation is roughly the recent trend above. A quarter that grows in line with its trend is
+already priced in, and the stock can fall on in-line numbers. Check each of these and report the
+ones that apply in "red_flags":
+  - growth in line with or below the recent trend (no acceleration)
+  - EBITDA margin down on the previous quarter, or gross margin under pressure
+  - total expenses, other expenses or advertising growing faster than revenue
+  - profit helped by other income, a lower tax rate or a one-off rather than operations
+  - management caution: inflation, input costs, weak demand, pricing pressure, slowdown, guidance cut
+  - exceptional charges, provisions, write-downs, rising debt or finance cost
+  - receivables or inventory building up, auditor qualifications or emphasis of matter
+versus_trend : "above trend" / "in line" / "below trend", with the figures behind it (one line).
+reaction_risk: "low" / "medium" / "high" that the stock falls on this result, with the reason (one line).
+
 === VERDICT (ai_suggestion) ===
-  "BUY"  : revenue and PAT both read, and the quarter is clearly strong YoY (profit growth driven by operations, not by other income or one-offs).
-  "SELL" : revenue and PAT both read, and the quarter is clearly weak YoY (falling profit or a swing to loss from operations).
+  "BUY"  : revenue and PAT both read, growth clearly ABOVE the recent trend or a clear turnaround,
+           driven by operations, and no serious red flag.
+  "SELL" : revenue and PAT both read, and the quarter is clearly weak: falling profit, a swing to
+           loss, growth well below trend, or serious red flags (margin collapse, cautious guidance).
   "BEATS ESTIMATES" / "MISSES ESTIMATES" : only when the document states an estimate.
-  "NA"   : anything else, including mixed or unclear results. Never use HOLD or NEUTRAL to express doubt.
+  "NA"   : anything else, including a strong but in-line quarter with high reaction risk, and mixed
+           or unclear results. Never use HOLD or NEUTRAL to express doubt.
 extraction_ok = true only if revenue.current_qtr and pat.current_qtr are real numbers.
 
 === POSITIVES / NEGATIVES (the most useful part for the reader) ===
@@ -867,6 +903,9 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
   }},
   "positives": ["<point with figure>", "..."],
   "negatives": ["<point with figure>", "..."],
+  "red_flags": ["<what the market may sell on, with figure>", "..."],
+  "versus_trend": "<above trend|in line|below trend>: <figures>",
+  "reaction_risk": "<low|medium|high>: <why>",
   "future_growth_outlook": "<what management says about growth, or NA>",
   "future_projected_numbers": "<specific guidance figures, or NA>",
   "broker_estimates": "<estimates stated in the document, or NA>",
@@ -1099,7 +1138,14 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
                 out.append(text[:240])
         return out
 
-    highlights = {"positives": _points("positives"), "negatives": _points("negatives")}
+    def _line(key):
+        text = _clean_cell(parsed_json.get(key) if isinstance(parsed_json, dict) else "") or ""
+        return "" if text.startswith("<") else text[:240]
+
+    highlights = {"positives": _points("positives"), "negatives": _points("negatives"),
+                  "red_flags": _points("red_flags"),
+                  "versus_trend": _line("versus_trend"),
+                  "reaction_risk": _line("reaction_risk")}
 
     # A verdict is only meaningful when the numbers behind it were extracted.
     # Anything uncertain must read "NA" rather than being dressed up as HOLD or
@@ -1276,6 +1322,12 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
 
         table = render_metrics_table(metrics)
         extra = f"\n\nOutlook: {future_growth_outlook}\nProjected: {future_projected_numbers}"
+        if highlights.get("versus_trend"):
+            extra += f"\nVs trend: {highlights['versus_trend']}"
+        if highlights.get("reaction_risk"):
+            extra += f"\nReaction risk: {highlights['reaction_risk']}"
+        if highlights.get("red_flags"):
+            extra += "\nRed flags: " + "; ".join(highlights["red_flags"][:3])
         if not extraction_ok:
             extra += "\n\nNote: key figures could not be extracted, so no directional call is given."
 

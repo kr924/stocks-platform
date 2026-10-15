@@ -794,6 +794,26 @@ because free models copy examples. `quarter`, `basis` and `previous_qtr` are
 asked for to make the model show its reading; the grid stores only its five
 columns.
 
+**Good numbers are not a BUY: the prompt judges the surprise.** On 15 Oct 2026
+Nestle India grew revenue 20% and PAT 36%, and the stock fell up to 9%.
+Brokers had forecast ₹6,765–6,809 Cr revenue and ₹1,022–1,035 Cr PAT, and
+the company printed exactly that. The EBITDA margin also slipped against the
+previous quarter, advertising rose 46%, and management warned of food
+inflation. So the prompt carries the company's last six quarters from
+Screener's store (`result_compare.trend_context`: revenue, PAT, YoY,
+EBITDA margin) and asks for three things:
+- `versus_trend`: above trend, in line, or below.
+- `red_flags`: margin down QoQ, costs or ads outgrowing revenue,
+  other-income or one-off support, management caution, exceptional charges,
+  working-capital build-up, auditor remarks.
+- `reaction_risk`: low, medium or high.
+BUY needs growth clearly above trend with no serious red flag. A strong but
+in-line quarter with high reaction risk is NA. These go into
+`highlights_json` and appear on the AI card (⚠ flags, trend and risk lines),
+the list ("⚠ High reaction risk —"), the Telegram verdict and the digest.
+**The model has no consensus estimates.** The trend stands in for them. A true
+beat/miss needs a broker-consensus feed, which is a data subscription.
+
 `_extract_json_from_llm` is deliberately tolerant: scraped output arrives with
 literal newlines inside strings and sometimes **two concatenated renderings** of
 the answer. It scores candidates and keeps the richest.
