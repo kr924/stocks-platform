@@ -803,7 +803,10 @@ current qtr/YoY/YoY %/QoQ %/estimated). Three layers protect it:
   when a filing's layout differs. Plus sign and magnitude checks.
 - **`response_matches_company`** / **`response_indicates_missing_document`** —
   a scraped browser session once returned *another company's* analysis
-  (EMMESSA's card held Carborundum's figures). Both are rejected to NA.
+  (EMMESSA's card held Carborundum's figures). Both are rejected to NA. The
+  company check reads the whole answer (it carries a `company` field) with
+  accents folded: "Nestlé" once stripped to "NESTL" and a correct Haiku
+  analysis of Nestle was discarded as another company's.
 
 Uncertainty is always **NA**, never HOLD or NEUTRAL — a hedge reads as a real
 call to anyone acting on it.

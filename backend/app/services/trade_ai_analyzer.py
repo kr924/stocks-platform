@@ -384,7 +384,12 @@ def response_matches_company(text: str, symbol: str, company_name: str = "") -> 
     if not text:
         return False
 
-    haystack = re.sub(r"[^A-Z0-9 ]+", " ", text.upper())
+    # Accents folded first: "Nestlé" upper-cased is "NESTLÉ", and stripping
+    # non-ASCII left "NESTL", so Claude Haiku's correct Nestle analysis on
+    # 15 Oct 2026 was discarded as describing a different company.
+    import unicodedata
+    folded = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+    haystack = re.sub(r"[^A-Z0-9 ]+", " ", folded.upper())
     padded = f" {haystack} "
 
     if symbol and f" {symbol.upper()} " in padded:
@@ -984,6 +989,7 @@ Do NOT restate plain revenue/PAT growth already in the grid. Use an empty list r
 
 Output ONLY raw JSON. No prose, no markdown fences. Shape:
 {{
+  "company": "<company name as printed on the statement>",
   "quarter": "<e.g. Sep 2026>",
   "basis": "<consolidated|standalone>",
   "unit_in_filing": "<lakh|crore|million|...>",
@@ -1279,7 +1285,12 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
         highlights = {"positives": [], "negatives": []}
 
     # Guard against an analysis of the wrong company reaching the dashboard.
-    elif parsed_json and not response_matches_company(ai_summary, symbol, company_name):
+    # The whole answer is checked, not only the summary: a summary that says
+    # "the company" names nobody, and the answer's "company" field, positives
+    # and notes do.
+    elif parsed_json and not response_matches_company(
+            " ".join([str(parsed_json.get("company") or ""), str(ai_summary or ""),
+                      json.dumps(parsed_json, ensure_ascii=False)]), symbol, company_name):
         logger.error(
             f"🚫 [WRONG COMPANY]: analysis for #{symbol} ({company_name or 'unknown'}) "
             f"does not reference it — discarding. Summary began: {str(ai_summary)[:120]}"
