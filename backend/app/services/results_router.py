@@ -31,9 +31,14 @@ logger = logging.getLogger("app.results_router")
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
-# Single worker: earnings analysis downloads a PDF and calls a premium LLM.
-# Running more than one at a time on a 1-vCPU box is what caused the CPU pile-up.
-_ai_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="earnings-ai")
+# Three workers. An analysis is almost all waiting on OpenRouter, not CPU:
+# the PDF is parsed in well under a second and the rest is a network call.
+# With one worker, a filing at 13:36 on 16 Oct waited 4.7 minutes in the queue
+# behind others before its analysis even started. The CPU-heavy work (OCR,
+# RapidOCR's ONNX session) has its own single-worker pool in
+# results_extractor and is unaffected. Three stays well inside the free
+# tier's 20 requests a minute.
+_ai_pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="earnings-ai")
 
 
 # Alerts and AI analysis run only while the market is open: 09:00 to 15:30 IST.

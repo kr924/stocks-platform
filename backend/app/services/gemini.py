@@ -142,10 +142,18 @@ def call_openai(prompt: str, api_key: str) -> dict:
 _NO_RETRY_CODES = {"401", "402", "403", "429"}
 
 
+def _call_timeout(base: float, deadline: float = None) -> float:
+    """The per-request timeout, never running past the analysis deadline."""
+    if not deadline:
+        return base
+    import time as _time
+    return max(5.0, min(base, deadline - _time.time()))
+
+
 def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url: str = None,
                     pdf_engine: str = None, free_only: bool = False,
                     fallbacks: list = None, report: dict = None,
-                    attachment_bytes: bytes = None) -> dict:
+                    attachment_bytes: bytes = None, deadline: float = None) -> dict:
     """
     Call OpenRouter API with dynamic model discovery and document URL attachment support.
 
@@ -156,6 +164,10 @@ def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url
     the caller chose an engine. A paid model on a free key fails anyway.
 
     report: if given, gets "model" set to the model that actually answered.
+
+    deadline: a time.time() after which no further model is tried and no
+    request may run past. A results analysis is worth something only while
+    the market can still react; a chain of 180 s timeouts once took 10 minutes.
 
     attachment_bytes: the PDF itself, sent as a base64 data URL. Preferred over
     attachment_url, which OpenRouter has to fetch on its own and which BSE and
@@ -262,7 +274,11 @@ def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url
         ]
 
     errors = []
+    import time as _time
     for model_name in models_to_try:
+        if deadline and _time.time() > deadline - 5:
+            errors.append(f"{model_name}: not tried, the analysis ran out of time")
+            break
         for use_json_format in [True, False]:
             payload = {
                 "model": model_name,
@@ -299,7 +315,9 @@ def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url
                     # Fetching, parsing and reading a filing does not fit in 25s.
                     # A filing's pages sent as text make a long prompt; free
                     # models take well over 30s to answer one.
-                    timeout=180 if (has_attachment or len(prompt) > 8000) else 30,
+                    # 90 s, not 180: a model that has not answered a filing in
+                    # 90 s rarely does, and the next model is the better bet.
+                    timeout=_call_timeout(90 if (has_attachment or len(prompt) > 8000) else 30, deadline),
                 )
                 if res.ok:
                     # HTTP 200 is not success on OpenRouter: an upstream
@@ -351,6 +369,10 @@ def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url
                         break
             except Exception as e:
                 errors.append(f"{model_name}: {type(e).__name__} {str(e)[:120]}")
+                # A timeout or a dropped connection is the model or provider,
+                # not JSON mode; asking the same model again only waits twice.
+                if isinstance(e, (requests.exceptions.Timeout, requests.exceptions.ConnectionError)):
+                    break
                 continue
 
     # Every distinct reason, not just the last: the first model's failure is

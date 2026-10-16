@@ -456,7 +456,8 @@ Operating Profit is its own construct, not a P&L-derived EBITDA — and a filing
 covering a different quarter from Screener's latest says so, because then the
 gaps are not errors.
 
-**It runs in the background**, on a single-worker pool like the earnings AI.
+**It runs in the background**, on a single-worker pool (the earnings AI has
+three workers; it is network-bound, this is CPU-bound).
 Measured on live filings: 6 s, 20 s, and 64 s. RapidOCR loads a 400-800 MB ONNX
 session per worker, so a second would starve the announcement poller on 2 cores
 rather than halve the wait.
@@ -943,6 +944,17 @@ to ~38 s. Sub-5 s is not reachable by polling, and milliseconds would need a
 co-located exchange feed — those carry trades, not filing PDFs. The only real
 route to single-digit seconds is a commercial dissemination feed, which is a
 data subscription rather than a code change.
+
+**The AI step is where the minutes went, not ingestion.** On 16 Oct a
+filing was loaded 19 s after announcement and alerted 1 s later, then waited
+**4.7 min** in the AI queue (one worker, behind other filings) and took
+**10.1 min** to answer (180 s timeouts, each retried once without JSON mode,
+across three models). Now: three AI workers (`results_router._ai_pool`; the
+work is waiting on OpenRouter, and OCR keeps its own single CPU worker), 90 s
+per request, a timeout or dropped connection moves straight to the next
+model, and the whole AI step has a 240 s budget (`AI_BUDGET_SECONDS`, the
+`deadline` argument of `call_openrouter`) after which it reports why it has
+no reading.
 
 Poll interval stays at 2s. Halving it buys ~1.4% of total latency while doubling
 the request rate against NSE, which blocks aggressive pollers.

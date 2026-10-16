@@ -642,6 +642,12 @@ MAX_INLINE_PDF_BYTES = 25 * 1024 * 1024
 # ~20 MB, inside what Gemini accepts inline. Larger bundles, and premium
 # models that cannot read a PDF themselves, get the selected pages instead.
 FULL_PDF_MAX_BYTES = 15 * 1024 * 1024
+# The whole AI step, every model and fallback included, gets this long. On
+# 16 Oct a filing's analysis took 10.1 minutes: 180 s timeouts, each retried
+# once without JSON mode, across three models. Past this the reading is
+# returned as unavailable, with the reasons, rather than arriving after the
+# move it was meant to inform.
+AI_BUDGET_SECONDS = 240
 
 
 _BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -812,6 +818,8 @@ def _do_analyze_earnings_disclosure_2step(
     from app.services.gemini import clean_json_response, call_openrouter
 
     ai_requested_at = datetime.utcnow()
+    import time as _time
+    ai_deadline = _time.time() + AI_BUDGET_SECONDS
 
     cfg = get_intel_config()
     auto_ai_cfg = cfg.auto_trading_ai
@@ -1165,7 +1173,8 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
                 or_res = call_openrouter(prompt_full, attempt["key"], model=model,
                                          attachment_url=attachment_url, attachment_bytes=raw_pdf,
                                          pdf_engine="native",
-                                         free_only=False, fallbacks=[model], report=report)
+                                         free_only=False, fallbacks=[model], report=report,
+                                         deadline=ai_deadline)
                 raw = json.dumps(or_res["analyses"][0]) if (or_res and or_res.get("analyses")) else (
                     json.dumps(or_res) if or_res else None)
                 if raw:
@@ -1198,7 +1207,7 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
                                      attachment_url=link,
                                      attachment_bytes=pdf,
                                      free_only=(tier == "free"), fallbacks=fallbacks,
-                                     report=report)
+                                     report=report, deadline=ai_deadline)
             raw = None
             if or_res and "analyses" in or_res and or_res["analyses"]:
                 raw = json.dumps(or_res["analyses"][0])
