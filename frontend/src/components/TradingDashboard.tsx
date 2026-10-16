@@ -1326,6 +1326,12 @@ export function TradingDashboard() {
     free_openrouter_model: "",
   });
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  // The 3-second poll's fetchData was created once at mount, so it read
+  // showSettingsModal as false forever and overwrote the open form with the
+  // server's settings every 3 s: a model picked in AI settings snapped back
+  // before Save could send it. The poll reads this ref instead.
+  const settingsOpenRef = useRef(false);
+  useEffect(() => { settingsOpenRef.current = showSettingsModal; }, [showSettingsModal]);
   const [savingSettings, setSavingSettings] = useState(false);
   // Keys typed into the settings form. undefined = leave the stored key alone,
   // "" = remove it, anything else = replace it.
@@ -1962,7 +1968,7 @@ export function TradingDashboard() {
       }
       if (settingsRes.ok) {
         const data = await settingsRes.json();
-        if (data.settings && !showSettingsModal) {
+        if (data.settings && !settingsOpenRef.current) {
           setAiSettings(prev => ({
             ...prev,
             ...data.settings
