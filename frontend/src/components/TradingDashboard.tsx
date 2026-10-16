@@ -1661,7 +1661,21 @@ export function TradingDashboard() {
   };
 
   // Upcoming Earnings Sorting, Search, and Filtering state
-  const [earningsSortBy, setEarningsSortBy] = useState<"date" | "return_desc" | "return_asc" | "change_desc" | "change_asc">("change_desc");
+  // Meeting date by default, so the list holds still. "Change %" reorders
+  // with every quote tick by design; it was the default, which made rows jump
+  // every few seconds. The choice is remembered per browser.
+  type EarningsSort = "date" | "return_desc" | "return_asc" | "change_desc" | "change_asc";
+  const [earningsSortBy, setEarningsSortByState] = useState<EarningsSort>(() => {
+    try {
+      const v = localStorage.getItem("earnings_sort");
+      if (v && ["date", "return_desc", "return_asc", "change_desc", "change_asc"].includes(v)) return v as EarningsSort;
+    } catch { /* storage unavailable */ }
+    return "date";
+  });
+  const setEarningsSortBy = (v: EarningsSort) => {
+    setEarningsSortByState(v);
+    try { localStorage.setItem("earnings_sort", v); } catch { /* storage unavailable */ }
+  };
   const [earningsSearch, setEarningsSearch] = useState<string>("");
   const [earningsDateFilter, setEarningsDateFilter] = useState<string>(todayStr);
 
@@ -1724,8 +1738,8 @@ export function TradingDashboard() {
     } else if (earningsSortBy === "return_asc") {
       list.sort((a, b) => (a.change_pct ?? 0) - (b.change_pct ?? 0));
     } else {
-      // Date ascending (nearest meeting first)
-      list.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      // Date ascending (nearest meeting first), then symbol: a fixed order.
+      list.sort((a, b) => (a.date || "").localeCompare(b.date || "") || a.symbol.localeCompare(b.symbol));
     }
 
     return list;
@@ -2569,8 +2583,15 @@ export function TradingDashboard() {
     // still appears within 3s.
     const intervalCards = setInterval(() => {
       fetchData();
-      fetchUpcomingEarnings();
     }, 3000);
+
+    // The calendar itself changes only when the server's scraper refreshes it
+    // (every 30 min); the rows' prices come from the shared quote cache
+    // below, not from this list. Re-reading it every 3 s rebuilt the whole
+    // calendar and re-quoted it for nothing.
+    const intervalCalendar = setInterval(() => {
+      fetchUpcomingEarnings();
+    }, 15 * 60 * 1000);
 
     // Quotes come from the backend's shared cache, which a single background
     // loop keeps ~3s fresh for every panel at once. Polling here no longer
@@ -2586,6 +2607,7 @@ export function TradingDashboard() {
 
     return () => {
       clearInterval(intervalCards);
+      clearInterval(intervalCalendar);
       clearInterval(intervalQuotes);
     };
   }, []);
@@ -4352,7 +4374,7 @@ export function TradingDashboard() {
             <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "600" }}>Sort By:</span>
             <select
               value={earningsSortBy}
-              onChange={(e: any) => setEarningsSortBy(e.target.value)}
+              onChange={(e: any) => setEarningsSortBy(e.target.value as EarningsSort)}
               style={{
                 backgroundColor: "var(--bg-base)",
                 border: "1px solid rgba(var(--accent-rgb), 0.18)",
