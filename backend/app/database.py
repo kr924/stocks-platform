@@ -278,6 +278,21 @@ class ScreenerQuarter(Base):
     )
 
 
+class PeriodBase(Base):
+    """
+    The closes each return period is measured from, for one instrument on one
+    IST day (services/period_returns.py). Fetched once a day from Upstox
+    daily candles; the live price over these gives the 5d .. 1y returns on
+    the earnings calendar. A published close never changes, so a day's row is
+    never re-fetched.
+    """
+    __tablename__ = "period_bases"
+    instrument_key = Column(String(80), primary_key=True)
+    day = Column(String(10), primary_key=True)          # IST date, YYYY-MM-DD
+    data_json = Column(Text, nullable=True)
+    fetched_at = Column(DateTime, default=datetime.utcnow)
+
+
 class BrokerEstimate(Base):
     """
     Brokers' published forecasts for one company's quarter, found by a web

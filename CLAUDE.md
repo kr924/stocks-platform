@@ -518,6 +518,25 @@ history chart survives Screener being unreachable.
 
 ---
 
+## The earnings calendar
+
+Sorted by meeting date then symbol by default, a fixed order. Live "Change %"
+re-sorts on every quote tick and used to be the default, which made rows jump
+every few seconds; it is still offered. The choice is kept in localStorage.
+The calendar list is read every 15 minutes, not every 3 s: it only changes
+when the scraper refreshes it, and the rows' prices come from the quote cache.
+
+**5d / 10d / 15d / 1m / 3m / 6m / 1y returns** (`services/period_returns.py`,
+table `period_bases`). The close 5, 10, 15, 21, 63, 126 and 252 trading
+sessions back, from Upstox daily candles, fetched **once per stock per IST
+day** in one background thread (~1 request/s, soonest meetings first) and
+stored, so restarts do not refetch. Today's partial candle is excluded. The
+page divides the live price (else the last close) by each base, so returns
+move with the market; a stock younger than a period shows "—", one not yet
+fetched "…". Each return column header sorts (click again to reverse), as do
+the Sort By options. The old "1Y Return" sort actually sorted by day change;
+it is gone. Rows older than 3 days are purged on the next fill.
+
 ## The index board
 
 `services/index_board.py` — 4 headline indices, 14 sectoral, 5 MCX commodities,

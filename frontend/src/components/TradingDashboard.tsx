@@ -1190,6 +1190,29 @@ interface UpcomingEarningsItem {
   created_at?: string;
   return_1y?: string;
   returns_1y?: string;
+  // Closes N sessions back that the 5d..1y returns are measured from,
+  // fetched once a day per stock (services/period_returns.py). Undefined or
+  // null until the background fetch reaches this stock.
+  period_bases?: { last_close: number; last_date?: string;
+                   bases: Record<string, number>; from: Record<string, string> } | null;
+  returns?: Record<string, number>;
+}
+
+/** Return periods shown on the earnings calendar, in trading sessions server-side. */
+const RET_PERIODS = ["5d", "10d", "15d", "1m", "3m", "6m", "1y"] as const;
+type RetPeriod = typeof RET_PERIODS[number];
+
+/**
+ * Live price over the close `period` sessions ago, as a percentage. The live
+ * price when there is one, else the last close; null when the stock has no
+ * base for that period (not fetched yet, or listed more recently).
+ */
+function periodReturn(item: UpcomingEarningsItem, period: RetPeriod, livePrice?: number): number | null {
+  const pb = item.period_bases;
+  const base = pb?.bases?.[period];
+  const now = livePrice && livePrice > 0 ? livePrice : pb?.last_close;
+  if (!base || !now) return null;
+  return (now / base - 1) * 100;
 }
 
 /**
@@ -1664,11 +1687,15 @@ export function TradingDashboard() {
   // Meeting date by default, so the list holds still. "Change %" reorders
   // with every quote tick by design; it was the default, which made rows jump
   // every few seconds. The choice is remembered per browser.
-  type EarningsSort = "date" | "return_desc" | "return_asc" | "change_desc" | "change_asc";
+  // "ret:<period>:<desc|asc>" sorts by that period's return.
+  type EarningsSort = "date" | "change_desc" | "change_asc" | `ret:${RetPeriod}:${"desc" | "asc"}`;
+  const isEarningsSort = (v: string): v is EarningsSort =>
+    ["date", "change_desc", "change_asc"].includes(v)
+    || /^ret:(5d|10d|15d|1m|3m|6m|1y):(desc|asc)$/.test(v);
   const [earningsSortBy, setEarningsSortByState] = useState<EarningsSort>(() => {
     try {
-      const v = localStorage.getItem("earnings_sort");
-      if (v && ["date", "return_desc", "return_asc", "change_desc", "change_asc"].includes(v)) return v as EarningsSort;
+      const v = localStorage.getItem("earnings_sort") || "";
+      if (isEarningsSort(v)) return v;
     } catch { /* storage unavailable */ }
     return "date";
   });
@@ -1733,10 +1760,19 @@ export function TradingDashboard() {
         const cB = qB.change ?? b.change_pct ?? 0;
         return cA - cB;
       });
-    } else if (earningsSortBy === "return_desc") {
-      list.sort((a, b) => (b.change_pct ?? 0) - (a.change_pct ?? 0));
-    } else if (earningsSortBy === "return_asc") {
-      list.sort((a, b) => (a.change_pct ?? 0) - (b.change_pct ?? 0));
+    } else if (earningsSortBy.startsWith("ret:")) {
+      // A period's return, live price over its base. Stocks with no figure
+      // yet (or too young for the period) go last either way.
+      const [, period, dir] = earningsSortBy.split(":") as [string, RetPeriod, "desc" | "asc"];
+      const val = (it: UpcomingEarningsItem) =>
+        periodReturn(it, period, marketQuotesMap[it.symbol.toUpperCase()]?.last_price);
+      list.sort((a, b) => {
+        const va = val(a), vb = val(b);
+        if (va == null && vb == null) return a.symbol.localeCompare(b.symbol);
+        if (va == null) return 1;
+        if (vb == null) return -1;
+        return dir === "desc" ? vb - va : va - vb;
+      });
     } else {
       // Date ascending (nearest meeting first), then symbol: a fixed order.
       list.sort((a, b) => (a.date || "").localeCompare(b.date || "") || a.symbol.localeCompare(b.symbol));
@@ -4390,8 +4426,12 @@ export function TradingDashboard() {
               <option value="change_desc">📊 Change % (Highest First)</option>
               <option value="change_asc">📉 Change % (Lowest First)</option>
               <option value="date">📅 Meeting Date (Earliest First)</option>
-              <option value="return_desc">📈 1Y Return % (Highest Gainers First)</option>
-              <option value="return_asc">📉 1Y Return % (Lowest / Worst First)</option>
+              <optgroup label="Return over period — highest first">
+                {RET_PERIODS.map(p => <option key={`d${p}`} value={`ret:${p}:desc`}>📈 {p.toUpperCase()} return (highest first)</option>)}
+              </optgroup>
+              <optgroup label="Return over period — lowest first">
+                {RET_PERIODS.map(p => <option key={`a${p}`} value={`ret:${p}:asc`}>📉 {p.toUpperCase()} return (lowest first)</option>)}
+              </optgroup>
             </select>
           </div>
         </div>
@@ -4405,7 +4445,7 @@ export function TradingDashboard() {
             No earnings disclosures match the selected date ({earningsDateFilter || 'All Dates'}) / search filter.
           </div>
         ) : (
-          <div style={{ maxHeight: "420px", overflowY: "auto", border: "1px solid rgba(var(--ink-rgb), 0.08)", borderRadius: "10px" }}>
+          <div style={{ maxHeight: "420px", overflowY: "auto", overflowX: "auto", border: "1px solid rgba(var(--ink-rgb), 0.08)", borderRadius: "10px" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: "11px" }}>
               <thead>
                 <tr style={{ background: "rgba(var(--bg-base-rgb), 0.95)", borderBottom: "1px solid rgba(var(--ink-rgb), 0.1)", color: "var(--text-muted)" }}>
@@ -4413,6 +4453,19 @@ export function TradingDashboard() {
                   <th style={{ padding: "10px 12px" }}>COMPANY</th>
                   <th style={{ padding: "10px 12px", textAlign: "right" }}>LTP</th>
                   <th style={{ padding: "10px 12px", textAlign: "right" }}>CHANGE</th>
+                  {RET_PERIODS.map(p => {
+                    const active = earningsSortBy.startsWith(`ret:${p}:`);
+                    const dir = active ? earningsSortBy.split(":")[2] : "";
+                    return (
+                      <th key={p}
+                        onClick={() => setEarningsSortBy(`ret:${p}:${active && dir === "desc" ? "asc" : "desc"}` as EarningsSort)}
+                        title={`Return over ${p}: live price against the close ${p} back (trading sessions). Click to sort; click again to reverse.`}
+                        style={{ padding: "10px 6px", textAlign: "right", cursor: "pointer", whiteSpace: "nowrap",
+                                 color: active ? "var(--accent)" : undefined, userSelect: "none" }}>
+                        {p.toUpperCase()}{active ? (dir === "desc" ? " ▼" : " ▲") : ""}
+                      </th>
+                    );
+                  })}
                   <th style={{ padding: "10px 12px", textAlign: "right" }}>PREV CLOSE</th>
                   <th style={{ padding: "10px 12px", textAlign: "right" }}>DAY HIGH</th>
                   <th style={{ padding: "10px 12px", textAlign: "center", width: "100px" }}>SENTIMENT (B/S)</th>
@@ -4506,6 +4559,21 @@ export function TradingDashboard() {
                       <td style={{ padding: "10px 12px", textAlign: "right", fontWeight: "700", fontSize: "11px", color: changePct == null ? "var(--text-faint)" : isUp ? "var(--positive-strong)" : "var(--negative-strong)" }}>
                         {changePct == null ? "—" : `${isUp ? "+" : ""}${changePct.toFixed(2)}%`}
                       </td>
+
+                      {/* 4b. RETURNS 5D .. 1Y */}
+                      {RET_PERIODS.map(p => {
+                        const r = periodReturn(item, p, ltp);
+                        const pending = item.period_bases === undefined || item.period_bases === null;
+                        return (
+                          <td key={p}
+                            title={r == null ? (pending ? "Fetching price history…" : `Listed less than ${p} ago`)
+                                             : `From ₹${item.period_bases?.bases?.[p]} on ${item.period_bases?.from?.[p] ?? "?"}`}
+                            style={{ padding: "10px 6px", textAlign: "right", whiteSpace: "nowrap", fontWeight: 700,
+                                     color: r == null ? "var(--text-faint)" : r >= 0 ? "var(--positive)" : "var(--negative)" }}>
+                            {r == null ? (pending ? "…" : "—") : `${r >= 0 ? "+" : ""}${r.toFixed(1)}%`}
+                          </td>
+                        );
+                      })}
 
                       {/* 5. PREV CLOSE */}
                       <td style={{ padding: "10px 12px", textAlign: "right", color: "var(--text-muted)", fontSize: "11px" }}>

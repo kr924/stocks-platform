@@ -853,6 +853,24 @@ def get_upcoming_earnings(db: Session = Depends(get_db)):
     except Exception as err:
         logger.warning(f"Live Upstox feed quote enrichment error: {err}")
 
+    # 5d .. 1y returns: the closes they are measured from, fetched once a day
+    # per stock in the background (services/period_returns.py). The calendar
+    # divides the live price by these, so the figures move with the market.
+    try:
+        from app.services import period_returns as PR
+        keys = [it.get("instrument_key") or "" for it in upcoming]   # already soonest first
+        have = PR.stored(db, keys)
+        for it in upcoming:
+            b = have.get(it.get("instrument_key") or "")
+            it["period_bases"] = b
+            now = it.get("ltp") or (b or {}).get("last_close")
+            it["returns"] = ({k: round((now / v - 1) * 100, 2) for k, v in (b.get("bases") or {}).items() if v}
+                             if b and now else {})
+        if any(k and k not in have for k in keys):
+            PR.ensure(keys)
+    except Exception as err:
+        logger.warning(f"Period returns unavailable: {err}")
+
     return upcoming
 
 
