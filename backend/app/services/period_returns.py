@@ -148,6 +148,11 @@ def ensure(keys: List[str]) -> bool:
     return True
 
 
+def failed_today(key: str) -> bool:
+    """The fetch for this key failed or returned no candles today; not retried until tomorrow."""
+    return _failed.get(key) == _today()
+
+
 def purge_old(db, keep_days: int = 3) -> int:
     from app.database import PeriodBase
     cutoff = (datetime.now(IST) - timedelta(days=keep_days)).strftime("%Y-%m-%d")

@@ -1193,7 +1193,7 @@ interface UpcomingEarningsItem {
   // Closes N sessions back that the 5d..1y returns are measured from,
   // fetched once a day per stock (services/period_returns.py). Undefined or
   // null until the background fetch reaches this stock.
-  period_bases?: { last_close: number; last_date?: string;
+  period_bases?: { last_close: number | null; last_date?: string; unavailable?: boolean;
                    bases: Record<string, number>; from: Record<string, string> } | null;
   returns?: Record<string, number>;
 }
@@ -2309,12 +2309,24 @@ export function TradingDashboard() {
     }
   };
 
+  const earningsRecheckRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fetchUpcomingEarnings = async () => {
     try {
       const earningsRes = await fetch(`${API_BASE}/api/trading/upcoming-earnings`);
       if (earningsRes.ok) {
         const data = await earningsRes.json();
-        setUpcomingEarnings(data.upcoming_earnings || []);
+        const rows: UpcomingEarningsItem[] = Array.isArray(data.upcoming_earnings) ? data.upcoming_earnings : [];
+        setUpcomingEarnings(rows);
+        // The 5d..1y bases are fetched in the background on the first read of
+        // the day (~1 stock a second). Until they are all in, look again in
+        // 30 s rather than leaving "…" up until the 15-minute read.
+        const pending = rows.some(r => r.instrument_key && !r.period_bases);
+        if (pending && !earningsRecheckRef.current) {
+          earningsRecheckRef.current = setTimeout(() => {
+            earningsRecheckRef.current = null;
+            fetchUpcomingEarnings();
+          }, 30000);
+        }
       }
     } catch (err) {
       console.error("Error loading upcoming earnings:", err);
@@ -4566,7 +4578,7 @@ export function TradingDashboard() {
                         const pending = item.period_bases === undefined || item.period_bases === null;
                         return (
                           <td key={p}
-                            title={r == null ? (pending ? "Fetching price history…" : `Listed less than ${p} ago`)
+                            title={r == null ? (pending ? "Fetching price history…" : `No price history going back ${p}`)
                                              : `From ₹${item.period_bases?.bases?.[p]} on ${item.period_bases?.from?.[p] ?? "?"}`}
                             style={{ padding: "10px 6px", textAlign: "right", whiteSpace: "nowrap", fontWeight: 700,
                                      color: r == null ? "var(--text-faint)" : r >= 0 ? "var(--positive)" : "var(--negative)" }}>

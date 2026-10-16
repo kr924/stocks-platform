@@ -861,12 +861,17 @@ def get_upcoming_earnings(db: Session = Depends(get_db)):
         keys = [it.get("instrument_key") or "" for it in upcoming]   # already soonest first
         have = PR.stored(db, keys)
         for it in upcoming:
-            b = have.get(it.get("instrument_key") or "")
+            k = it.get("instrument_key") or ""
+            b = have.get(k)
+            if b is None and k and (k in have or PR.failed_today(k)):
+                # Fetched today and there is nothing to show: say so, so the
+                # page stops waiting for it.
+                b = {"last_close": None, "bases": {}, "from": {}, "unavailable": True}
             it["period_bases"] = b
             now = it.get("ltp") or (b or {}).get("last_close")
             it["returns"] = ({k: round((now / v - 1) * 100, 2) for k, v in (b.get("bases") or {}).items() if v}
                              if b and now else {})
-        if any(k and k not in have for k in keys):
+        if any(k and k not in have and not PR.failed_today(k) for k in keys):
             PR.ensure(keys)
     except Exception as err:
         logger.warning(f"Period returns unavailable: {err}")
