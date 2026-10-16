@@ -809,6 +809,23 @@ longer in the automatic chain (`skip_gemcall`). Its code path remains in
   "did not read usable figures". OpenRouter answers HTTP 200 with `{"error": …}` and no
   `choices` when a provider fails; that used to surface as just `'choices'`.
   Each model's own message, code and provider are now reported.
+- **"Premium analyse" and Re-analyse replace a run in progress** (16 Oct
+  2026). Every run takes a number when queued (`trade_ai_analyzer.begin_run`);
+  a newer one makes the older stale. A stale run tries no further model
+  (`call_openrouter(cancel=)`), writes no log, sends no Telegram verdict and
+  leaves the filing's status alone (`is_current_run`, checked in
+  `results_router._run_earnings_ai`). A request in flight cannot be aborted,
+  so at most one HTTP call is wasted. Manual runs skip the pool and start on
+  their own thread, so they never wait behind the runs they replace. "Premium
+  analyse" (`premium: true` on `/reanalyse`) runs the configured premium
+  model on the premium key whatever the switch says. Re-analyse is no longer
+  disabled while a run is going.
+- **NA has two meanings on the panel**, and the header says which: "figures
+  not extractable" (with any consistency issues) when the read failed, "no
+  clear call — mixed quarter" when the figures were read and the model
+  declined to call it (CROMPTON Sep 2026: above trend, but margin −100 bps
+  QoQ, inventory build-up, PAT flattered by a base-quarter exceptional).
+  The verdict itself stays NA — never HOLD.
 - `flow_used` is `openrouter_premium` / `openrouter_free` / `custom_rest_api`;
   `provider` names the model that actually answered, fallbacks included.
 - **Free-model limits are per account, not per key** ("Making additional

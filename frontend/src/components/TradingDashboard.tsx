@@ -2262,8 +2262,14 @@ export function TradingDashboard() {
   };
 
   /** Re-run the earnings AI over one filing, optionally with another model. */
-  const handleReanalyse = async (pending: PendingResult) => {
-    const choice = reanalyseModel[pending.id] ?? "";
+  /**
+   * Run the analysis again. premium=true is "Premium analyse": the configured
+   * premium model, whatever the switch says. Either way, an analysis of this
+   * filing still running (usually the free one) is replaced: the server marks
+   * it stale and it discards its result.
+   */
+  const handleReanalyse = async (pending: PendingResult, premium = false) => {
+    const choice = premium ? "" : (reanalyseModel[pending.id] ?? "");
     const model = choice === "__custom__" ? (customModel[pending.id] || "").trim() : choice;
     if (choice === "__custom__" && !model) {
       alert("Type a model id, or pick one from the list.");
@@ -2274,7 +2280,7 @@ export function TradingDashboard() {
       const res = await fetch(`${API_BASE}/api/trading/pending-results/${pending.id}/reanalyse`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model, flow: "ai" }),
+        body: JSON.stringify({ model, flow: "ai", premium }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -3845,6 +3851,15 @@ export function TradingDashboard() {
                     {pending.ai_status === "done" && ai ? (
                       <>
                         <VerdictBadge verdict={ai.ai_suggestion} />
+                        {/* NA with figures read is the model declining to call a
+                            mixed quarter, not a failed read; say which. */}
+                        {(ai.ai_suggestion || "NA").toUpperCase() === "NA" && ai.extraction_ok !== false
+                          && !(ai.validation?.issues?.length) && (
+                          <span style={{ fontSize: "10px", color: "var(--text-muted)", fontStyle: "italic" }}
+                                title="The figures were read; the model judged the quarter mixed and made no call. The red flags and reaction risk below say why.">
+                            no clear call — mixed quarter
+                          </span>
+                        )}
                         {ai.extraction_ok === false && (
                           <span style={{ fontSize: "10px", color: "var(--text-muted)", fontStyle: "italic" }}>
                             figures not extractable
@@ -4126,19 +4141,47 @@ export function TradingDashboard() {
                             )}
                             <button
                               onClick={() => handleReanalyse(pending)}
-                              disabled={reanalysing || pending.ai_status === "running"}
-                              title="Run the earnings analysis again. The verdict on screen is kept until the new one lands."
+                              disabled={reanalysing}
+                              title={pending.ai_status === "running"
+                                ? "An analysis is running. Re-analysing replaces it with the model picked here."
+                                : "Run the earnings analysis again. The verdict on screen is kept until the new one lands."}
                               style={{
                                 display: "inline-flex", alignItems: "center", gap: "5px",
                                 padding: "5px 12px", borderRadius: "6px",
                                 background: "var(--ai-bg)", border: "1px solid rgba(var(--ai-rgb), 0.3)",
                                 color: "var(--ai)", fontSize: "11px", fontWeight: 700,
-                                cursor: (reanalysing || pending.ai_status === "running") ? "not-allowed" : "pointer",
-                                opacity: (reanalysing || pending.ai_status === "running") ? 0.6 : 1,
+                                cursor: reanalysing ? "wait" : "pointer",
+                                opacity: reanalysing ? 0.6 : 1,
                               }}>
-                              <RefreshCw size={11} className={pending.ai_status === "running" ? "spin" : undefined} />
-                              {pending.ai_status === "running" ? "Analysing…" : "Re-analyse"}
+                              <RefreshCw size={11} className={reanalysing ? "spin" : undefined} />
+                              Re-analyse
                             </button>
+                            {/* One click: the configured premium model, replacing a free run
+                                still going. Usable while that run is in progress. */}
+                            <button
+                              onClick={() => handleReanalyse(pending, true)}
+                              disabled={reanalysing || !aiSettings.premium_openrouter_key_set}
+                              title={aiSettings.premium_openrouter_key_set
+                                ? `Analyse now with ${aiSettings.premium_openrouter_model} (premium key, whole PDF). Any analysis still running is replaced.`
+                                : "Set the premium OpenRouter key under AI settings first."}
+                              style={{
+                                display: "inline-flex", alignItems: "center", gap: "5px",
+                                padding: "5px 12px", borderRadius: "6px",
+                                background: "var(--positive)", border: "none",
+                                color: "var(--on-accent)", fontSize: "11px", fontWeight: 800,
+                                cursor: (reanalysing || !aiSettings.premium_openrouter_key_set) ? "not-allowed" : "pointer",
+                                opacity: (reanalysing || !aiSettings.premium_openrouter_key_set) ? 0.5 : 1,
+                              }}>
+                              <Zap size={11} /> Premium analyse
+                              <span style={{ fontWeight: 500, opacity: 0.85, fontSize: "10px" }}>
+                                · {(aiSettings.premium_openrouter_model || "").split("/").pop()}
+                              </span>
+                            </button>
+                            {pending.ai_status === "running" && (
+                              <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                                <RefreshCw size={10} className="spin" /> analysing…
+                              </span>
+                            )}
                           </div>
 
                           {Array.isArray(pending.like_for_like?.ai_ocr_disagree) && pending.like_for_like!.ai_ocr_disagree!.length > 0 && (

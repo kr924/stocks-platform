@@ -221,9 +221,22 @@ def _send_result_alert(ann, event, pending_id=None, instrument_key: str = "", pe
 
 
 def _run_earnings_ai(symbol: str, title: str, attachment_url: str, description: str,
-                     config_id, pending_id, model_override: str = None, notify: bool = True):
-    """Background worker: run the existing 2-step earnings analysis."""
+                     config_id, pending_id, model_override: str = None, notify: bool = True,
+                     run_id: int = None, supersede: bool = False):
+    """
+    Background worker: run the existing 2-step earnings analysis.
+
+    run_id is taken when the job is queued (trade_ai_analyzer.begin_run). If a
+    newer run for the symbol has been requested since, typically "Premium
+    analyse" pressed while this free run waited or ran, this one stops and
+    leaves the filing's status and log to the newer run.
+    """
     from app.database import SessionLocal
+    from app.services.trade_ai_analyzer import is_current_run
+
+    if not is_current_run(symbol, run_id):
+        logger.info(f"[EARNINGS AI] {symbol}: superseded before it started; skipped")
+        return
 
     db = SessionLocal()
     try:
@@ -247,7 +260,13 @@ def _run_earnings_ai(symbol: str, title: str, attachment_url: str, description: 
             tracking_ref=tracking_ref,
             model_override=model_override,
             notify=notify,
+            run_id=run_id,
+            supersede=supersede,
         )
+
+        if not is_current_run(symbol, run_id):
+            # A newer analysis owns the panel now; do not mark it done.
+            return
 
         if pending_id:
             pending = db.query(PendingResultOrder).filter(PendingResultOrder.id == pending_id).first()
@@ -275,7 +294,7 @@ def _run_earnings_ai(symbol: str, title: str, attachment_url: str, description: 
     except Exception as e:
         logger.error(f"[EARNINGS AI] failed for {symbol}: {e}")
         try:
-            if pending_id:
+            if pending_id and is_current_run(symbol, run_id):
                 pending = db.query(PendingResultOrder).filter(
                     PendingResultOrder.id == pending_id
                 ).first()
@@ -430,6 +449,7 @@ def route_financial_result(db: Session, ann, event, dedup_key: str):
         db.rollback()
 
     # Then run the AI analysis in the background.
+    from app.services.trade_ai_analyzer import begin_run
     _ai_pool.submit(
         _run_earnings_ai,
         symbol,
@@ -438,6 +458,7 @@ def route_financial_result(db: Session, ann, event, dedup_key: str):
         ann.description,
         None,
         pending.id,
+        run_id=begin_run(symbol),
     )
 
 
@@ -587,7 +608,8 @@ def expire_stale_pending(db: Session) -> int:
         return 0
 
 
-def run_ai_for_pending(pending_id: int, config_id=None, model_override: str = None):
+def run_ai_for_pending(pending_id: int, config_id=None, model_override: str = None,
+                       supersede: bool = False):
     """
     Public hook so the API can (re)trigger analysis for a pending result.
 
@@ -611,16 +633,22 @@ def run_ai_for_pending(pending_id: int, config_id=None, model_override: str = No
                 "no earnings analysis to run."
             )
             return False
-        _ai_pool.submit(
-            _run_earnings_ai,
-            pending.symbol,
-            pending.title,
-            pending.attachment_url,
-            pending.description,
-            config_id,
-            pending.id,
-            model_override,
-        )
+        from app.services.trade_ai_analyzer import begin_run
+        # Taking the run number now makes every earlier run for this symbol,
+        # queued or in flight, stale at once.
+        run_id = begin_run(pending.symbol)
+        args = (_run_earnings_ai, pending.symbol, pending.title, pending.attachment_url,
+                pending.description, config_id, pending.id, model_override)
+        if supersede:
+            # Its own thread, not the pool: with every worker busy on free
+            # runs, "Premium analyse" would otherwise wait behind the very
+            # runs it is replacing.
+            import threading as _threading
+            _threading.Thread(target=args[0], args=args[1:],
+                              kwargs={"run_id": run_id, "supersede": True},
+                              daemon=True, name=f"premium-ai-{pending.symbol}").start()
+        else:
+            _ai_pool.submit(*args, run_id=run_id)
         return True
     finally:
         db.close()

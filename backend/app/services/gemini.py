@@ -153,7 +153,8 @@ def _call_timeout(base: float, deadline: float = None) -> float:
 def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url: str = None,
                     pdf_engine: str = None, free_only: bool = False,
                     fallbacks: list = None, report: dict = None,
-                    attachment_bytes: bytes = None, deadline: float = None) -> dict:
+                    attachment_bytes: bytes = None, deadline: float = None,
+                    cancel=None) -> dict:
     """
     Call OpenRouter API with dynamic model discovery and document URL attachment support.
 
@@ -164,6 +165,9 @@ def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url
     the caller chose an engine. A paid model on a free key fails anyway.
 
     report: if given, gets "model" set to the model that actually answered.
+
+    cancel: a callable; when it returns True no further model or retry is
+    tried (a newer analysis of the same filing has replaced this one).
 
     deadline: a time.time() after which no further model is tried and no
     request may run past. A results analysis is worth something only while
@@ -276,10 +280,14 @@ def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url
     errors = []
     import time as _time
     for model_name in models_to_try:
+        if cancel and cancel():
+            raise RuntimeError("superseded by a newer analysis")
         if deadline and _time.time() > deadline - 5:
             errors.append(f"{model_name}: not tried, the analysis ran out of time")
             break
         for use_json_format in [True, False]:
+            if cancel and cancel():
+                raise RuntimeError("superseded by a newer analysis")
             payload = {
                 "model": model_name,
                 "messages": [

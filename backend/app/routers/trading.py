@@ -92,6 +92,9 @@ class ReanalyseRequest(BaseModel):
     # "ai" today. "ocr" is accepted and rejected with a clear message rather
     # than 404ing, so the UI can offer the tab before the engine exists.
     flow: Optional[str] = "ai"
+    # "Premium analyse": the configured premium model, on the premium key,
+    # whatever the switch says, replacing any analysis still running.
+    premium: bool = False
 
 
 class EstimatesRefreshRequest(BaseModel):
@@ -1148,6 +1151,15 @@ def reanalyse_pending_result(pending_id: int, body: ReanalyseRequest,
     # ":free" model on the free key, anything else on the premium key. Say so
     # now rather than queue a run that cannot succeed.
     override = (body.model or "").strip() or None
+    if body.premium and not override:
+        from app.services.intel_config import get_intel_config
+        from app.services.openrouter_models import DEFAULT_PREMIUM_MODEL, is_free_model
+        override = (get_intel_config().auto_trading_ai.get("premium_openrouter_model") or "").strip() \
+            or DEFAULT_PREMIUM_MODEL
+        if is_free_model(override):
+            raise HTTPException(status_code=400,
+                                detail=f"The premium model is set to {override}, a free model. "
+                                       "Pick a paid model under AI settings.")
     if override:
         from app.services.intel_config import get_intel_config
         from app.services.openrouter_models import accounts
@@ -1165,15 +1177,17 @@ def reanalyse_pending_result(pending_id: int, body: ReanalyseRequest,
             )
 
     from app.services.results_router import run_ai_for_pending
+    # A request by hand always wins: any analysis of this filing still queued
+    # or running is made stale and discards its result (results_router).
     started = run_ai_for_pending(pending.id, config_id=pending.config_id,
-                                 model_override=override)
+                                 model_override=override, supersede=True)
     if not started:
         raise HTTPException(status_code=409, detail="Could not queue the analysis")
 
     pending.ai_status = "running"
     pending.ai_requested_at = datetime.utcnow()
     db.commit()
-    return {"status": "success", "model": (body.model or "").strip() or "configured default",
+    return {"status": "success", "model": override or "configured default",
             "pending": _serialize_pending(pending, None, db)}
 
 

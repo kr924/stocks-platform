@@ -584,6 +584,32 @@ def _extract_json_from_llm(text: str) -> dict:
 _in_progress_analyses = set()
 _in_progress_lock = threading.Lock()
 
+# Which analysis run is current, per symbol. Every run takes a number when it
+# is queued; a newer one (above all "Premium analyse" pressed while a free run
+# is still going) makes the older ones stale. A stale run tries no further
+# model and writes nothing: its log, Telegram verdict and panel status would
+# otherwise land on top of the newer analysis. Python cannot kill a thread or
+# abort a request in flight, so at most one in-flight HTTP call is wasted.
+import itertools as _itertools
+_run_seq = _itertools.count(1)
+_run_lock = threading.Lock()
+_current_run: dict = {}
+
+
+def begin_run(symbol: str) -> int:
+    """A new current run for this symbol; any earlier run becomes stale."""
+    with _run_lock:
+        rid = next(_run_seq)
+        _current_run[(symbol or "").upper().strip()] = rid
+        return rid
+
+
+def is_current_run(symbol: str, run_id: Optional[int]) -> bool:
+    if run_id is None:
+        return True
+    with _run_lock:
+        return _current_run.get((symbol or "").upper().strip()) == run_id
+
 
 def check_against_screener(symbol: str, parsed_json: dict) -> str:
     """
@@ -750,6 +776,8 @@ def analyze_earnings_disclosure_2step(
     tracking_ref: Optional[str] = None,
     model_override: Optional[str] = None,
     notify: bool = True,
+    run_id: Optional[int] = None,
+    supersede: bool = False,
 ) -> Optional[dict]:
     """
     Two-Step AI Analysis Pipeline:
@@ -764,6 +792,18 @@ def analyze_earnings_disclosure_2step(
 
     # --- Concurrency & Deduplication Lock: Prevent duplicate simultaneous calls (within 15 seconds) ---
     dedup_key = f"{symbol.upper().strip()}:{title.strip()}"
+    if run_id is None:
+        run_id = begin_run(symbol)
+    if not is_current_run(symbol, run_id):
+        logger.info(f"⏭️ [AUTO AI SKIPPED]: #{symbol} — a newer analysis was requested before this one started.")
+        return {}
+    if supersede:
+        # "Premium analyse": runs alongside whatever is in progress, which has
+        # just become stale and will discard its own result.
+        return _do_analyze_earnings_disclosure_2step(
+            symbol, title, attachment_url, pdf_text, config_id, tracking_ref,
+            model_override, notify, run_id,
+        )
     with _in_progress_lock:
         if dedup_key in _in_progress_analyses:
             logger.info(f"⏭️ [AUTO AI SKIPPED]: Simultaneous analysis currently running for #{symbol}. Skipping duplicate call.")
@@ -794,7 +834,7 @@ def analyze_earnings_disclosure_2step(
     try:
         return _do_analyze_earnings_disclosure_2step(
             symbol, title, attachment_url, pdf_text, config_id, tracking_ref,
-            model_override, notify,
+            model_override, notify, run_id,
         )
     finally:
         with _in_progress_lock:
@@ -810,6 +850,7 @@ def _do_analyze_earnings_disclosure_2step(
     tracking_ref: Optional[str] = None,
     model_override: Optional[str] = None,
     notify: bool = True,
+    run_id: Optional[int] = None,
 ) -> Optional[dict]:
     import base64
     import requests
@@ -820,6 +861,9 @@ def _do_analyze_earnings_disclosure_2step(
     ai_requested_at = datetime.utcnow()
     import time as _time
     ai_deadline = _time.time() + AI_BUDGET_SECONDS
+
+    def _stale() -> bool:
+        return not is_current_run(symbol, run_id)
 
     cfg = get_intel_config()
     auto_ai_cfg = cfg.auto_trading_ai
@@ -1174,7 +1218,7 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
                                          attachment_url=attachment_url, attachment_bytes=raw_pdf,
                                          pdf_engine="native",
                                          free_only=False, fallbacks=[model], report=report,
-                                         deadline=ai_deadline)
+                                         deadline=ai_deadline, cancel=_stale)
                 raw = json.dumps(or_res["analyses"][0]) if (or_res and or_res.get("analyses")) else (
                     json.dumps(or_res) if or_res else None)
                 if raw:
@@ -1207,7 +1251,7 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
                                      attachment_url=link,
                                      attachment_bytes=pdf,
                                      free_only=(tier == "free"), fallbacks=fallbacks,
-                                     report=report, deadline=ai_deadline)
+                                     report=report, deadline=ai_deadline, cancel=_stale)
             raw = None
             if or_res and "analyses" in or_res and or_res["analyses"]:
                 raw = json.dumps(or_res["analyses"][0])
@@ -1231,6 +1275,8 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
     # Premium OFF: the free account only; the paid key is never touched.
     # gemcall is skipped for automatic analysis (plan["skip_gemcall"]).
     for attempt in plan["before_gemcall"]:
+        if _stale():
+            break
         result_raw, provider = _openrouter(attempt)
         if result_raw:
             used_flow, used_provider = f"openrouter_{attempt['tier']}", provider
@@ -1391,6 +1437,10 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
     pat_yoy = _cell_summary(metrics, "pat")
     pbt = "NA"
     growth_projection = future_growth_outlook
+
+    if _stale():
+        logger.info(f"⏭️ [AUTO AI]: #{symbol} — superseded by a newer analysis; this result is discarded.")
+        return {}
 
     # --- Save to TradeAILog ---
     try:
