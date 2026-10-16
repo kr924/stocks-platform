@@ -604,6 +604,45 @@ def begin_run(symbol: str) -> int:
         return rid
 
 
+# What each current run is doing, for the panel: "reading the full PDF on
+# google/gemini-4-argon, 40 s". Kept per symbol for the current run only;
+# a run that is no longer current cannot overwrite it.
+_progress: dict = {}
+
+
+def set_progress(symbol: str, run_id: Optional[int], **fields):
+    import time as _t
+    key = (symbol or "").upper().strip()
+    with _run_lock:
+        if run_id is not None and _current_run.get(key) != run_id:
+            return
+        entry = _progress.get(key)
+        if not entry or entry.get("run_id") != run_id:
+            entry = {"run_id": run_id, "started": _t.time()}
+            _progress[key] = entry
+        entry.update(fields)
+
+
+def clear_progress(symbol: str, run_id: Optional[int]):
+    key = (symbol or "").upper().strip()
+    with _run_lock:
+        entry = _progress.get(key)
+        if entry and entry.get("run_id") == run_id:
+            _progress.pop(key, None)
+
+
+def get_progress(symbol: str) -> Optional[dict]:
+    """The live step, model and elapsed seconds of this symbol's run, or None."""
+    import time as _t
+    with _run_lock:
+        entry = _progress.get((symbol or "").upper().strip())
+        if not entry:
+            return None
+        out = {k: v for k, v in entry.items() if k not in ("run_id", "started")}
+        out["elapsed_s"] = int(_t.time() - entry.get("started", _t.time()))
+        return out
+
+
 def is_current_run(symbol: str, run_id: Optional[int]) -> bool:
     if run_id is None:
         return True
@@ -865,6 +904,9 @@ def _do_analyze_earnings_disclosure_2step(
     def _stale() -> bool:
         return not is_current_run(symbol, run_id)
 
+    def _step(text, **kw):
+        set_progress(symbol, run_id, step=text, **kw)
+
     cfg = get_intel_config()
     auto_ai_cfg = cfg.auto_trading_ai
     
@@ -896,6 +938,7 @@ def _do_analyze_earnings_disclosure_2step(
     doc_prep = {"mode": "none"}
     raw_pdf = None
     if attachment_url and (plan["before_gemcall"] or plan["after_gemcall"]):
+        _step("downloading the filing")
         raw_pdf = fetch_filing_pdf(attachment_url)
         if raw_pdf is None:
             failures.append(f"the filing PDF could not be downloaded ({last_fetch_reason()})")
@@ -1211,6 +1254,7 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
         label = "Premium" if tier == "premium" else "Free"
         if _full_pdf_ok(tier, model):
             report = {}
+            _step("reading the full PDF", tier=tier, model=model)
             try:
                 logger.info(f"🔬 [AUTO AI OPENROUTER PREMIUM]: {model} reading the full filing "
                             f"({len(raw_pdf) // 1024} KB) for #{symbol}")
@@ -1218,7 +1262,8 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
                                          attachment_url=attachment_url, attachment_bytes=raw_pdf,
                                          pdf_engine="native",
                                          free_only=False, fallbacks=[model], report=report,
-                                         deadline=ai_deadline, cancel=_stale)
+                                         deadline=ai_deadline, cancel=_stale,
+                                         progress=lambda m: _step("reading the full PDF", tier=tier, model=m))
                 raw = json.dumps(or_res["analyses"][0]) if (or_res and or_res.get("analyses")) else (
                     json.dumps(or_res) if or_res else None)
                 if raw:
@@ -1251,7 +1296,10 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
                                      attachment_url=link,
                                      attachment_bytes=pdf,
                                      free_only=(tier == "free"), fallbacks=fallbacks,
-                                     report=report, deadline=ai_deadline, cancel=_stale)
+                                     report=report, deadline=ai_deadline, cancel=_stale,
+                                     progress=lambda m: _step(
+                                         "reading the selected pages" if doc_prep["mode"] == "text"
+                                         else "reading the filing", tier=tier, model=m))
             raw = None
             if or_res and "analyses" in or_res and or_res["analyses"]:
                 raw = json.dumps(or_res["analyses"][0])
@@ -1441,6 +1489,7 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
     if _stale():
         logger.info(f"⏭️ [AUTO AI]: #{symbol} — superseded by a newer analysis; this result is discarded.")
         return {}
+    _step("saving the analysis")
 
     # --- Save to TradeAILog ---
     try:

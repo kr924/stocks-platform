@@ -142,6 +142,32 @@ def call_openai(prompt: str, api_key: str) -> dict:
 _NO_RETRY_CODES = {"401", "402", "403", "429"}
 
 
+def _post_with_wall_clock(url: str, payload: dict, headers: dict, limit: float):
+    """
+    POST with a limit on the whole request, not on the gap between bytes.
+
+    requests' timeout is a read timeout: it restarts every time a byte
+    arrives. OpenRouter keeps a slow request alive by sending whitespace while
+    the model works, so a "90 s" timeout never fired and an analysis could
+    run for ten minutes (INDORAMA, 16 Oct 2026). The body is read in chunks
+    here and the request abandoned once `limit` seconds have passed in all.
+    """
+    start = time.time()
+    with requests.post(url, json=payload, headers=headers, timeout=(10, min(limit, 60)), stream=True) as r:
+        chunks = []
+        # One byte at a time: any larger read blocks until that many bytes
+        # have come (and chunk_size=None reads to the end on a response with
+        # no length), keep-alive spaces and all. Answers are a few KB.
+        for chunk in r.iter_content(chunk_size=1):
+            if chunk:
+                chunks.append(chunk)
+            if time.time() - start > limit:
+                raise requests.exceptions.Timeout(f"no complete answer within {limit:.0f}s")
+        r._content = b"".join(chunks)
+        r._content_consumed = True
+    return r
+
+
 def _call_timeout(base: float, deadline: float = None) -> float:
     """The per-request timeout, never running past the analysis deadline."""
     if not deadline:
@@ -154,7 +180,7 @@ def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url
                     pdf_engine: str = None, free_only: bool = False,
                     fallbacks: list = None, report: dict = None,
                     attachment_bytes: bytes = None, deadline: float = None,
-                    cancel=None) -> dict:
+                    cancel=None, progress=None) -> dict:
     """
     Call OpenRouter API with dynamic model discovery and document URL attachment support.
 
@@ -165,6 +191,9 @@ def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url
     the caller chose an engine. A paid model on a free key fails anyway.
 
     report: if given, gets "model" set to the model that actually answered.
+
+    progress: a callable told each model name as its request goes out, so
+    the panel can say what is running.
 
     cancel: a callable; when it returns True no further model or retry is
     tried (a newer analysis of the same filing has replaced this one).
@@ -317,15 +346,15 @@ def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url
                 ]
                 
             try:
-                res = requests.post(
-                    "https://openrouter.ai/api/v1/chat/completions",
-                    json=payload, headers=headers,
-                    # Fetching, parsing and reading a filing does not fit in 25s.
-                    # A filing's pages sent as text make a long prompt; free
-                    # models take well over 30s to answer one.
-                    # 90 s, not 180: a model that has not answered a filing in
-                    # 90 s rarely does, and the next model is the better bet.
-                    timeout=_call_timeout(90 if (has_attachment or len(prompt) > 8000) else 30, deadline),
+                if progress is not None:
+                    progress(model_name)
+                res = _post_with_wall_clock(
+                    "https://openrouter.ai/api/v1/chat/completions", payload, headers,
+                    # 90 s for a filing, 30 s otherwise, measured on the whole
+                    # request (see _post_with_wall_clock), and never past the
+                    # analysis deadline. A model that has not answered a filing
+                    # in 90 s rarely does; the next model is the better bet.
+                    _call_timeout(90 if (has_attachment or len(prompt) > 8000) else 30, deadline),
                 )
                 if res.ok:
                     # HTTP 200 is not success on OpenRouter: an upstream

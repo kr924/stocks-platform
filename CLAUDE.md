@@ -981,6 +981,23 @@ model, and the whole AI step has a 240 s budget (`AI_BUDGET_SECONDS`, the
 `deadline` argument of `call_openrouter`) after which it reports why it has
 no reading.
 
+**requests' timeout is not a time limit.** It is a read timeout, restarted by
+every byte, and OpenRouter keeps a slow request alive by sending spaces while
+the model works. So the 90 s timeout above never fired, and INDORAMA showed
+"AI running" for 10+ minutes. `gemini._post_with_wall_clock` reads the body a
+byte at a time and abandons the request once the limit has passed in all;
+tested against a server dripping a byte a second (3 s limit → 3.0 s).
+Larger reads block until that many bytes arrive, so the size matters.
+
+**A restart orphans a running analysis.** A deploy mid-run kills the worker
+thread and nothing set the status again. Every live run registers progress
+when it starts (`trade_ai_analyzer.set_progress`); the listing marks a row
+still "running" with no live progress after 90 s as failed
+(`routers/trading._settle_orphaned_runs`), so Premium analyse is offered
+instead of a spinner. The panel shows each run's step, model, tier and
+seconds so far (`ai_progress`: "AI reading the full PDF · gemini-4-argon
+(premium) · 42s").
+
 Poll interval stays at 2s. Halving it buys ~1.4% of total latency while doubling
 the request rate against NSE, which blocks aggressive pollers.
 

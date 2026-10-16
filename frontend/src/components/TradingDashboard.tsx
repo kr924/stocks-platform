@@ -251,8 +251,22 @@ interface TradePosition {
   can_sell: boolean;
 }
 
+/** What a running analysis is doing right now (server-side, per symbol). */
+interface AiProgress { step?: string; model?: string; tier?: string; elapsed_s?: number }
+
+/** "reading the full PDF · gemini-4-argon (premium) · 42s" */
+function aiProgressText(pr?: AiProgress | null): string {
+  if (!pr) return "AI running…";
+  const model = (pr.model || "").split("/").pop() || "";
+  const parts = [pr.step || "running",
+                 model ? `${model}${pr.tier ? ` (${pr.tier})` : ""}` : "",
+                 typeof pr.elapsed_s === "number" ? `${pr.elapsed_s}s` : ""].filter(Boolean);
+  return `AI ${parts.join(" · ")}`;
+}
+
 interface PendingResult {
   id: number;
+  ai_progress?: AiProgress | null;
   position: TradePosition | null;
   symbol: string;
   company_name: string | null;
@@ -3464,8 +3478,9 @@ export function TradingDashboard() {
               const aiSummary = (/^high/i.test(risk) ? "⚠ High reaction risk — " : "")
                 + (aiDone && p.ai_analysis!.ai_summary && !/^AI analysis pending/i.test(p.ai_analysis!.ai_summary)
                   ? p.ai_analysis!.ai_summary : "");
-              const aiState = aiDone ? "" : p.ai_status === "failed" ? "AI failed"
-                : p.ai_status === "deferred" ? "not analysed — outside 09:00–15:30" : "AI running…";
+              const aiState = aiDone ? "" : p.ai_status === "failed" ? "AI stopped — use Premium analyse"
+                : p.ai_status === "deferred" ? "not analysed — outside 09:00–15:30"
+                : aiProgressText(p.ai_progress);
               const isRes = categoryOf(p) === "results";
               const sel = selectedPending?.id === p.id;
               return (
@@ -4179,7 +4194,7 @@ export function TradingDashboard() {
                             </button>
                             {pending.ai_status === "running" && (
                               <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "inline-flex", alignItems: "center", gap: "4px" }}>
-                                <RefreshCw size={10} className="spin" /> analysing…
+                                <RefreshCw size={10} className="spin" /> {aiProgressText(pending.ai_progress)}
                               </span>
                             )}
                           </div>

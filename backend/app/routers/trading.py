@@ -823,6 +823,8 @@ def _serialize_pending(p: PendingResultOrder, ai_log: Optional[TradeAILog] = Non
         "event_time": p.event_time.isoformat() if p.event_time else None,
         "status": p.status,
         "ai_status": p.ai_status,
+        # What a running analysis is doing: step, model, tier, seconds so far.
+        "ai_progress": _ai_progress(p),
         "ai_log_id": p.ai_log_id,
         "config_id": p.config_id,
         "created_at": p.created_at.isoformat() if p.created_at else None,
@@ -881,6 +883,48 @@ def _attach_screener(db: Session, pendings: list, serialized: list) -> int:
     return missing
 
 
+def _ai_progress(p) -> Optional[dict]:
+    if p.ai_status != "running":
+        return None
+    try:
+        from app.services.trade_ai_analyzer import get_progress
+        return get_progress(p.symbol)
+    except Exception:
+        return None
+
+
+def _settle_orphaned_runs(db, pendings) -> None:
+    """
+    A row left "running" with no analysis alive in this process.
+
+    A deploy or restart mid-analysis kills the worker thread, and nothing
+    ever set the status again: INDORAMA showed "AI running" for good after a
+    restart on 16 Oct 2026. Every live run registers progress the moment it
+    starts (results_router._run_earnings_ai), so "running" with no progress
+    after a minute's grace means the run is gone. The row is marked failed so
+    Re-analyse / Premium analyse are offered instead of a spinner.
+    """
+    from datetime import timedelta
+    try:
+        from app.services.trade_ai_analyzer import get_progress
+    except Exception:
+        return
+    cutoff = datetime.utcnow() - timedelta(seconds=90)
+    changed = False
+    for p in pendings:
+        if (p.ai_status == "running" and p.ai_requested_at and p.ai_requested_at < cutoff
+                and get_progress(p.symbol) is None):
+            p.ai_status = "failed"
+            p.ai_completed_at = datetime.utcnow()
+            changed = True
+            logger.info(f"[EARNINGS AI] {p.symbol}: run no longer alive (restart?); marked failed")
+    if changed:
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+
+
 @router.get("/pending-results")
 def list_pending_results(
     status: Optional[str] = Query("pending"),
@@ -931,6 +975,7 @@ def list_pending_results(
         ))
 
     pendings = q.order_by(PendingResultOrder.created_at.desc()).all()
+    _settle_orphaned_runs(db, pendings)
 
     log_ids = [p.ai_log_id for p in pendings if p.ai_log_id]
     logs = {}

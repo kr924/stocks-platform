@@ -232,12 +232,13 @@ def _run_earnings_ai(symbol: str, title: str, attachment_url: str, description: 
     leaves the filing's status and log to the newer run.
     """
     from app.database import SessionLocal
-    from app.services.trade_ai_analyzer import is_current_run
+    from app.services.trade_ai_analyzer import is_current_run, set_progress, clear_progress
 
     if not is_current_run(symbol, run_id):
         logger.info(f"[EARNINGS AI] {symbol}: superseded before it started; skipped")
         return
 
+    set_progress(symbol, run_id, step="starting", model=model_override or "")
     db = SessionLocal()
     try:
         pending = None
@@ -307,6 +308,7 @@ def _run_earnings_ai(symbol: str, title: str, attachment_url: str, description: 
         except Exception:
             db.rollback()
     finally:
+        clear_progress(symbol, run_id)
         db.close()
 
 
