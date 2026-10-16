@@ -42,6 +42,7 @@ logger = logging.getLogger("app.main")
 
 from app.config import PROVIDER, DEFAULT_NIFTY_50
 from app.database import init_db, get_db, Watchlist, NewsCache, AICache, SessionStore, HistoricalPriceCache
+from app.database import SessionLocal, SystemSetting
 from app.services.feed_factory import get_feed
 from app.services.base_feed import BaseMarketFeed
 from app.services.gemini import generate_stock_commentary, analyze_stock_with_gemini, chat_with_llm
@@ -229,18 +230,15 @@ async def _intelligence_scheduler():
 
                 # 01:00 — drop result prompts older than 72h. Overnight, so a
                 # deletion never races the panel someone is deciding on.
-                if now_ist.hour >= 1 and last_run.get("pending_purge_date") != today_str:
-                    last_run["pending_purge_date"] = today_str
+                if now_ist.hour >= 1 and _daily_due(last_run, "pending_purge_date", today_str):
                     await asyncio.to_thread(_run_pending_purge)
 
                 # 02:00 — retire target configs whose date has passed
-                if now_ist.hour >= 2 and last_run.get("config_expiry_date") != today_str:
-                    last_run["config_expiry_date"] = today_str
+                if now_ist.hour >= 2 and _daily_due(last_run, "config_expiry_date", today_str):
                     await asyncio.to_thread(_run_config_expiry)
 
                 # 06:00 — sync upcoming earnings into the watchlist
-                if now_ist.hour >= 6 and last_run.get("earnings_sync_date") != today_str:
-                    last_run["earnings_sync_date"] = today_str
+                if now_ist.hour >= 6 and _daily_due(last_run, "earnings_sync_date", today_str):
                     await asyncio.to_thread(_run_earnings_sync)
 
                 # 15:25 — premium OpenRouter off for the day (once; a manual
@@ -256,13 +254,11 @@ async def _intelligence_scheduler():
                 # web search. Once a day; a second day's run re-tries only what
                 # came back empty. See services/consensus.py.
                 if (now_ist.weekday() < 5 and (now_ist.hour, now_ist.minute) >= (8, 40)
-                        and last_run.get("estimates_date") != today_str):
-                    last_run["estimates_date"] = today_str
+                        and _daily_due(last_run, "estimates_date", today_str)):
                     asyncio.create_task(asyncio.to_thread(_run_estimates_prefetch))
 
                 # 08:00 — publish the digest page and send the single alert
-                if now_ist.hour >= 8 and last_run.get("morning_digest_date") != today_str:
-                    last_run["morning_digest_date"] = today_str
+                if now_ist.hour >= 8 and _daily_due(last_run, "morning_digest_date", today_str):
                     asyncio.create_task(asyncio.to_thread(_run_morning_digest))
 
                 # Sunday 17:00 — rebuild the NSE/BSE symbol registry.
@@ -316,6 +312,51 @@ import functools
 
 _task_locks: Dict[str, threading.Lock] = {}
 _task_locks_guard = threading.Lock()
+
+
+def _daily_due(last_run: dict, name: str, today: str) -> bool:
+    """
+    True once per IST day for a daily job, restarts included; marks it done.
+
+    The daily guards used to live only in `last_run`, in this process's
+    memory. Every restart (each deploy) therefore re-ran every job whose hour
+    had passed: the 08:40 estimates lookup ran again at 15:00 on 16 Oct and
+    sent a burst of free-model calls (Gemma 4 31B / 26B, all 429), and the
+    08:00 digest would go out again mid-session with whatever had not yet
+    been digested. The date is now kept in system_settings as well, the way
+    the weekly registry rebuild already was.
+    """
+    if last_run.get(name) == today:
+        return False
+    key = f"daily_job:{name}"
+    db = None
+    try:
+        db = SessionLocal()
+        row = db.query(SystemSetting).filter(SystemSetting.key == key).first()
+        if row and row.value == today:
+            last_run[name] = today
+            return False
+        if row:
+            row.value = today
+            db.commit()
+        else:
+            # First sight of this guard (the deploy that introduces it): the
+            # job has already run today in the process this one replaced, so
+            # record today and do not run it a second time.
+            db.add(SystemSetting(key=key, value=today))
+            db.commit()
+            last_run[name] = today
+            logger.info(f"[SCHEDULER] {name}: guard initialised for {today}; not re-run")
+            return False
+    except Exception as e:
+        logger.warning(f"[SCHEDULER] could not persist {name}: {e}")
+        if db is not None:
+            db.rollback()
+    finally:
+        if db is not None:
+            db.close()
+    last_run[name] = today
+    return True
 
 
 def _single_flight(name: str):

@@ -46,6 +46,7 @@ import requests
 logger = logging.getLogger("app.consensus")
 
 DAILY_CAP = 80
+FAILED_RETRY_HOURS = 6
 METRICS = ("revenue_cr", "ebitda_cr", "ebitda_margin_pct", "pat_cr")
 
 FINANCE_DOMAINS = [
@@ -491,7 +492,11 @@ def get_or_fetch(db, symbol: str, company_name: str, quarter: str,
     # the analysis, not by a re-analyse, not by the next 08:40 run. Only a
     # call that failed outright (no answer, so nothing was learned) may be
     # tried again. "Search again" on the panel passes force=True.
-    already = bool(data) and not data.get("error")
+    # A failed call is retried, but not before FAILED_RETRY_HOURS: a free tier
+    # answering 429 would otherwise be asked again by every analysis.
+    recent_fail = bool(data) and data.get("error") and row is not None and row.fetched_at \
+        and datetime.utcnow() - row.fetched_at < timedelta(hours=FAILED_RETRY_HOURS)
+    already = bool(data) and (not data.get("error") or recent_fail)
     if (already and not force) or not allow_fetch:
         return data
 

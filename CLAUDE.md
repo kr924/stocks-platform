@@ -206,6 +206,14 @@ briefly and was removed for contradicting the cutoff.
 
 ### Daily jobs (IST, guarded by last-run date)
 
+The guard is kept in `system_settings` (`daily_job:<name>`, `main._daily_due`),
+not only in memory. Until 16 Oct 2026 it lived in the scheduler's `last_run`
+dict, so every restart (each deploy) re-ran every daily job whose hour had
+passed: the 08:40 estimates lookup ran again at 15:00 and sent a burst of
+free-model calls, all 429, and the 08:00 digest would have gone out again
+mid-session with whatever was not yet digested. The deploy that introduced
+the guard records "already run today" on first sight rather than re-running.
+
 - **01:00** purge result prompts older than **30 days** (rows that led to an
   order are kept — `config_id` is the only trail from a filing to a position).
   It was 72h while the Results Digest was the record; the panel is the record
@@ -929,7 +937,9 @@ When it runs:
   the premium key (tokens only, ~$0.001, for own search).
 **Searched once, kept**: a search that completed, brokers found or not, is
 never repeated by the analysis, a re-analyse or the next 08:40 run. Only a
-call that failed outright is retried. A forced search that fails or finds
+call that failed outright is retried, and not within 6 h
+(`FAILED_RETRY_HOURS`), so a rate-limited free tier is not asked again by
+every analysis. A forced search that fails or finds
 nothing keeps the brokers found before. `DAILY_CAP` (80) bounds paid searches.
 The toggle is `broker_estimates_enabled` in AI settings (on by default).
 
