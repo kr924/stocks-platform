@@ -282,6 +282,8 @@ def _run_earnings_ai(symbol: str, title: str, attachment_url: str, description: 
                 pending.ai_completed_at = datetime.utcnow()
                 pending.ai_log_id = latest.id if latest else None
                 db.commit()
+                # An order placed while this ran: link the reading to it.
+                link_analysis_to_position(db, pending)
 
                 sse_manager.broadcast("result_ai_done", {
                     "pending_id": pending.id,
@@ -606,6 +608,32 @@ def expire_stale_pending(db: Session) -> int:
         db.rollback()
         logger.error(f"Failed to expire stale pending results: {e}")
         return 0
+
+
+def link_analysis_to_position(db, pending) -> bool:
+    """
+    Attach the filing's existing analysis to the position bought from it.
+
+    Placing an order used to re-run the whole earnings analysis just to get a
+    log carrying the new config_id: a second premium call for a reading that
+    already existed, and the panel flipping back to "running" seconds after a
+    BUY (JAYNECOIND, 16 Oct 2026). The log is the same filing's analysis; it
+    only needs the link. config_id on a log is the trail from a filing to a
+    position, and retention keeps any log that has one.
+    """
+    if not pending or not getattr(pending, "config_id", None) or not getattr(pending, "ai_log_id", None):
+        return False
+    try:
+        from app.database import TradeAILog
+        log = db.query(TradeAILog).filter(TradeAILog.id == pending.ai_log_id).first()
+        if log and not log.config_id:
+            log.config_id = pending.config_id
+            db.commit()
+            return True
+    except Exception as e:
+        db.rollback()
+        logger.warning(f"[EARNINGS AI] could not link analysis to position for {pending.symbol}: {e}")
+    return False
 
 
 def run_ai_for_pending(pending_id: int, config_id=None, model_override: str = None,

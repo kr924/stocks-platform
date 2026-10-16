@@ -134,10 +134,12 @@ def _place_buy(pending_id: int, qty: int, order_type: str, limit_price=None) -> 
             result.price, result.message or "",
         )
         if result.success:
+            # Link the existing analysis; never re-run it on an order.
             try:
-                run_ai_for_pending(pending.id, config_id=config.id)
+                from app.services.results_router import link_analysis_to_position
+                link_analysis_to_position(db, pending)
             except Exception as e:
-                logger.error(f"Could not queue earnings AI for #{pending.id}: {e}")
+                logger.error(f"Could not link the analysis to #{pending.id}: {e}")
         return result.success, text
     except Exception as e:
         db.rollback()

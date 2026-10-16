@@ -820,6 +820,14 @@ longer in the automatic chain (`skip_gemcall`). Its code path remains in
   analyse" (`premium: true` on `/reanalyse`) runs the configured premium
   model on the premium key whatever the switch says. Re-analyse is no longer
   disabled while a run is going.
+- **An order never re-runs the analysis** (16 Oct 2026). Placing a buy from
+  the panel or Telegram used to queue the whole analysis again just to get a
+  log carrying the new `config_id`: a second premium call, and JAYNECOIND's
+  panel flipped back to "running" seconds after its BUY. Now
+  `results_router.link_analysis_to_position` sets `config_id` on the filing's
+  existing log; a run still going links itself when it finishes. Each filing
+  is analysed once automatically, and again only by Re-analyse / Premium
+  analyse.
 - **NA has two meanings on the panel**, and the header says which: "figures
   not extractable" (with any consistency issues) when the read failed, "no
   clear call — mixed quarter" when the figures were read and the model

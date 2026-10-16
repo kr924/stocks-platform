@@ -1080,12 +1080,15 @@ def place_pending_result_order(
     db.commit()
     db.refresh(config)
 
-    # Re-run the earnings analysis now that a position exists to attach it to.
+    # Attach the filing's existing analysis to the new position. It is not
+    # re-run: the reading is the same filing's, and a re-run spent a second
+    # premium call and flipped the panel back to "running" after the BUY. An
+    # analysis still running links itself when it finishes.
     try:
-        from app.services.results_router import run_ai_for_pending
-        run_ai_for_pending(pending.id, config_id=config.id)
+        from app.services.results_router import link_analysis_to_position
+        link_analysis_to_position(db, pending)
     except Exception as e:
-        logger.error(f"Failed to queue earnings AI for pending #{pending.id}: {e}")
+        logger.error(f"Could not link the analysis to pending #{pending.id}: {e}")
 
     return {
         "success": result.success,
