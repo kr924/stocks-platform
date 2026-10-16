@@ -1536,7 +1536,10 @@ export function TradingDashboard() {
 
   useEffect(() => {
     alertsOnRef.current = alertsOn;
-    localStorage.setItem("resultAlertsOn", alertsOn ? "1" : "0");
+    try { localStorage.setItem("resultAlertsOn", alertsOn ? "1" : "0"); } catch { /* storage off */ }
+    // The alerts themselves are raised by ResultAlerts in App, which stays
+    // mounted on every view; this switch only tells it.
+    window.dispatchEvent(new CustomEvent("resultalerts", { detail: alertsOn }));
   }, [alertsOn]);
 
   const enableAlerts = async () => {
@@ -1578,39 +1581,6 @@ export function TradingDashboard() {
       });
     } catch (err) {
       console.error("Alert tone failed:", err);
-    }
-  };
-
-  /**
-   * Fire for filings that appeared since the last poll.
-   *
-   * The first poll after a reload only seeds the set — otherwise opening the
-   * page on a day with 300 filings would fire 300 notifications.
-   */
-  const notifyNewResults = (rows: PendingResult[]) => {
-    if (seenResultIdsRef.current === null) {
-      seenResultIdsRef.current = new Set(rows.map(r => r.id));
-      return;
-    }
-    const seen = seenResultIdsRef.current;
-    const fresh = rows.filter(r => !seen.has(r.id));
-    rows.forEach(r => seen.add(r.id));
-    if (!fresh.length || !alertsOnRef.current) return;
-
-    playAlertTone();
-    // One notification for a batch: a results burst can carry dozens at once,
-    // and dozens of toasts bury the thing they are announcing.
-    if (fresh.length === 1) {
-      const r = fresh[0];
-      new Notification(`${r.symbol} — financial result`, {
-        body: (r.company_name ? `${r.company_name}\n` : "") + (r.title || "").slice(0, 120),
-        tag: `result-${r.id}`,
-      });
-    } else {
-      new Notification(`${fresh.length} financial results just landed`, {
-        body: fresh.slice(0, 8).map(r => r.symbol).join(", ") + (fresh.length > 8 ? "…" : ""),
-        tag: "result-batch",
-      });
     }
   };
 
@@ -2051,9 +2021,8 @@ export function TradingDashboard() {
         const rows: PendingResult[] = data.pending || [];
         // Only today's view announces arrivals; browsing an earlier date is
         // reading history, not watching for something to act on.
-        if (resultsDateRef.current === istDateStr()) {
-          notifyNewResults(rows.filter(r => r.status === "pending"));
-        }
+        // Arrival alerts are raised by ResultAlerts (App level, every view),
+        // not from this poll, which stops whenever this tab is not open.
         setPendingResults(rows);
         // Screener figures arrive behind the request, so the panel reports how
         // many are still outstanding rather than rendering gaps.

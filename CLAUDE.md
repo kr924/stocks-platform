@@ -330,6 +330,18 @@ suggestion cards, nothing to expand. It replaced a 560 px scroll box of cards,
 each with its own collapsible analysis — a scroll inside a scroll, and a click
 per company to see the numbers. Stacks under 900 px.
 
+**Arrival alerts live in App, not the dashboard** (`components/ResultAlerts.tsx`).
+They used to fire from TradingDashboard's 3-second poll, and App unmounts the
+dashboard on Stocks Tracker and AI Intelligence, so with ALERTS ON a filing
+arriving while another view was open raised nothing (16 Oct 2026). ResultAlerts
+is mounted once, listens to the SSE stream's `pending_result_order` (sent the
+moment an order screen is created), falls back to polling today's pending list
+every 10 s while the stream is down, skips deferred filings, batches a burst
+for 1.5 s into one toast with a **unique tag** (the old fixed "result-batch"
+tag replaced the previous toast silently), re-arms the tone on the first click
+after a reload, and counts unseen arrivals in the tab title. The ALERTS ON
+switch stays in the header and signals it with a `resultalerts` window event.
+
 **Pause, not dismiss.** Pausing stops a row being quoted and leaves it in place
 with its last price; its symbol leaves the quote batch, which is where the
 metered Upstox allowance is spent. Dismiss removed the card outright, the wrong

@@ -22,6 +22,7 @@ import { getTheme, setTheme, type Theme } from "./theme";
 import { Chart } from "./components/Chart";
 import { IntelligenceDashboard } from "./components/IntelligenceDashboard";
 import { TradingDashboard } from "./components/TradingDashboard";
+import { ResultAlerts } from "./components/ResultAlerts";
 
 /**
  * Is it inside NSE trading hours right now? Mon-Fri, 09:00 to 15:35 IST.
@@ -1537,6 +1538,9 @@ export default function App() {
           <button onClick={() => setToast(null)} style={{ background: "transparent", color: "var(--text-primary)", fontWeight: "bold", fontSize: "14px", marginLeft: "10px", border: "none", cursor: "pointer" }}>Ãƒâ€”</button>
         </div>
       )}
+
+      {/* Filing alerts work on every view, not only Auto Trading. */}
+      <ResultAlerts />
 
       {/* Main Content Area */}
       {activeView === "trading" ? (
