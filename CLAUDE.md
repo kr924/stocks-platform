@@ -764,6 +764,16 @@ longer in the automatic chain (`skip_gemcall`). Its code path remains in
   name: INDIANB's pick was `google/lyria-3-clip-preview`, a music model.
   The catalogue is `GET openrouter.ai/api/v1/models` (no key needed), cached 6h,
   served at `/api/trading/openrouter/models?tier=free|premium`.
+- **Premium models read the whole filing as a PDF** (owner's call, 16 Oct
+  2026), when it is at most 15 MB (`FULL_PDF_MAX_BYTES`; base64 makes it
+  ~20 MB, inside Gemini's inline limit) and the model reads PDFs itself, with
+  `pdf_engine="native"`. Gemini bills a PDF page at ~258 tokens, so a whole
+  30-page filing costs less than the selected pages as text. The unit line
+  worked out from the text layer goes in the prompt. A larger bundle, a
+  premium model that cannot read PDFs (it would get OpenRouter's paid OCR of
+  every page), or a full-PDF call that fails all fall back to the selected
+  pages below; `provider` ends ", full PDF" when the whole file was read.
+  **The free key keeps the selected pages.**
 - **The AI reads the filing's pages as text** (`services/filing_text.py`). We
   download the PDF ourselves (`fetch_filing_pdf`). That tries a plain browser
   GET (the extractor's method), then the NSE session, then the

@@ -637,6 +637,11 @@ def check_against_screener(symbol: str, parsed_json: dict) -> str:
 # result is empty or discarded. So the filing is downloaded here, where both
 # exchanges are already answered, and sent as data.
 MAX_INLINE_PDF_BYTES = 25 * 1024 * 1024
+# Premium models get the whole filing (owner's call, 16 Oct 2026) when it is
+# at most this size. Sent base64, a third larger again, so 15 MB arrives as
+# ~20 MB, inside what Gemini accepts inline. Larger bundles, and premium
+# models that cannot read a PDF themselves, get the selected pages instead.
+FULL_PDF_MAX_BYTES = 15 * 1024 * 1024
 
 
 _BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -837,6 +842,7 @@ def _do_analyze_earnings_disclosure_2step(
     # than "no figures".
     failures = []
     doc_prep = {"mode": "none"}
+    raw_pdf = None
     if attachment_url and (plan["before_gemcall"] or plan["after_gemcall"]):
         raw_pdf = fetch_filing_pdf(attachment_url)
         if raw_pdf is None:
@@ -1029,6 +1035,21 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
 
 {document_block}"""
 
+    # The same prompt for a premium model reading the whole filing as a PDF.
+    # The unit line worked out from the text layer is kept: Nestle's
+    # "(₹ in million)" heading does not survive extraction, and a unit misread
+    # is a 10x error in every figure.
+    unit_hint = ""
+    if doc_prep.get("mode") == "text":
+        first = (doc_prep.get("text") or "").split("\n", 1)[0]
+        if first.startswith("UNIT"):
+            unit_hint = first + "\n"
+    full_block = ("THE FILING is attached as a PDF: the complete results filing, every page. Read the "
+                  "results statements and their notes for the figures, and the press release, management "
+                  "commentary and any outlook or guidance pages for the commentary.\n" + unit_hint)
+    prompt_full = prompt.replace(document_block, full_block).replace(
+        f"Use ONLY the {doc_word}.", "Use ONLY the attached filing.")
+
     result_raw = None
     used_flow = "custom_rest_api"
     used_provider = f"custom_api ({custom_url})"
@@ -1123,9 +1144,38 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
 
         return result_raw
 
+    def _full_pdf_ok(tier, model) -> bool:
+        if tier != "premium" or not raw_pdf or len(raw_pdf) > FULL_PDF_MAX_BYTES:
+            return False
+        try:
+            # A model that cannot read a PDF would get OpenRouter's paid OCR
+            # of every page; it keeps the selected pages instead.
+            return openrouter_models.reads_pdf(model) is not False
+        except Exception:
+            return True
+
     def _openrouter(attempt):
         tier, model = attempt["tier"], attempt["model"]
         label = "Premium" if tier == "premium" else "Free"
+        if _full_pdf_ok(tier, model):
+            report = {}
+            try:
+                logger.info(f"🔬 [AUTO AI OPENROUTER PREMIUM]: {model} reading the full filing "
+                            f"({len(raw_pdf) // 1024} KB) for #{symbol}")
+                or_res = call_openrouter(prompt_full, attempt["key"], model=model,
+                                         attachment_url=attachment_url, attachment_bytes=raw_pdf,
+                                         pdf_engine="native",
+                                         free_only=False, fallbacks=[model], report=report)
+                raw = json.dumps(or_res["analyses"][0]) if (or_res and or_res.get("analyses")) else (
+                    json.dumps(or_res) if or_res else None)
+                if raw:
+                    return raw, f"OpenRouter {label} ({report.get('model') or model}, full PDF)"
+            except Exception as e:
+                # Too large for the provider, or a model that refused the file:
+                # fall through to the selected pages rather than giving up.
+                reason = str(e).replace("All OpenRouter models failed: ", "")
+                failures.append(f"full PDF on {model} failed, retried with the selected pages: {reason[:200]}")
+                logger.warning(f"[AUTO AI] #{symbol}: full PDF failed on {model}: {reason[:200]}")
         report = {}
         # Text mode carries the filing in the prompt; nothing to attach.
         pdf = doc_prep.get("pdf") if doc_prep["mode"] == "pdf" else None
