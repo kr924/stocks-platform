@@ -188,8 +188,26 @@ def screener_figures(db, symbol: str, quarters: Iterable[str],
 
 # ─── The comparison ─────────────────────────────────────────────────────────
 
-def _pct(cur: Optional[float], base: Optional[float]) -> Optional[float]:
+def change_label(cur: Optional[float], base: Optional[float]) -> str:
+    """
+    Words for a change that a percentage would misstate. Ponni Sugars' Jun
+    2026 quarter was a ₹1.23 Cr loss, so its Sep profit of ₹21.69 Cr came out
+    "+1,863% QoQ": arithmetically true and meaningless. Against a loss, or
+    into one, the change is said in words instead.
+    """
     if cur is None or base is None or abs(base) < MIN_BASE:
+        return ""
+    if base < 0:
+        if cur >= 0:
+            return "turnaround"
+        return "loss narrowed" if cur > base else "loss widened"
+    if cur < 0:
+        return "swung to loss"
+    return ""
+
+
+def _pct(cur: Optional[float], base: Optional[float]) -> Optional[float]:
+    if cur is None or base is None or abs(base) < MIN_BASE or change_label(cur, base):
         return None
     return round((cur - base) / abs(base) * 100, 2)
 
@@ -359,6 +377,8 @@ def build(db, symbol: str, event_time: Optional[datetime],
                 return f"{NOT_AVAILABLE} for {base_q}" if base_q else NOT_AVAILABLE
             if cur is None:
                 return "current figure not read"
+            if change_label(cur, base):
+                return change_label(cur, base)
             if pct_v is None:
                 return f"{base_q} base under ₹1 Cr" if abs(base) < MIN_BASE else ""
             return ""
@@ -385,6 +405,15 @@ def build(db, symbol: str, event_time: Optional[datetime],
             "ai_current": ai_cur,
             "ai_yoy_pct": _pct(ai_cur, ya),
             "ai_qoq_pct": _pct(ai_cur, pq),
+            # In words where a percentage would mislead (a loss base).
+            "ocr_yoy_label": change_label(ocr_cur, ya),
+            "ocr_qoq_label": change_label(ocr_cur, pq),
+            "scr_yoy_label": change_label(scr_cur_v, ya),
+            "scr_qoq_label": change_label(scr_cur_v, pq),
+            "ai_yoy_label": change_label(ai_cur, ya),
+            "ai_qoq_label": change_label(ai_cur, pq),
+            "yoy_label": change_label(cur, ya),
+            "qoq_label": change_label(cur, pq),
             "current": cur,
             "year_ago": ya,
             "prev_qtr": pq,

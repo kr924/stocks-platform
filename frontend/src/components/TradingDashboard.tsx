@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { Chart } from "./Chart";
+import { VerdictScorecard } from "./VerdictScorecard";
 import {
   Zap,
   ShieldAlert,
@@ -220,6 +221,10 @@ interface DigestCompany {
     // The filing's own figure (OCR) and Screener's, each against the same bases.
     ocr_current?: number | null; ocr_yoy_pct?: number | null; ocr_qoq_pct?: number | null;
     scr_current?: number | null; scr_yoy_pct?: number | null; scr_qoq_pct?: number | null;
+    // A change against a loss base, in words ("turnaround", "loss narrowed",
+    // "loss widened", "swung to loss"); the percentage is null then.
+    ocr_yoy_label?: string; ocr_qoq_label?: string; scr_yoy_label?: string; scr_qoq_label?: string;
+    ai_yoy_label?: string; ai_qoq_label?: string; yoy_label?: string; qoq_label?: string;
     match: boolean | null; diff_pct: number | null;
   }[];
   like_for_like?: LikeForLike | null;
@@ -471,6 +476,53 @@ interface TradeAILog {
   red_flags?: string[];
   versus_trend?: string;
   reaction_risk?: string;
+  // Worked out in code (services/verdict_checks.py): the quarter against its
+  // run-rate (or, seasonal, its trailing-year growth), the price going in,
+  // and `gate` when a BUY was turned into NA.
+  checks?: VerdictChecks | null;
+}
+
+interface VerdictChecks {
+  trend?: { verdict: string; detail?: string; margin_bps?: number | null; margin_detail?: string; basis?: string };
+  seasonal?: boolean;
+  season_why?: string;
+  price?: {
+    price?: number | null; returns?: Record<string, number>; pe?: number | null; market_cap?: number | null;
+    high_52w?: number | null; off_high_pct?: number | null; flags?: string[]; priced_in?: boolean;
+  };
+  gate?: { was: string; reasons: string[] } | null;
+}
+
+/** The computed checks as short lines for the AI card. */
+function checkLines(c?: VerdictChecks | null): string[] {
+  if (!c) return [];
+  const out: string[] = [];
+  const t = c.trend;
+  if (t && t.verdict && t.verdict !== "n/a") {
+    out.push(`Trend check (${c.seasonal ? "seasonal, YoY" : "run-rate"}): ${t.verdict}${t.detail ? ` — ${t.detail}` : ""}`);
+  } else if (t?.detail) {
+    out.push(`Trend check: n/a — ${t.detail}`);
+  }
+  if (t?.margin_detail) out.push(t.margin_detail);
+  const pr = c.price;
+  if (pr) {
+    const r = pr.returns || {};
+    const bits = [
+      r["5d"] != null ? `5d ${r["5d"] > 0 ? "+" : ""}${r["5d"].toFixed(1)}%` : "",
+      r["1m"] != null ? `1m ${r["1m"] > 0 ? "+" : ""}${r["1m"].toFixed(1)}%` : "",
+      r["1y"] != null ? `1y ${r["1y"] > 0 ? "+" : ""}${r["1y"].toFixed(0)}%` : "",
+      pr.off_high_pct != null ? `${pr.off_high_pct.toFixed(0)}% vs 52w high` : "",
+      pr.pe != null ? `P/E ${pr.pe.toFixed(1)}` : "",
+    ].filter(Boolean);
+    if (bits.length) out.push(`Going in: ${bits.join(" · ")}`);
+  }
+  return out;
+}
+
+/** "turnaround" and friends, shortened for the list's one-line grid. */
+function shortChange(label?: string): string {
+  return label === "turnaround" ? "turn↑" : label === "loss narrowed" ? "loss↓"
+    : label === "loss widened" ? "loss↑" : label === "swung to loss" ? "→loss" : "";
 }
 
 /** One labelled readout in the quote strip, matching the tracker's column head. */
@@ -823,6 +875,14 @@ function ScreenerComparison({ rows, lfl, view }: {
             const qoq = view === "ai" ? row.ai_qoq_pct
               : view === "screener" ? row.scr_qoq_pct
               : perSource ? row.ocr_qoq_pct : row.actual_qoq;
+            const yoyLab = view === "ai" ? row.ai_yoy_label : view === "screener" ? row.scr_yoy_label
+              : perSource ? row.ocr_yoy_label : row.yoy_label;
+            const qoqLab = view === "ai" ? row.ai_qoq_label : view === "screener" ? row.scr_qoq_label
+              : perSource ? row.ocr_qoq_label : row.qoq_label;
+            const lab = (l?: string) => l ? (
+              <span title="Against a loss, a percentage would mislead"
+                style={{ color: l === "turnaround" || l === "loss narrowed" ? "var(--positive)" : "var(--negative)", fontWeight: 700 }}>{l}</span>
+            ) : null;
             const curNote = view === "ai" ? "the AI did not read this figure"
               : view === "screener" ? `Screener has not published ${q} yet`
               : "not read from the filing";
@@ -831,9 +891,9 @@ function ScreenerComparison({ rows, lfl, view }: {
                 <td style={{ padding: "4px 8px", fontWeight: 600, color: "var(--text-primary)", whiteSpace: "nowrap" }}>{row.label}</td>
                 <td style={{ ...cell, color: "var(--text-primary)" }}>{fmt(cur) ?? missing(curNote)}</td>
                 <td style={{ ...cell, color: "var(--text-secondary)" }}>{fmt(row.year_ago) ?? missing(row.yoy_note)}</td>
-                <td style={{ ...cell, fontWeight: 700, color: pctColor(yoy) }}>{pct(yoy) ?? missing(cur == null ? curNote : row.yoy_note)}</td>
+                <td style={{ ...cell, fontWeight: 700, color: pctColor(yoy) }}>{pct(yoy) ?? lab(yoyLab) ?? missing(cur == null ? curNote : row.yoy_note)}</td>
                 <td style={{ ...cell, color: "var(--text-secondary)" }}>{fmt(row.prev_qtr) ?? missing(row.qoq_note)}</td>
-                <td style={{ ...cell, fontWeight: 700, color: pctColor(qoq) }}>{pct(qoq) ?? missing(cur == null ? curNote : row.qoq_note)}</td>
+                <td style={{ ...cell, fontWeight: 700, color: pctColor(qoq) }}>{pct(qoq) ?? lab(qoqLab) ?? missing(cur == null ? curNote : row.qoq_note)}</td>
               </tr>
             );
           })}
@@ -1315,6 +1375,8 @@ export function TradingDashboard() {
   const [nseAnnouncements, setNseAnnouncements] = useState<any[]>([]);
   const [pendingResults, setPendingResults] = useState<PendingResult[]>([]);
   const [pendingSearch, setPendingSearch] = useState("");
+  // The AI verdict scorecard, opened from the Order Decisions header.
+  const [showScorecard, setShowScorecard] = useState(false);
   // AI detail is collapsed by default: on a heavy results day this panel carries
   // 170+ cards, and a five-row metric table on each buries the order controls.
   // Order Decisions is a list beside one open detail pane. The selected id is
@@ -3084,6 +3146,13 @@ export function TradingDashboard() {
                 borderRadius: "6px", color: "var(--text-primary)",
               }}
             />
+            <button onClick={() => setShowScorecard(v => !v)}
+              title="How each AI verdict has done: move after the result, hit rate"
+              style={{ padding: "6px 10px", background: showScorecard ? "var(--ai-bg)" : "transparent",
+                       border: "1px solid rgba(var(--ai-rgb), 0.35)", borderRadius: "6px",
+                       color: "var(--ai)", fontSize: "11px", fontWeight: 700, cursor: "pointer" }}>
+              Scorecard
+            </button>
             {pendingSearch && (
               <button onClick={() => setPendingSearch("")}
                 style={{ padding: "6px 10px", background: "transparent", border: "1px solid rgba(var(--neutral-rgb), 0.18)", borderRadius: "6px", color: "var(--text-muted)", fontSize: "11px", cursor: "pointer" }}>
@@ -3253,6 +3322,8 @@ export function TradingDashboard() {
             </span>
           </div>
         </div>
+
+        {showScorecard && <VerdictScorecard onClose={() => setShowScorecard(false)} />}
 
         {/* One tab per kind of filing. Results are the only ones with figures
             to read, so they are the only ones carrying a Screener table or an
@@ -3444,7 +3515,9 @@ export function TradingDashboard() {
               const aiDone = p.ai_status === "done" && !!p.ai_analysis;
               const aiSug = aiDone ? (p.ai_analysis!.ai_suggestion || "NA") : null;
               const risk = aiDone ? (p.ai_analysis!.reaction_risk || "") : "";
-              const aiSummary = (/^high/i.test(risk) ? "⚠ High reaction risk — " : "")
+              const gate = aiDone ? p.ai_analysis!.checks?.gate : null;
+              const aiSummary = (gate ? `⛔ BUY withheld: ${(gate.reasons || [])[0] || ""} — ` : "")
+                + (/^high/i.test(risk) ? "⚠ High reaction risk — " : "")
                 + (aiDone && p.ai_analysis!.ai_summary && !/^AI analysis pending/i.test(p.ai_analysis!.ai_summary)
                   ? p.ai_analysis!.ai_summary : "");
               const aiState = aiDone ? "" : p.ai_status === "failed" ? "AI stopped — use Premium analyse"
@@ -3498,7 +3571,10 @@ export function TradingDashboard() {
                         ) : (["revenue", "pat"] as const).flatMap(k =>
                           (["ocr_yoy_pct", "ocr_qoq_pct"] as const).map(f => {
                             const v = val(k, f);
-                            return <span key={`o${k}${f}`} className="n" style={{ color: pctCol(v) }}>{pctTxt(v)}</span>;
+                            const l = v == null ? String((rowOf(k) as any)?.[f.replace("_pct", "_label")] || "") : "";
+                            return <span key={`o${k}${f}`} className="n" title={l || undefined}
+                              style={{ color: l ? (l === "turnaround" || l === "loss narrowed" ? "var(--positive)" : "var(--negative)") : pctCol(v) }}>
+                              {l ? shortChange(l) : pctTxt(v)}</span>;
                           }))}
                         <span className="od-chip call" title={ocrWhy}
                           style={{ color: toneCol(ocrTone), background: toneBg(ocrTone) }}>{ocrLabel}</span>
@@ -3509,7 +3585,10 @@ export function TradingDashboard() {
                             {(["revenue", "pat"] as const).flatMap(k =>
                               (["scr_yoy_pct", "scr_qoq_pct"] as const).map(f => {
                                 const v = val(k, f);
-                                return <span key={`s${k}${f}`} className="n" style={{ color: pctCol(v) }}>{pctTxt(v)}</span>;
+                                const l = v == null ? String((rowOf(k) as any)?.[f.replace("_pct", "_label")] || "") : "";
+                            return <span key={`s${k}${f}`} className="n" title={l || undefined}
+                              style={{ color: l ? (l === "turnaround" || l === "loss narrowed" ? "var(--positive)" : "var(--negative)") : pctCol(v) }}>
+                              {l ? shortChange(l) : pctTxt(v)}</span>;
                               }))}
                             <span className="od-chip call" title={snr?.reason || ""}
                               style={{ color: toneCol(snr?.tone || "na"), background: toneBg(snr?.tone || "na") }}>{snr?.label || "NA"}</span>
@@ -3522,10 +3601,15 @@ export function TradingDashboard() {
                             {(["revenue", "pat"] as const).flatMap(k =>
                               (["ai_yoy_pct", "ai_qoq_pct"] as const).map(f => {
                                 const v = val(k, f);
-                                return <span key={`a${k}${f}`} className="n" style={{ color: pctCol(v) }}>{pctTxt(v)}</span>;
+                                const l = v == null ? String((rowOf(k) as any)?.[f.replace("_pct", "_label")] || "") : "";
+                            return <span key={`a${k}${f}`} className="n" title={l || undefined}
+                              style={{ color: l ? (l === "turnaround" || l === "loss narrowed" ? "var(--positive)" : "var(--negative)") : pctCol(v) }}>
+                              {l ? shortChange(l) : pctTxt(v)}</span>;
                               }))}
                             <span className="od-chip call"
-                              style={{ color: toneCol(labelTone(aiSug || "")), background: toneBg(labelTone(aiSug || "")) }}>{aiSug}</span>
+                              title={gate ? `BUY withheld by the checks:\n${(gate.reasons || []).join("\n")}` : undefined}
+                              style={{ color: toneCol(labelTone(aiSug || "")), background: toneBg(labelTone(aiSug || "")),
+                                       textDecoration: "none" }}>{gate ? "BUY✕" : aiSug}</span>
                           </>
                         ) : (
                           <>
@@ -3835,9 +3919,18 @@ export function TradingDashboard() {
                     {pending.ai_status === "done" && ai ? (
                       <>
                         <VerdictBadge verdict={ai.ai_suggestion} />
+                        {/* The model said BUY and the checks in code overruled
+                            it (services/verdict_checks.py). */}
+                        {ai.checks?.gate && (
+                          <span style={{ fontSize: "10px", color: "var(--warning)", fontWeight: 700 }}
+                                title={(ai.checks.gate.reasons || []).join("\n")}>
+                            ⛔ BUY withheld — {(ai.checks.gate.reasons || [])[0]}
+                            {(ai.checks.gate.reasons || []).length > 1 ? ` (+${ai.checks.gate.reasons.length - 1} more)` : ""}
+                          </span>
+                        )}
                         {/* NA with figures read is the model declining to call a
                             mixed quarter, not a failed read; say which. */}
-                        {(ai.ai_suggestion || "NA").toUpperCase() === "NA" && ai.extraction_ok !== false
+                        {!ai.checks?.gate && (ai.ai_suggestion || "NA").toUpperCase() === "NA" && ai.extraction_ok !== false
                           && !(ai.validation?.issues?.length) && (
                           <span style={{ fontSize: "10px", color: "var(--text-muted)", fontStyle: "italic" }}
                                 title="The figures were read; the model judged the quarter mixed and made no call. The red flags and reaction risk below say why.">
@@ -4269,7 +4362,9 @@ export function TradingDashboard() {
                                   negatives={pending.ai_status === "done" && ai ? ai.negatives : []}
                                   flags={pending.ai_status === "done" && ai ? ai.red_flags : []}
                                   notes={pending.ai_status === "done" && ai
-                                    ? [ai.versus_trend ? `Vs trend: ${ai.versus_trend}` : null,
+                                    ? [ai.checks?.gate ? `⛔ The model said BUY; withheld because: ${(ai.checks.gate.reasons || []).join("; ")}` : null,
+                                       ...checkLines(ai.checks),
+                                       ai.versus_trend ? `Vs trend (AI): ${ai.versus_trend}` : null,
                                        ai.reaction_risk ? `Reaction risk: ${ai.reaction_risk}` : null]
                                     : []}
                                   empty={pending.ai_status === "done" && ai

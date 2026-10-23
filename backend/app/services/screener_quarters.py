@@ -13,6 +13,7 @@ import logging
 import re
 import threading
 import time
+from datetime import datetime
 from typing import Dict, List, Optional
 
 import requests
@@ -169,6 +170,45 @@ def _quarter_headings(html: str) -> list:
         return []
     cells = re.findall(r"<th[^>]*>(.*?)</th>", head.group(1), re.DOTALL)
     return [_strip(c) for c in cells[1:] if _strip(c)]
+
+
+_RATIO_NAMES = {
+    "market cap": "market_cap",
+    "current price": "price",
+    "high / low": "high_low",
+    "stock p/e": "pe",
+    "book value": "book_value",
+    "roce": "roce",
+    "roe": "roe",
+}
+
+
+def parse_top_ratios(html: str) -> dict:
+    """
+    The figures at the top of a Screener company page: price, market cap,
+    P/E and the 52-week high/low. Used as the valuation the market held going
+    into a result (services/verdict_checks.py): a stock at 59x earnings that
+    has tripled in a year needs more than good growth. A loss-maker's P/E is
+    blank and comes back None, never 0.
+    """
+    section = re.search(r'id="top-ratios"(.*?)</ul>', html or "", re.DOTALL)
+    if not section:
+        return {}
+    out = {}
+    for li in re.findall(r"<li[^>]*>(.*?)</li>", section.group(1), re.DOTALL):
+        name = re.search(r'class="name"[^>]*>(.*?)</span>', li, re.DOTALL)
+        if not name:
+            continue
+        key = _RATIO_NAMES.get(re.sub(r"\s+", " ", _strip(name.group(1))).lower())
+        if not key:
+            continue
+        nums = [_to_float(_strip(n)) for n in re.findall(r'class="number"[^>]*>(.*?)</span>', li, re.DOTALL)]
+        if key == "high_low":
+            if len(nums) >= 2:
+                out["high_52w"], out["low_52w"] = nums[0], nums[1]
+        elif nums:
+            out[key] = nums[0]
+    return out
 
 
 def persist_quarters(symbol: str, headings: list, metrics: dict,
@@ -352,6 +392,9 @@ def fetch_latest_quarter(symbol: str, cache_only: bool = False,
             # Column headings for the series above, same order.
             "quarters": headings,
             "metrics": metrics,
+            # Price, market cap, P/E and 52-week range as the page showed them.
+            "ratios": parse_top_ratios(res.text),
+            "ratios_at": datetime.utcnow().isoformat() + "Z",
             "error": "" if metrics else out["error"],
         })
         if out["ok"]:

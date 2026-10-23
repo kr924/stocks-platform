@@ -175,7 +175,10 @@ def _highlights(a: TradeAILog) -> dict:
             # What the market may sell on, and the result against the recent trend.
             "red_flags": h.get("red_flags") or [],
             "versus_trend": h.get("versus_trend") or "",
-            "reaction_risk": h.get("reaction_risk") or ""}
+            "reaction_risk": h.get("reaction_risk") or "",
+            # Computed in code (services/verdict_checks.py): the trend check,
+            # the price going in, and "gate" when a BUY was withheld.
+            "checks": h.get("checks") or None}
 
 
 def _serialize_ai_log(a: TradeAILog) -> dict:
@@ -1838,3 +1841,25 @@ def openrouter_models_list(tier: str = Query("premium"), refresh: bool = False):
     return {"tier": tier, "models": rows,
             "reason": None if rows else "OpenRouter's model list could not be fetched"}
 
+
+
+# ─── Verdict scorecard ──────────────────────────────────────────────────────
+
+@router.get("/scorecard")
+def verdict_scorecard(days: int = 30, db: Session = Depends(get_db)):
+    """
+    How each AI verdict on a result has done: average move and hit rate at
+    the first close after the result, the next session and five sessions on
+    (services/verdict_scorecard.py). Starts a background fill of any missing
+    closes, at most once at a time.
+    """
+    from app.services import verdict_scorecard as VS
+    VS.refresh(days=max(days, 30), force=False)
+    return VS.summary(db, days)
+
+
+@router.post("/scorecard/refresh")
+def verdict_scorecard_refresh(days: int = 30):
+    from app.services import verdict_scorecard as VS
+    started = VS.refresh(days=days)
+    return {"started": started, "filling": VS.is_running()}

@@ -278,6 +278,33 @@ class ScreenerQuarter(Base):
     )
 
 
+class VerdictOutcome(Base):
+    """
+    What the stock did after an AI verdict on a results filing
+    (services/verdict_scorecard.py): the close of the first session after the
+    result, the next session and five sessions on, against the price when the
+    filing landed. Kept independently of the prompt and the AI log, both of
+    which are purged at 30 days, so the scorecard can look further back.
+    """
+    __tablename__ = "verdict_outcomes"
+    pending_id = Column(Integer, primary_key=True)
+    symbol = Column(String(50), index=True)
+    trade_date = Column(String(10), index=True)        # IST date of the filing
+    event_time = Column(DateTime, nullable=True)
+    verdict = Column(String(30), nullable=True)        # as shown: BUY / SELL / NA / ...
+    withheld = Column(Boolean, default=False)          # a BUY the checks turned into NA
+    trend = Column(String(20), nullable=True)          # trend check verdict
+    provider = Column(String(200), nullable=True)
+    base_price = Column(Float, nullable=True)
+    d0_date = Column(String(10), nullable=True)
+    d0_close = Column(Float, nullable=True)
+    d1_close = Column(Float, nullable=True)
+    d5_close = Column(Float, nullable=True)
+    complete = Column(Boolean, default=False, index=True)
+    note = Column(String(200), nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+
 class PeriodBase(Base):
     """
     The closes each return period is measured from, for one instrument on one

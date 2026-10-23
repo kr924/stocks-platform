@@ -247,6 +247,9 @@ def _build_rows(db: Session, pendings: List[PendingResultOrder],
                 "scr_current": r.get("scr_current"),
                 "scr_yoy_pct": r.get("scr_yoy_pct"),
                 "scr_qoq_pct": r.get("scr_qoq_pct"),
+                **{k: r.get(k, "") for k in ("ocr_yoy_label", "ocr_qoq_label", "scr_yoy_label",
+                                             "scr_qoq_label", "ai_yoy_label", "ai_qoq_label",
+                                             "yoy_label", "qoq_label")},
                 "ai_yoy": (ai_metrics.get(key) or {}).get("yoy_change_pct", "NA"),
                 **compare(ai_num, r["current"]),
             })
@@ -479,6 +482,10 @@ def _pct_cell(v, note) -> str:
     if v is not None:
         cls = "ok" if v > 0 else "bad" if v < 0 else ""
         return f'<span class="{cls}">{v:+.1f}%</span>'
+    if note in ("turnaround", "loss narrowed", "loss widened", "swung to loss"):
+        # Against a loss base a percentage misleads; the change is said in words.
+        cls = "ok" if note in ("turnaround", "loss narrowed") else "bad"
+        return f'<span class="{cls}">{html.escape(note)}</span>'
     return f'<span class="na" title="{html.escape(note or "")}">n/a</span>'
 
 

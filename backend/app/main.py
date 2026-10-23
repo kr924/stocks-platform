@@ -257,6 +257,12 @@ async def _intelligence_scheduler():
                         and _daily_due(last_run, "estimates_date", today_str)):
                     asyncio.create_task(asyncio.to_thread(_run_estimates_prefetch))
 
+                # 16:00 Mon-Fri — after the close: the day's closes for the
+                # verdict scorecard (services/verdict_scorecard.py).
+                if (now_ist.weekday() < 5 and now_ist.hour >= 16
+                        and _daily_due(last_run, "verdict_scorecard_date", today_str)):
+                    asyncio.create_task(asyncio.to_thread(_run_verdict_scorecard))
+
                 # 08:00 — publish the digest page and send the single alert
                 if now_ist.hour >= 8 and _daily_due(last_run, "morning_digest_date", today_str):
                     asyncio.create_task(asyncio.to_thread(_run_morning_digest))
@@ -416,6 +422,15 @@ def _run_scheduled_buys():
 
 
 @_single_flight("estimates_prefetch")
+def _run_verdict_scorecard():
+    """16:00 IST Mon-Fri — closes for the AI verdict scorecard."""
+    try:
+        from app.services import verdict_scorecard
+        verdict_scorecard.refresh(days=45, wait=True)
+    except Exception as e:
+        logger.error(f"Verdict scorecard error: {e}")
+
+
 def _run_estimates_prefetch():
     """08:40 IST — broker estimates for every company reporting today."""
     try:

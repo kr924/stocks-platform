@@ -191,6 +191,42 @@ def normalize_metrics(raw) -> dict:
     return grid
 
 
+def with_previous_qtr(metrics: dict, raw) -> dict:
+    """
+    The grid plus each row's previous_qtr from the model's raw answer. The
+    stored grid has no previous-quarter column (METRIC_COLS), but the model is
+    asked for it, and the QoQ checks need it.
+    """
+    raw = raw if isinstance(raw, dict) else {}
+    out = {}
+    for row, cells in (metrics or {}).items():
+        extra = raw.get(row) if isinstance(raw.get(row), dict) else {}
+        out[row] = dict(cells or {}, previous_qtr=_clean_cell(extra.get("previous_qtr")) or "NA")
+    return out
+
+
+def relabel_loss_bases(metrics: dict, raw=None) -> dict:
+    """
+    Replace a percentage change measured against a loss (or into one) with
+    words: "turnaround", "loss narrowed", "loss widened", "swung to loss".
+    `raw` is the model's own metrics, which carry previous_qtr.
+    """
+    try:
+        from app.services.result_compare import change_label, _ai_number
+    except Exception:
+        return metrics
+    full = with_previous_qtr(metrics, raw)
+    for row, cells in (metrics or {}).items():
+        if not isinstance(cells, dict):
+            continue
+        cur = _ai_number(cells.get("current_qtr"))
+        for base_key, pct_key in (("last_year_same_qtr", "yoy_change_pct"), ("previous_qtr", "qoq_change_pct")):
+            label = change_label(cur, _ai_number(full[row].get(base_key)))
+            if label:
+                cells[pct_key] = label
+    return metrics
+
+
 def metrics_are_usable(metrics: dict) -> bool:
     """
     True when the grid carries enough to justify a verdict.
@@ -989,6 +1025,28 @@ def _do_analyze_earnings_disclosure_2step(
     except Exception as e:
         logger.debug(f"[AUTO AI] trend context unavailable for {symbol}: {e}")
 
+    # Worked out in code, not left to the model (services/verdict_checks.py):
+    # the run-rate or, for a seasonal business, the trailing-year growth the
+    # quarter has to beat, and what the price had done going into it. On
+    # 23 Oct 2026 SAKAR (flat against its run-rate, P/E 59, up 5% the day
+    # before) and PONNIERODE (seasonal; growth matched its trailing year)
+    # were both called BUY and both fell ~7%.
+    checks_exp, checks_price, checks_block = {}, {}, ""
+    try:
+        from app.database import SessionLocal as _SLc
+        from app.services import verdict_checks
+        from app.services.result_compare import infer_quarter as _iqc
+        _step("checking the trend and the price")
+        _dbc = _SLc()
+        try:
+            checks_exp = verdict_checks.expectation(_dbc, symbol, _iqc(datetime.utcnow()))
+            checks_price = verdict_checks.price_context(_dbc, symbol)
+        finally:
+            _dbc.close()
+        checks_block = verdict_checks.prompt_block(checks_exp, checks_price)
+    except Exception as e:
+        logger.info(f"[AUTO AI] computed checks unavailable for {symbol}: {e}")
+
     # What brokers forecast for this quarter, verified against the articles
     # (services/consensus.py). Usually stored by the 08:40 job. When it is
     # not, the analysis does not wait: our own search reads several articles
@@ -1059,7 +1117,7 @@ Convert every figure to ₹ crore (₹ lakh / 100; ₹ million / 10; ₹ thousan
 Compute the percentages from the figures you wrote. They are checked against each other, and a
 mismatch discards the whole analysis. Any figure you cannot read with certainty is "NA". Never guess.
 
-{trend_block}{estimates_block}
+{trend_block}{checks_block}{estimates_block}
 === HOW THE MARKET WILL READ IT (judge this before the verdict) ===
 Good growth is not enough: a price moves on the SURPRISE against what was expected. Where
 BROKER ESTIMATES are given above, they ARE the expectation: compare revenue, EBITDA and PAT
@@ -1078,8 +1136,10 @@ versus_trend : "above trend" / "in line" / "below trend", with the figures behin
 reaction_risk: "low" / "medium" / "high" that the stock falls on this result, with the reason (one line).
 
 === VERDICT (ai_suggestion) ===
-  "BUY"  : revenue and PAT both read, growth clearly ABOVE the recent trend or a clear turnaround,
-           driven by operations, and no serious red flag.
+  "BUY"  : revenue and PAT both read, growth clearly ABOVE the recent trend (as COMPUTED CHECKS
+           defines it, where given) or a clear turnaround, driven by operations, NO red flags and
+           reaction_risk "low". Put only what the market could sell on in red_flags; minor points
+           go in negatives. A BUY that fails the computed checks is withdrawn automatically.
   "SELL" : revenue and PAT both read, and the quarter is clearly weak: falling profit, a swing to
            loss, growth well below trend, or serious red flags (margin collapse, cautious guidance).
   "BEATS ESTIMATES" / "MISSES ESTIMATES" : only when broker estimates are given above (or the
@@ -1426,6 +1486,24 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
     if not extraction_ok or ai_suggestion in ("", "N/A", "NONE", "NULL", "UNKNOWN", "INCONCLUSIVE"):
         ai_suggestion = "NA"
 
+    # The BUY rule enforced in code: reaction risk low, no red flags, above
+    # the computed trend, margin not down >100 bps, and a higher bar when the
+    # price ran up or the valuation is rich. A failed BUY becomes NA with the
+    # reasons kept (highlights["checks"]["gate"]), shown as "BUY withheld".
+    if extraction_ok:
+        try:
+            from app.services import verdict_checks
+            from app.services.result_compare import infer_quarter as _iqg
+            ai_suggestion, highlights["checks"] = verdict_checks.run(
+                None, symbol, _iqg(datetime.utcnow()), checks_exp, checks_price,
+                ai_suggestion, with_previous_qtr(metrics, parsed_json.get("metrics")), highlights)
+        except Exception as e:
+            logger.warning(f"[CHECKS] {symbol}: verdict checks failed, BUY not gated: {e}")
+        # "+1,863% QoQ" off a loss quarter is true and meaningless: say it in
+        # words in the stored grid (after the consistency checks, which need
+        # the model's own percentages).
+        metrics = relabel_loss_bases(metrics, parsed_json.get("metrics"))
+
     ai_summary = parsed_json.get("summary") or (
         str(result_raw)[:500] if result_raw else f"No AI reading for {symbol}: {no_reading_reason}"
     )
@@ -1610,6 +1688,12 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
             extra += f"\nReaction risk: {highlights['reaction_risk']}"
         if highlights.get("red_flags"):
             extra += "\nRed flags: " + "; ".join(highlights["red_flags"][:3])
+        _gate = (highlights.get("checks") or {}).get("gate")
+        if _gate:
+            extra += "\n\n⛔ BUY withheld: " + "; ".join(_gate.get("reasons") or [])[:600]
+        _tr = (highlights.get("checks") or {}).get("trend") or {}
+        if _tr.get("verdict") and _tr["verdict"] != "n/a" and not _gate:
+            extra += f"\nTrend check: {_tr['verdict']} — {_tr.get('detail', '')}"
         if not extraction_ok:
             extra += "\n\nNote: key figures could not be extracted, so no directional call is given."
 

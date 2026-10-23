@@ -227,6 +227,7 @@ the guard records "already run today" on first sight rather than re-running.
   rolling **08:00-to-08:00 IST** window, so every filing lands in exactly one
   digest and the boundary falls where nobody is trading. Anything older that was
   never digested is swept in too, so a missed run or a weekend cannot lose rows.
+- **16:00 Mon–Fri** closes for the AI verdict scorecard (below)
 
 Screener is keyed by **BSE scrip code** for BSE-only companies — `LIMECHM` 404s
 where `507759` resolves — and answers 429 when called back to back, so requests
@@ -380,6 +381,12 @@ read was computed from them.
   or the `screener_quarters` store. **Never substituted** — a missing base is
   shown as `n/a` / "numbers not available", because a growth rate against the
   wrong quarter looks exactly like a real one. Bases under ₹1 Cr are refused.
+- **Against a loss, words, not a percentage** (`change_label`). Ponni Sugars'
+  Jun 2026 was a ₹1.23 Cr loss, so Sep's ₹21.69 Cr profit was "+1,863% QoQ".
+  A loss base (or a fall into loss) gives `turnaround` / `loss narrowed` /
+  `loss widened` / `swung to loss` in `*_label` with the percentage null —
+  on the table, the list (`turn↑`, `loss↓`…), the digest, and in the AI's
+  stored grid (`relabel_loss_bases`, after the consistency checks).
 - **Definitions follow the filing**: expenses = Screener Expenses + Interest +
   Depreciation (filed totals include both); EBITDA = Screener Operating Profit
   (banks/NBFCs have none → n/a).
@@ -889,6 +896,66 @@ current qtr/YoY/YoY %/QoQ %/estimated). Three layers protect it:
 
 Uncertainty is always **NA**, never HOLD or NEUTRAL — a hedge reads as a real
 call to anyone acting on it.
+
+### A BUY has to pass checks done in code (23 Oct 2026)
+
+SAKAR and PONNIERODE were both called BUY by the premium model and both fell
+~7%. SAKAR's +149% PAT YoY was against a weak Sep 2025; against its run-rate
+the quarter was flat (PAT ₹10–11 Cr four quarters running, EBITDA margin
+−127 bps QoQ), at P/E 59 after tripling in a year. Ponni is seasonal (Q1 a
+loss, Sep its best quarter); its EBITDA growth matched the trailing year's.
+The model listed most of that itself, rated reaction risk "medium" and still
+said BUY: "no serious red flag" was a sentence only the model enforced.
+
+`services/verdict_checks.py`, run inside the analysis:
+
+- **Before the call**, a COMPUTED CHECKS block in the prompt:
+  - *Seasonal or not* — log-linear trend over up to 12 Screener quarters; a
+    business whose same quarters sit on the same side of it every year by
+    ±12% or more is seasonal (Ponni ±21%, Sakar ±5%).
+  - *Non-seasonal*: the expectation is the run-rate — last quarter and the
+    3-quarter average. *Seasonal*: the same quarter last year and the
+    trailing-year growth (last four quarters vs the four before), on EBITDA,
+    which exceptional items do not distort.
+  - *Price going in*: 5-session / 1-month / 1-year returns (period bases,
+    one candle request if not stored), distance from the 52-week high, P/E
+    and market cap from Screener's page (`parse_top_ratios`, now kept on
+    every Screener snapshot as `ratios`).
+- **After the call**, arithmetic on the AI's figures (`trend_check`):
+  `above` = EBITDA more than 15% over the higher of last quarter and the
+  3-quarter average (seasonal: YoY growth more than 15% ahead of the trailing
+  year's, as growth factors); `below` = 10% under the lower; else `in line`;
+  a loss base that turns positive is `turnaround`. PAT stands in where there
+  is no EBITDA, and operations up with PAT below is downgraded to in line.
+  The EBITDA margin is compared with the previous quarter (seasonal: the year
+  ago) from the filing's own columns. The previous-quarter column is not in
+  the stored grid, so `with_previous_qtr` takes it from the model's raw answer.
+- **The gate** (`gate`): BUY stands only with reaction risk `low`, **no** red
+  flags, trend not `in line`/`below`, margin not down 100 bps or more, and —
+  when the stock is up ≥15% in a month or ≥8% in 5 sessions, or P/E ≥ 50 —
+  the step-up bar rises to 25%. Otherwise BUY becomes **NA** and the reasons
+  go in `highlights_json.checks.gate`; the panel shows "⛔ BUY withheld", the
+  list `BUY✕`, Telegram the reasons. A check that cannot be computed (no
+  history, no price) never blocks on its own, except a run-up/rich valuation
+  with no trend to clear it.
+- `ops/check_verdict_checks.py` replays both filings and a steady grower
+  against the live code.
+
+### The verdict scorecard
+
+`services/verdict_scorecard.py`, table `verdict_outcomes`, `GET
+/api/trading/scorecard?days=`, the **Scorecard** button on Order Decisions.
+For each results prompt with an AI verdict and a price at announcement: the
+close of the first session after the result (same day if filed 09:15–15:30,
+else the next session), the next session, and five sessions on, against
+`price_at_announcement`. Grouped as BUY / BEATS ESTIMATES / BUY withheld / NA
+/ MISSES ESTIMATES / SELL with average, median and hit rate (up for BUY, down
+for SELL; NA and withheld have no direction — their average is the yardstick
+a BUY must beat). One Upstox daily-candle request per filing, ~1/s, stored
+until d5 exists, then never fetched again; a session still open is not a
+close. Filled at 16:00 Mon–Fri, by "Fetch closes", and when the panel opens
+if the last fill was over 30 minutes ago. Rows outlive the 30-day prompt
+purge (kept a year).
 
 **The prompt reads only the filing** (rewritten 15 Oct 2026). It used to ask
 the model to "refer to screener.in and broker research", which a model without
