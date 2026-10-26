@@ -408,10 +408,13 @@ a capital-gains summary per financial year, derived from trades alone.
   Upstox's quantity and average price win, with the ledger's dated lots for
   what they cover and an undated lot for older shares; a stock Upstox no
   longer holds is dropped unless bought today. Zerodha is the ledger alone.
-- **The Stocks Tracker's Holdings tab** (`components/HoldingsTable.tsx`, from
-  `GET /api/portfolio/positions` every 60 s, prices from the tracker's live
-  quotes): qty, average price, invested, current, P&L, and each lot as
-  "qty · days" (LT past 12 months, "older" when undated). **Sell** for Upstox
+- **The Stocks Tracker's Holdings tab keeps the watchlist's columns** (day
+  high, sentiment, buy/sell qty, 2m signal — owner's call, 26 Oct 2026;
+  averages, invested and P&L are the Portfolio page's job) and adds, from
+  `GET /api/portfolio/positions` every 60 s while the tab is open
+  (`components/HoldingsTable.tsx`): a **Day's P&L** strip on top
+  (qty × (LTP − previous close)), a **Held** column with each lot as
+  "qty · days" (LT past 12 months, "older" when undated), and **Sell** for Upstox
   holdings (`POST /api/portfolio/sell`, delivery SELL through the broker
   gateway): it closes the engine's `bought` TradeConfigs for that stock
   oldest-first up to the quantity sold, so the stoploss watcher cannot sell

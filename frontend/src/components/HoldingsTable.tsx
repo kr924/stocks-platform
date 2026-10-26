@@ -1,24 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
-import type { ReactNode } from "react";
 
 const API_BASE = import.meta.env.VITE_API_BASE || (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" ? "http://localhost:8000" : "");
 
 /**
- * The Stocks Tracker's Holdings tab: what you own at Upstox and Zerodha,
- * with quantity, average price, amount invested, current amount, P&L and how
- * long each lot has been held. Prices are the tracker's live quotes; the
- * positions come from /api/portfolio/positions (the trade ledger reconciled
- * with Upstox's own holdings, re-read at most every 10 minutes), which also
- * keeps the H / U / Z chips in step. Upstox holdings can be sold from here.
+ * What the Stocks Tracker adds to its own table on the Holdings tab. The tab
+ * keeps the watchlist's columns (day high, sentiment, buy/sell quantity, 2m
+ * signal…); averages, invested amount and P&L live on the Portfolio page.
+ * Added here: the day's P&L across holdings (summary strip), a Held column
+ * (each purchase as "qty · days"), and Sell for Upstox holdings.
+ *
+ * Positions come from /api/portfolio/positions — the trade ledger reconciled
+ * with Upstox's own holdings, re-read at most every 10 minutes — which also
+ * keeps the H / U / Z chips in step.
  */
 
 export interface TrackerItem {
   id: number; symbol: string; name: string; instrument_key: string;
-  last_price: number; change: number; is_holding?: boolean; broker?: string | null;
+  last_price: number; change: number; close?: number; is_holding?: boolean; broker?: string | null;
 }
 
-interface Lot { date: string | null; qty: number; days: number | null; long_term: boolean | null; broker: string }
-interface Position {
+export interface Lot { date: string | null; qty: number; days: number | null; long_term: boolean | null; broker: string }
+export interface Position {
   key: string; symbol: string | null; isin: string | null; instrument_key: string;
   qty: number; avg: number | null; invested: number; broker: string; lots: Lot[];
   brokers: Record<string, { qty: number; avg: number; invested: number; source: string }>;
@@ -32,18 +34,11 @@ const pct = (v: number | null | undefined) => v == null || isNaN(v) ? "—" : `$
 const col = (v: number | null | undefined) => v == null || isNaN(v) ? "var(--text-faint)" : v > 0 ? "var(--positive)" : v < 0 ? "var(--negative)" : "var(--text-muted)";
 const q = (n: number) => Number.isInteger(n) ? String(n) : n.toFixed(2);
 
-export function HoldingsTable({ items, symbolCell, onRowClick, onChanged }: {
-  items: TrackerItem[];
-  symbolCell: (item: TrackerItem) => ReactNode;
-  onRowClick: (item: TrackerItem) => void;
-  onChanged: () => void;
-}) {
+/** Positions by symbol, polled every 60 s while `active`. */
+export function useHoldingPositions(active: boolean) {
   const [positions, setPositions] = useState<Position[]>([]);
   const [snapAt, setSnapAt] = useState<string | null>(null);
   const [upErr, setUpErr] = useState<string | null>(null);
-  const [syncing, setSyncing] = useState(false);
-  const [sellFor, setSellFor] = useState<{ item: TrackerItem; pos: Position } | null>(null);
-
   const load = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/portfolio/positions`);
@@ -55,135 +50,94 @@ export function HoldingsTable({ items, symbolCell, onRowClick, onChanged }: {
     } catch { /* offline */ }
   };
   useEffect(() => {
+    if (!active) return;
     load();
     const t = setInterval(load, 60000);
     return () => clearInterval(t);
-  }, []);
-
+  }, [active]);
   const bySymbol = useMemo(() => {
     const m: Record<string, Position> = {};
     for (const p of positions) if (p.symbol) m[p.symbol.toUpperCase()] = p;
     return m;
   }, [positions]);
+  return { bySymbol, snapAt, upErr, reload: load };
+}
 
+/** Today's P&L across holdings: quantity × (live price − previous close). */
+export function HoldingsSummary({ items, bySymbol, snapAt, upErr, onSynced }: {
+  items: TrackerItem[]; bySymbol: Record<string, Position>; snapAt: string | null; upErr: string | null;
+  onSynced: () => void;
+}) {
+  const [syncing, setSyncing] = useState(false);
+  let day = 0, base = 0, counted = 0;
+  for (const it of items) {
+    const p = bySymbol[it.symbol.toUpperCase()];
+    if (!p || !(it.last_price > 0) || !it.close) continue;
+    day += p.qty * (it.last_price - it.close);
+    base += p.qty * it.close;
+    counted += 1;
+  }
   const sync = async () => {
     setSyncing(true);
-    try { await fetch(`${API_BASE}/api/portfolio/sync/upstox`, { method: "POST" }); } catch { /* shown by state */ }
-    await load();
-    onChanged();
+    try { await fetch(`${API_BASE}/api/portfolio/sync/upstox`, { method: "POST" }); } catch { /* ignore */ }
+    onSynced();
     setSyncing(false);
   };
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "14px", alignItems: "center", padding: "4px 12px 10px", fontSize: "12px" }}>
+      <span style={{ color: "var(--text-muted)" }}
+            title={`Quantity × (live price − previous close), over ${counted} holding(s) with a quantity on file`}>
+        Day's P&L{" "}
+        <b style={{ color: col(day), fontSize: "14px" }}>{counted ? signed(day) : "—"}</b>
+        {counted && base ? <b style={{ color: col(day) }}> ({pct(day / base * 100)})</b> : null}
+      </span>
+      <span style={{ marginLeft: "auto", color: "var(--text-faint)", fontSize: "11px" }}
+            title={upErr ? `Upstox holdings: ${upErr}` : "Upstox holdings are re-read at most every 10 minutes; Zerodha comes from the tradebook imported on the Portfolio page."}>
+        {upErr ? "⚠ Upstox holdings not read" : "Upstox holdings"}
+        {snapAt ? ` · ${new Date(snapAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}` : ""}
+      </span>
+      <button onClick={sync} disabled={syncing} className="wl-chip" style={{ height: "22px", fontSize: "11px", padding: "0 8px" }}>
+        {syncing ? "Syncing…" : "Sync Upstox"}
+      </button>
+    </div>
+  );
+}
 
-  const rows = items.map(item => {
-    const p = bySymbol[item.symbol.toUpperCase()];
-    const ltp = item.last_price > 0 ? item.last_price : null;
-    const current = p && ltp ? p.qty * ltp : null;
-    const pnl = current != null && p ? current - p.invested : null;
-    return { item, p, ltp, current, pnl, pnlPct: pnl != null && p && p.invested ? pnl / p.invested * 100 : null };
-  });
-  const tot = rows.reduce((a, r) => ({
-    invested: a.invested + (r.p && r.current != null ? r.p.invested : 0),
-    current: a.current + (r.current ?? 0),
-  }), { invested: 0, current: 0 });
+/** Each purchase as "qty · days" (LT past 12 months, "older" when undated). */
+export function HeldCell({ pos }: { pos?: Position }) {
+  if (!pos) {
+    return <span style={{ color: "var(--text-faint)", fontSize: "11px" }}
+                 title="Marked held by hand, or not in the Upstox holdings / imported tradebook">—</span>;
+  }
+  const lots = Array.isArray(pos.lots) ? pos.lots : [];
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "3px", fontSize: "11px" }}
+         title={lots.map(l => `${l.broker === "upstox" ? "U" : "Z"} ${q(l.qty)} bought ${l.date ?? "before the trade history"}${l.days != null ? ` (${l.days} days)` : ""}${l.long_term ? " — long-term" : ""}`).join("\n")}>
+      {lots.slice(0, 3).map((l, i) => (
+        <span key={i} style={{ padding: "1px 5px", borderRadius: "4px", whiteSpace: "nowrap",
+                               background: l.long_term ? "var(--positive-bg)" : "rgba(var(--ink-rgb),0.05)",
+                               color: l.long_term ? "var(--positive-strong)" : "var(--text-secondary)" }}>
+          {q(l.qty)} · {l.days == null ? "older" : `${l.days}d`}{l.long_term ? " LT" : ""}
+        </span>
+      ))}
+      {lots.length > 3 && <span style={{ color: "var(--text-faint)" }}>+{lots.length - 3}</span>}
+    </div>
+  );
+}
 
-  const th = (align: "left" | "right" = "right", w?: string) => ({ textAlign: align, width: w });
-  const cell = (align: "left" | "right" = "right") => ({ textAlign: align, fontSize: "12px", whiteSpace: "nowrap" as const });
-
+/** Sell button for a holding with shares at Upstox; opens the confirm dialog. */
+export function SellButton({ item, pos, onDone }: { item: TrackerItem; pos?: Position; onDone: () => void }) {
+  const [open, setOpen] = useState(false);
+  const up = pos?.brokers?.upstox;
+  if (!pos || !up || up.qty < 1) return null;
   return (
     <>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "14px", alignItems: "center", padding: "6px 12px 10px", fontSize: "12px" }}>
-        <span style={{ color: "var(--text-muted)" }}>Invested <b style={{ color: "var(--text-primary)" }}>{inr(tot.invested)}</b></span>
-        <span style={{ color: "var(--text-muted)" }}>Current <b style={{ color: "var(--text-primary)" }}>{inr(tot.current)}</b></span>
-        <span style={{ color: "var(--text-muted)" }}>P&L <b style={{ color: col(tot.current - tot.invested) }}>
-          {signed(tot.current - tot.invested)} {tot.invested ? `(${pct((tot.current - tot.invested) / tot.invested * 100)})` : ""}</b></span>
-        <span style={{ marginLeft: "auto", color: "var(--text-faint)", fontSize: "11px" }}
-              title={upErr ? `Upstox holdings: ${upErr}` : "Upstox holdings are re-read at most every 10 minutes; Zerodha comes from the tradebook you import on the Portfolio page."}>
-          {upErr ? "⚠ Upstox holdings not read — " : "Upstox holdings "}
-          {snapAt ? `as of ${new Date(snapAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}` : ""}
-        </span>
-        <button onClick={sync} disabled={syncing} className="wl-chip" style={{ height: "22px", fontSize: "11px", padding: "0 8px" }}>
-          {syncing ? "Syncing…" : "Sync Upstox"}
-        </button>
-      </div>
-      {items.length === 0 ? (
-        <div className="empty-state">
-          No holdings yet. They fill in from Upstox automatically (Sync Upstox to do it now) and from a Zerodha tradebook
-          imported on the 💼 Portfolio page.
-        </div>
-      ) : (
-        <div className="table-scroll-container">
-          <table className="stock-data-table">
-            <thead>
-              <tr>
-                <th className="col-symbol">Symbol</th>
-                <th style={th("left", "170px")}>Company</th>
-                <th style={th("right", "86px")}>LTP</th>
-                <th style={th("right", "70px")}>Day</th>
-                <th style={th("right", "60px")}>Qty</th>
-                <th style={th("right", "90px")}>Avg price</th>
-                <th style={th("right", "100px")}>Invested</th>
-                <th style={th("right", "100px")}>Current</th>
-                <th style={th("right", "110px")}>P&L</th>
-                <th style={th("left", "170px")} title="Quantity · days held, per purchase. LT = held over 12 months (long-term).">Held (qty · days)</th>
-                <th style={th("right", "70px")}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map(({ item, p, ltp, current, pnl, pnlPct }) => {
-                const up = p?.brokers?.upstox;
-                const lots = Array.isArray(p?.lots) ? p!.lots : [];
-                const lotText = (l: Lot) => `${q(l.qty)} · ${l.days == null ? "older" : `${l.days}d`}`;
-                return (
-                  <tr key={item.id} onClick={() => onRowClick(item)}>
-                    <td>{symbolCell(item)}</td>
-                    <td><span className="truncate" style={{ color: "var(--text-secondary)", fontSize: "11px", display: "block" }}>{item.name}</span></td>
-                    <td style={{ ...cell(), fontWeight: 700, color: "var(--text-primary)" }}>{ltp ? inr(ltp, 2) : "—"}</td>
-                    <td style={{ ...cell(), color: col(item.change), fontWeight: 600 }}>{ltp ? pct(item.change) : "—"}</td>
-                    <td style={cell()} title={p ? (Object.entries(p.brokers) as [string, Position["brokers"][string]][]).map(([b, v]) => `${b}: ${q(v.qty)} @ ${inr(v.avg, 2)} (${v.source.replace("_", " ")})`).join("\n") : ""}>
-                      {p ? q(p.qty) : "—"}
-                    </td>
-                    <td style={cell()}>{p ? inr(p.avg, 2) : "—"}</td>
-                    <td style={cell()}>{p ? inr(p.invested) : "—"}</td>
-                    <td style={{ ...cell(), fontWeight: 700 }}>{inr(current)}</td>
-                    <td style={{ ...cell(), color: col(pnl), fontWeight: 700 }}>
-                      {signed(pnl)}<div style={{ fontSize: "10px", fontWeight: 600 }}>{pct(pnlPct)}</div>
-                    </td>
-                    <td style={{ fontSize: "11px", color: "var(--text-secondary)" }}
-                        title={lots.map(l => `${l.broker === "upstox" ? "U" : "Z"} ${q(l.qty)} bought ${l.date ?? "before the trade history"}${l.days != null ? ` (${l.days} days)` : ""}${l.long_term ? " — long-term" : ""}`).join("\n")}>
-                      {p ? (
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: "3px" }}>
-                          {lots.slice(0, 3).map((l, i) => (
-                            <span key={i} style={{ padding: "1px 5px", borderRadius: "4px", whiteSpace: "nowrap",
-                                                   background: l.long_term ? "var(--positive-bg)" : "rgba(var(--ink-rgb),0.05)",
-                                                   color: l.long_term ? "var(--positive-strong)" : "var(--text-secondary)" }}>
-                              {lotText(l)}{l.long_term ? " LT" : ""}
-                            </span>
-                          ))}
-                          {lots.length > 3 && <span style={{ color: "var(--text-faint)" }}>+{lots.length - 3}</span>}
-                        </div>
-                      ) : <span style={{ color: "var(--text-faint)" }} title="Marked held by hand, or not in the Upstox holdings / imported tradebook">no trades on file</span>}
-                    </td>
-                    <td style={{ textAlign: "right" }}>
-                      {up && up.qty >= 1 && (
-                        <button onClick={(e) => { e.stopPropagation(); setSellFor({ item, pos: p! }); }}
-                          style={{ fontSize: "11px", fontWeight: 700, padding: "3px 10px", borderRadius: "6px", cursor: "pointer",
-                                   border: "1px solid rgba(var(--negative-rgb),0.45)", background: "var(--negative-bg)", color: "var(--negative)" }}
-                          title="Sell at Upstox">
-                          Sell
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-      {sellFor && (
-        <SellDialog item={sellFor.item} pos={sellFor.pos} onClose={() => setSellFor(null)}
-                    onDone={() => { setSellFor(null); load(); onChanged(); }} />
-      )}
+      <button onClick={(e) => { e.stopPropagation(); setOpen(true); }} title="Sell at Upstox"
+        style={{ fontSize: "10px", fontWeight: 800, padding: "3px 8px", borderRadius: "6px", cursor: "pointer",
+                 border: "1px solid rgba(var(--negative-rgb),0.45)", background: "var(--negative-bg)", color: "var(--negative)" }}>
+        Sell
+      </button>
+      {open && <SellDialog item={item} pos={pos} onClose={() => setOpen(false)} onDone={() => { setOpen(false); onDone(); }} />}
     </>
   );
 }
@@ -219,7 +173,7 @@ function SellDialog({ item, pos, onClose, onDone }: { item: TrackerItem; pos: Po
   const inp = { padding: "7px 9px", fontSize: "13px", background: "var(--surface-1)", color: "var(--text-primary)",
                 border: "1px solid var(--border-default)", borderRadius: "7px", width: "100%" };
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(var(--shadow-rgb),0.45)", zIndex: 1000,
+    <div onClick={(e) => { e.stopPropagation(); onClose(); }} style={{ position: "fixed", inset: 0, background: "rgba(var(--shadow-rgb),0.45)", zIndex: 1000,
                                    display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
       <div onClick={e => e.stopPropagation()} style={{ background: "var(--surface-1)", border: "1px solid var(--border-default)",
                                                       borderRadius: "12px", padding: "18px", width: "360px", maxWidth: "100%",

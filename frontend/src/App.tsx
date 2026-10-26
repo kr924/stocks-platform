@@ -23,7 +23,7 @@ import { IntelligenceDashboard } from "./components/IntelligenceDashboard";
 import { TradingDashboard } from "./components/TradingDashboard";
 import { ResultAlerts } from "./components/ResultAlerts";
 import { PortfolioDashboard } from "./components/PortfolioDashboard";
-import { HoldingsTable } from "./components/HoldingsTable";
+import { useHoldingPositions, HoldingsSummary, HeldCell, SellButton } from "./components/HoldingsTable";
 
 /**
  * Is it inside NSE trading hours right now? Mon-Fri, 09:00 to 15:35 IST.
@@ -421,6 +421,9 @@ export default function App() {
 
   // Watchlist filter tabs and periods
   const [watchlistTab, setWatchlistTab] = useState<"gainers" | "losers" | "holdings">("gainers");
+  // Quantities and purchase dates for the Holdings tab (Held column, Sell,
+  // day's P&L); fetched only while that tab is open.
+  const holdingPos = useHoldingPositions(watchlistTab === "holdings");
 
   interface IndexData {
     name: string;
@@ -1746,20 +1749,24 @@ export default function App() {
               </div>
             </div>
 
+            {watchlistTab === "holdings" && (
+              <HoldingsSummary
+                items={filteredWatchlist}
+                bySymbol={holdingPos.bySymbol}
+                snapAt={holdingPos.snapAt}
+                upErr={holdingPos.upErr}
+                onSynced={() => { holdingPos.reload(); fetchWatchlist(watchlistPeriod); }}
+              />
+            )}
             {watchlistLoading ? (
               <div className="loading-state">
                 <RefreshCw className="animate-spin" size={16} style={{ color: "var(--accent-color)" }} />
               </div>
-            ) : watchlistTab === "holdings" ? (
-              <HoldingsTable
-                items={filteredWatchlist}
-                symbolCell={(it) => renderSymbolCell(it as WatchlistItem)}
-                onRowClick={(it) => { setSelectedKey(it.instrument_key); setIsModalOpen(true); }}
-                onChanged={() => fetchWatchlist(watchlistPeriod)}
-              />
             ) : filteredWatchlist.length === 0 ? (
               <div className="empty-state">
-                No stocks match this filter in watchlist.
+                {watchlistTab === "holdings"
+                  ? "No holdings yet. They fill in from Upstox automatically and from a Zerodha tradebook imported on the 💼 Portfolio page."
+                  : "No stocks match this filter in watchlist."}
               </div>
             ) : (
               <div className="table-scroll-container">
@@ -1768,6 +1775,9 @@ export default function App() {
                     <tr>
                       <th className="col-symbol">Symbol</th>
                       <th className="col-name">Company</th>
+                      {watchlistTab === "holdings" && (
+                        <th style={{ width: "150px" }} title="Each purchase as quantity · days held. LT = held over 12 months.">Held (qty · days)</th>
+                      )}
                       <th className="col-ltp" style={{ textAlign: "right" }}>LTP</th>
                       <th className="col-change" style={{ textAlign: "right" }}>Change</th>
                       <th className="col-close" style={{ textAlign: "right" }}>Prev Close</th>
@@ -1786,7 +1796,7 @@ export default function App() {
                       <th className="col-ai">AI</th>
                       <th className="col-sector">Sector</th>
                       <th className="col-res">Resistance</th>
-                      <th className="col-actions"></th>
+                      <th className="col-actions" style={watchlistTab === "holdings" ? { width: "110px" } : undefined}></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1811,6 +1821,9 @@ export default function App() {
                               {item.name}
                             </span>
                           </td>
+                          {watchlistTab === "holdings" && (
+                            <td><HeldCell pos={holdingPos.bySymbol[item.symbol.toUpperCase()]} /></td>
+                          )}
                           <td style={{ textAlign: "right", fontWeight: 700, color: "var(--text-primary)" }}>
                             {item.last_price > 0 ? `₹${item.last_price.toFixed(2)}` : "—"}
                           </td>
@@ -1950,6 +1963,10 @@ export default function App() {
                               >
                                 <RefreshCw size={12} className={detailsLoading[item.instrument_key] ? "animate-spin" : ""} />
                               </button>
+                              {watchlistTab === "holdings" && (
+                                <SellButton item={item} pos={holdingPos.bySymbol[item.symbol.toUpperCase()]}
+                                  onDone={() => { holdingPos.reload(); fetchWatchlist(watchlistPeriod); }} />
+                              )}
                               <button
                                 onClick={(e) => handleDeleteFromWatchlist(item.id, e)}
                                 className="action-btn-danger"
