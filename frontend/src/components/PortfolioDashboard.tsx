@@ -14,7 +14,9 @@ type BrokerFilter = "" | "upstox" | "zerodha";
 
 interface Holding {
   key: string; symbol: string | null; isin: string | null; broker: string;
-  qty: number; avg_cost: number; invested: number; first_buy: string; last_buy: string;
+  qty: number; avg_cost: number; invested: number; first_buy: string | null; last_buy: string | null;
+  lots?: { date: string | null; qty: number; days: number | null; long_term: boolean | null }[];
+  undated_qty?: number; source?: string;
   long_term_qty: number; next_long_term: string | null;
   ltp: number | null; value: number | null; pnl: number | null; pnl_pct: number | null; day_change_pct: number | null;
 }
@@ -27,6 +29,7 @@ interface HoldingsResp {
 interface TaxRow {
   broker: string; symbol: string | null; isin: string | null; buy_date: string; sell_date: string; qty: number;
   buy_price: number; sell_price: number; gain: number; term: string; grandfathered?: boolean; cost: number; sale_value: number;
+  charges?: number; stt?: number; tax_gain?: number;
 }
 interface TaxResp {
   fy: string;
@@ -37,6 +40,7 @@ interface TaxResp {
   short_term_loss_carried_forward: number;
   intraday: { pnl: number; turnover: number; trades: number };
   estimated_tax: number; sale_value: number; rows: TaxRow[]; warnings: string[]; notes: string[];
+  charges?: { deductible: number; stt: number; gross_gain: number };
 }
 interface Trade {
   id: number; broker: string; symbol: string; isin: string | null; exchange: string | null; trade_date: string;
@@ -287,7 +291,7 @@ export function PortfolioDashboard() {
                 <th style={{ ...th(), cursor: "pointer" }} onClick={() => setSortKey("pnl")}>P&L</th>
                 <th style={{ ...th(), cursor: "pointer" }} onClick={() => setSortKey("pnl_pct")}>P&L %</th>
                 <th style={th()} title="Shares held more than 12 months: a sale is long-term (12.5% above ₹1.25 lakh a year) rather than short-term (20%)">LONG-TERM</th>
-                <th style={th()}>FIRST BUY</th>
+                <th style={th("left")} title="Quantity · days held, per purchase">HELD (QTY · DAYS)</th>
               </tr>
             </thead>
             <tbody>
@@ -305,9 +309,14 @@ export function PortfolioDashboard() {
                   <td style={{ ...td(), color: col(h.pnl_pct) }}>{pct(h.pnl_pct)}</td>
                   <td style={{ ...td(), color: "var(--text-secondary)" }}
                       title={h.next_long_term ? `More become long-term on ${h.next_long_term}` : "All long-term"}>
-                    {h.long_term_qty >= h.qty ? "all" : h.long_term_qty > 0 ? `${qtyTxt(h.long_term_qty)} of ${qtyTxt(h.qty)}` : `from ${h.next_long_term}`}
+                    {h.long_term_qty >= h.qty ? "all" : h.long_term_qty > 0 ? `${qtyTxt(h.long_term_qty)} of ${qtyTxt(h.qty)}`
+                      : h.next_long_term ? `from ${h.next_long_term}` : "older lots — date unknown"}
                   </td>
-                  <td style={{ ...td(), color: "var(--text-muted)" }}>{h.first_buy}</td>
+                  <td style={{ ...td("left"), color: "var(--text-secondary)", fontSize: "11px" }}
+                      title={(h.lots || []).map(l => `${qtyTxt(l.qty)} bought ${l.date ?? "before the trade history"}`).join("\n")}>
+                    {(h.lots || []).slice(0, 3).map(l => `${qtyTxt(l.qty)} · ${l.days == null ? "older" : `${l.days}d`}`).join(", ")}
+                    {(h.lots || []).length > 3 ? ` +${(h.lots || []).length - 3}` : ""}
+                  </td>
                 </tr>
               ))}
               {rows.length === 0 && (
@@ -345,6 +354,13 @@ export function PortfolioDashboard() {
                 <Tile label="Intraday (speculative)" value={signed(tax.intraday.pnl)} color={col(tax.intraday.pnl)}
                       sub={`${tax.intraday.trades} round trip(s) · taxed at your slab`} />
               </div>
+              {tax.charges && (
+                <div style={{ fontSize: "12px", color: "var(--text-secondary)", marginBottom: "8px" }}>
+                  Estimated charges on these sales: {inr(tax.charges.deductible)} brokerage, exchange, SEBI, stamp, GST and DP
+                  (deducted from the gains above) + {inr(tax.charges.stt)} STT (not deductible from capital gains).
+                  Gains before charges: {signed(tax.charges.gross_gain)}.
+                </div>
+              )}
               {(tax.long_term_loss_carried_forward > 0 || tax.short_term_loss_carried_forward > 0) && (
                 <div style={{ fontSize: "12px", color: "var(--text-secondary)", marginBottom: "8px" }}>
                   Loss to carry forward (file the return on time to keep it):
@@ -356,7 +372,7 @@ export function PortfolioDashboard() {
                 <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "900px" }}>
                   <thead>
                     <tr>
-                      {["TYPE", "SYMBOL", "AT", "BOUGHT", "SOLD", "QTY", "BUY", "SELL", "COST", "SALE VALUE", "GAIN"].map((h, i) => (
+                      {["TYPE", "SYMBOL", "AT", "BOUGHT", "SOLD", "QTY", "BUY", "SELL", "COST", "SALE VALUE", "CHARGES", "STT", "GAIN"].map((h, i) => (
                         <th key={h} style={th(i < 3 ? "left" : "right")}>{h}</th>
                       ))}
                     </tr>
@@ -377,11 +393,14 @@ export function PortfolioDashboard() {
                         <td style={td()}>{inr(r.sell_price, 2)}</td>
                         <td style={td()}>{inr(r.cost)}</td>
                         <td style={td()}>{inr(r.sale_value)}</td>
-                        <td style={{ ...td(), color: col(r.gain), fontWeight: 700 }}>{signed(r.gain)}</td>
+                        <td style={{ ...td(), color: "var(--text-muted)" }}>{inr(r.charges, 2)}</td>
+                        <td style={{ ...td(), color: "var(--text-muted)" }}>{inr(r.stt, 2)}</td>
+                        <td style={{ ...td(), color: col(r.tax_gain ?? r.gain), fontWeight: 700 }}
+                            title={`Before charges ${signed(r.gain)}`}>{signed(r.tax_gain ?? r.gain)}</td>
                       </tr>
                     ))}
                     {tax.rows.length === 0 && (
-                      <tr><td colSpan={11} style={{ ...td("left"), color: "var(--text-faint)", fontStyle: "italic" }}>No sales in FY {tax.fy}.</td></tr>
+                      <tr><td colSpan={13} style={{ ...td("left"), color: "var(--text-faint)", fontStyle: "italic" }}>No sales in FY {tax.fy}.</td></tr>
                     )}
                   </tbody>
                 </table>

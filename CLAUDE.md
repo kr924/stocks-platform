@@ -387,15 +387,42 @@ a capital-gains summary per financial year, derived from trades alone.
   sells is matched **FIFO**. Held more than 12 months → LTCG. A sale with no
   lot is reported as a warning, never guessed — missing history or an
   unentered bonus/split.
+- **Charges are estimated** (`services/charges.py`): tradebooks and the
+  trade-history API carry none, so they come from each broker's published
+  schedule (Zerodha delivery ₹0 / Upstox ₹20 per order; STT 0.1% delivery,
+  0.025% intraday sell; NSE transaction charge by date — 0.00322%, 0.00297%
+  from 1 Oct 2024, 0.00307% from 1 Mar 2026; SEBI ₹10/crore; stamp 0.015% /
+  0.003%; GST 18%; DP ₹15.34 Zerodha / ₹23.60 Upstox per stock per sell day).
+  Orders are counted by order id where the source has one. Everything but STT
+  is deducted from capital gains (`tax_gain`); intraday is net of all of it.
 - **Tax** (`tax_summary`) is an estimate: rates by sale date (15/10% before
   23 Jul 2024, 20/12.5% from then), exemption ₹1 lakh to FY 2023-24 and
   ₹1.25 lakh from FY 2024-25, short-term loss set off against long-term gains,
-  no charges deducted, no cess or surcharge, pre-1 Feb 2018 lots flagged at
-  actual cost. `realised.csv` exports one row per matched sale.
-- **The tracker's H / U / Z chips follow the ledger** (`sync_watchlist`, after
-  each import or sync): a stock held → H with its broker(s), added to the
-  watchlist if missing; fully sold → H cleared. Stocks with no trades on file,
-  or with an unmatched sale, are left alone.
+  no cess or surcharge, pre-1 Feb 2018 lots flagged at actual cost.
+  `realised.csv` exports one row per matched sale with the charges.
+- **Holdings are the ledger reconciled with Upstox's own holdings**
+  (`positions`; `GET /v2/portfolio/long-term-holdings`, snapshot in
+  `system_settings.portfolio_upstox_holdings`, re-read at most every 10 min).
+  Where the ledger's Upstox quantity (before today's trades) equals Upstox's
+  `quantity` or `quantity + t1_quantity`, the ledger's lots stand. Otherwise
+  Upstox's quantity and average price win, with the ledger's dated lots for
+  what they cover and an undated lot for older shares; a stock Upstox no
+  longer holds is dropped unless bought today. Zerodha is the ledger alone.
+- **The Stocks Tracker's Holdings tab** (`components/HoldingsTable.tsx`, from
+  `GET /api/portfolio/positions` every 60 s, prices from the tracker's live
+  quotes): qty, average price, invested, current, P&L, and each lot as
+  "qty · days" (LT past 12 months, "older" when undated). **Sell** for Upstox
+  holdings (`POST /api/portfolio/sell`, delivery SELL through the broker
+  gateway): it closes the engine's `bought` TradeConfigs for that stock
+  oldest-first up to the quantity sold, so the stoploss watcher cannot sell
+  them a second time, then re-syncs today's trades at 8 s and 60 s.
+- **The tracker's H / U / Z chips follow `positions`** (`sync_watchlist`, after
+  each import or sync, and whenever the Upstox snapshot changes): held → H
+  with its broker(s), added to the watchlist if missing; no longer held → H
+  cleared. Stocks neither source knows, or with an unmatched sale, are left
+  alone.
+- `ops/check_portfolio.py` replays parsing, matching, charges, set-off and
+  the Upstox reconciliation against the live code.
 
 ## Like-for-like: a quarter against the same quarter last year
 

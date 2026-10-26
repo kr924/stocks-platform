@@ -167,3 +167,117 @@ def delete_trade(trade_id: int, db: Session = Depends(get_db)):
     db.delete(t)
     db.commit()
     return {"status": "ok"}
+
+
+# ─── For the Stocks Tracker's Holdings tab ──────────────────────────────────
+
+@router.get("/positions")
+def positions(db: Session = Depends(get_db)):
+    """
+    What is held now, per stock: quantity, average price, amount invested and
+    the dated lots (days held), per broker. Upstox's holdings are re-read at
+    most every 10 minutes; when they changed, the tracker's H / U / Z chips
+    are brought in line.
+    """
+    pos = P.positions(db)
+    if pos["changed"]:
+        try:
+            P.sync_watchlist(db, pos)
+        except Exception as e:
+            logger.warning(f"[PORTFOLIO] watchlist sync failed: {e}")
+    rows = []
+    for p in pos["positions"]:
+        rows.append({**{k: p[k] for k in ("key", "symbol", "isin", "instrument_key", "qty", "avg", "invested",
+                                          "broker", "lots")},
+                     "brokers": {b: {"qty": v["qty"], "avg": v["avg"], "invested": v["invested"],
+                                     "source": v["source"]} for b, v in p["brokers"].items()}})
+    return {"positions": rows, "upstox_snapshot_at": pos["upstox_snapshot_at"],
+            "upstox_error": pos["upstox_error"]}
+
+
+class SellBody(BaseModel):
+    symbol: str
+    quantity: int
+    order_type: str = "MARKET"
+    limit_price: Optional[float] = None
+
+
+@router.post("/sell")
+def sell_holding(body: SellBody, db: Session = Depends(get_db)):
+    """
+    Sell shares held at Upstox, from the tracker. A delivery (CNC) SELL
+    through the same gateway the trading engine uses. Positions the engine
+    bought and is still watching for its stoploss are closed (oldest first,
+    up to the quantity sold), so the watcher does not try to sell them again.
+    """
+    import threading
+    from app.database import TradeConfig, TradeOrder
+    from app.services.broker_gateway import get_broker
+
+    sym = (body.symbol or "").strip().upper()
+    pos = P.positions(db)
+    p = next((x for x in pos["positions"] if (x.get("symbol") or "").upper() == sym), None)
+    up = (p or {}).get("brokers", {}).get("upstox")
+    if not up:
+        raise HTTPException(400, f"{sym} is not held at Upstox")
+    held = int(round(up["qty"]))
+    if body.quantity < 1 or body.quantity > held:
+        raise HTTPException(400, f"Quantity must be between 1 and {held}")
+    ot = (body.order_type or "MARKET").upper()
+    if ot not in ("MARKET", "LIMIT"):
+        raise HTTPException(400, "order_type is MARKET or LIMIT")
+    if ot == "LIMIT" and not (body.limit_price and body.limit_price > 0):
+        raise HTTPException(400, "A limit order needs a price")
+    key = (p.get("instrument_key") or "").replace(":", "|")
+    if "|" not in key:
+        raise HTTPException(400, f"No Upstox instrument key for {sym}")
+
+    result = get_broker("upstox").place_order(symbol=sym, instrument_key=key, side="SELL",
+                                              quantity=body.quantity, order_type=ot,
+                                              limit_price=body.limit_price if ot == "LIMIT" else None)
+    db.add(TradeOrder(config_id=0, symbol=sym, side="SELL", quantity=body.quantity, order_type=ot,
+                      limit_price=body.limit_price if ot == "LIMIT" else None, price=result.price,
+                      broker="upstox", broker_order_id=result.broker_order_id,
+                      broker_response=json.dumps(result.raw_response, default=str), status=result.status,
+                      error_message=None if result.success else result.message))
+    closed = []
+    if result.success:
+        left = body.quantity
+        configs = (db.query(TradeConfig)
+                   .filter(TradeConfig.symbol == sym, TradeConfig.status == "bought",
+                           TradeConfig.broker == "upstox")
+                   .order_by(TradeConfig.bought_at.asc()).all())
+        for cfg in configs:
+            if left <= 0:
+                break
+            note = f"Sold {min(left, cfg.quantity)} from Stocks Tracker holdings (order {result.broker_order_id})"
+            if cfg.quantity <= left:
+                left -= cfg.quantity
+                cfg.status = "sold"
+                cfg.sold_at = datetime.utcnow()
+                cfg.notes = note
+                closed.append(cfg.id)
+            else:
+                cfg.quantity -= left
+                cfg.notes = note + f"; {cfg.quantity} still held"
+                left = 0
+    db.commit()
+    logger.info(f"[PORTFOLIO] sell {body.quantity} {sym} ({ot}): {result.status} {result.message}")
+
+    if result.success:
+        # Pick the fill up into the ledger and the holdings once it has executed.
+        def _later():
+            import time
+            from app.database import SessionLocal
+            for wait in (8, 60):
+                time.sleep(wait)
+                s = SessionLocal()
+                try:
+                    P.sync_upstox(s, years=0)
+                except Exception as e:
+                    logger.info(f"[PORTFOLIO] post-sell sync: {e}")
+                finally:
+                    s.close()
+        threading.Thread(target=_later, daemon=True, name=f"post-sell-{sym}").start()
+    return {"success": result.success, "status": result.status, "message": result.message,
+            "order_id": result.broker_order_id, "closed_configs": closed}

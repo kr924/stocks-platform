@@ -45,6 +45,8 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
+from app.services.charges import day_charges
+
 logger = logging.getLogger("app.portfolio")
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -274,6 +276,7 @@ def _isin_from_key(key: str) -> Optional[str]:
 
 
 def fetch_upstox(feed, years: int = 3) -> dict:
+    """years=0: today's trades only (after a sell from the tracker)."""
     """
     Equity trades from Upstox: every financial year the API keeps (three),
     then today's trades, which the history endpoint has not caught up with.
@@ -346,12 +349,12 @@ def fetch_upstox(feed, years: int = 3) -> dict:
     return {"rows": rows, "errors": errors}
 
 
-def sync_upstox(db) -> dict:
-    """Fetch, store and record the outcome in system_settings."""
+def sync_upstox(db, years: int = 3) -> dict:
+    """Fetch trades and holdings, store, record the outcome, and update the tracker's H chips."""
     import json
     from app.main import get_active_feed
     from app.database import SystemSetting
-    got = fetch_upstox(get_active_feed())
+    got = fetch_upstox(get_active_feed(), years=years)
     res = store(db, got["rows"])
     res.update({"fetched": len(got["rows"]), "errors": got["errors"],
                 "at": datetime.utcnow().isoformat() + "Z"})
@@ -364,11 +367,11 @@ def sync_upstox(db) -> dict:
         db.commit()
     except Exception:
         db.rollback()
-    if res["added"]:
-        try:
-            sync_watchlist(db)
-        except Exception as e:
-            logger.warning(f"[PORTFOLIO] watchlist sync failed: {e}")
+    try:
+        upstox_holdings(db, force=True)
+        res["watchlist"] = sync_watchlist(db)
+    except Exception as e:
+        logger.warning(f"[PORTFOLIO] watchlist sync failed: {e}")
     logger.info(f"[PORTFOLIO] Upstox sync: {res['added']} new of {res['fetched']}; errors: {res['errors']}")
     return res
 
@@ -426,21 +429,37 @@ def compute(trades) -> dict:
             bavg = sum(t.quantity * t.price for t in buys) / bq if bq else 0.0
             savg = sum(t.quantity * t.price for t in sells) / sq if sq else 0.0
             intra = min(bq, sq)
+            sd = _d(day)
+            ch = day_charges(broker, sd, buys, sells, intra)
             if intra > EPS:
+                gain = intra * (savg - bavg)
+                # Speculative business income: every charge, STT included, is
+                # a business expense.
                 realised.append({"broker": broker, "key": k, "buy_date": day, "sell_date": day,
                                  "qty": intra, "buy_price": bavg, "sell_price": savg,
-                                 "gain": intra * (savg - bavg), "term": "INTRADAY"})
-            if bq - intra > EPS:
-                open_lots.append({"date": day, "qty": bq - intra, "price": bavg})
+                                 "gain": gain, "buy_charges": 0.0, "sell_charges": ch["intra_other"],
+                                 "stt": ch["intra_stt"], "tax_gain": gain - ch["intra_other"] - ch["intra_stt"],
+                                 "term": "INTRADAY"})
+            dq = bq - intra
+            if dq > EPS:
+                open_lots.append({"date": day, "qty": dq, "price": bavg,
+                                  "charge_ps": ch["buy_other"] / dq, "stt_ps": ch["buy_stt"] / dq})
             left = sq - intra
-            sd = _d(day)
+            sell_ps = ch["sell_other"] / left if left > EPS else 0.0
+            sell_stt_ps = ch["sell_stt"] / left if left > EPS else 0.0
             while left > EPS and open_lots:
                 lot = open_lots[0]
                 take = min(left, lot["qty"])
                 bd = _d(lot["date"])
+                gain = take * (savg - lot["price"])
+                bc, sc = take * lot["charge_ps"], take * sell_ps
                 realised.append({"broker": broker, "key": k, "buy_date": lot["date"], "sell_date": day,
                                  "qty": take, "buy_price": lot["price"], "sell_price": savg,
-                                 "gain": take * (savg - lot["price"]),
+                                 "gain": gain, "buy_charges": bc, "sell_charges": sc,
+                                 "stt": take * (lot["stt_ps"] + sell_stt_ps),
+                                 # Capital gain: charges other than STT are cost
+                                 # of acquisition or expenses of transfer.
+                                 "tax_gain": gain - bc - sc,
                                  "term": "LTCG" if is_long_term(bd, sd) else "STCG",
                                  "grandfathered": bd < GRANDFATHER_BEFORE})
                 lot["qty"] -= take
@@ -478,27 +497,221 @@ def _instrument_key(info: dict) -> str:
     return keys[0] if keys else ""
 
 
-def holdings(db, broker: Optional[str] = None, with_prices: bool = True) -> dict:
-    """Open positions per stock and broker, with live value where a quote exists."""
-    c = compute(_all_trades(db, broker))
+# ─── Upstox's own holdings ──────────────────────────────────────────────────
+
+UPSTOX_HOLDINGS_KEY = "portfolio_upstox_holdings"
+UPSTOX_HOLDINGS_MAX_AGE = 600   # seconds; holdings only change when you trade
+
+
+def fetch_upstox_holdings(feed) -> List[dict]:
+    """GET /v2/portfolio/long-term-holdings: what Upstox says you hold now."""
+    data = _upstox_get(feed, "/v2/portfolio/long-term-holdings", {})
+    out = []
+    for h in data.get("data") or []:
+        key = h.get("instrument_token") or ""
+        out.append({
+            "symbol": (h.get("trading_symbol") or h.get("tradingsymbol") or "").upper(),
+            "isin": (h.get("isin") or _isin_from_key(key) or "").upper() or None,
+            "instrument_key": key, "exchange": (h.get("exchange") or "").upper() or None,
+            "company_name": h.get("company_name"),
+            "quantity": _num(h.get("quantity")) or 0.0,
+            "t1_quantity": _num(h.get("t1_quantity")) or 0.0,
+            "average_price": _num(h.get("average_price")) or 0.0,
+        })
+    return out
+
+
+def upstox_holdings(db, max_age: int = UPSTOX_HOLDINGS_MAX_AGE, force: bool = False) -> Optional[dict]:
+    """
+    The last Upstox holdings snapshot, refreshed when older than max_age.
+    {at, rows, changed, error}. None when Upstox has never answered.
+    """
+    import json
+    from app.database import SystemSetting
+    row = db.query(SystemSetting).filter(SystemSetting.key == UPSTOX_HOLDINGS_KEY).first()
+    old = None
+    if row and row.value:
+        try:
+            old = json.loads(row.value)
+        except Exception:
+            old = None
+    if old and not force:
+        try:
+            age = (datetime.utcnow() - datetime.fromisoformat(old["at"].rstrip("Z"))).total_seconds()
+        except Exception:
+            age = 1e9
+        if age < max_age:
+            return {**old, "changed": False}
+    try:
+        from app.main import get_active_feed
+        rows = fetch_upstox_holdings(get_active_feed())
+    except Exception as e:
+        if old:
+            return {**old, "changed": False, "error": str(e)}
+        return None
+    new = {"at": datetime.utcnow().isoformat() + "Z", "rows": rows}
+    try:
+        if row:
+            row.value = json.dumps(new)
+        else:
+            db.add(SystemSetting(key=UPSTOX_HOLDINGS_KEY, value=json.dumps(new)))
+        db.commit()
+    except Exception:
+        db.rollback()
+    changed = not old or sorted((r["isin"] or r["symbol"], r["quantity"], r["t1_quantity"]) for r in old.get("rows", [])) != \
+        sorted((r["isin"] or r["symbol"], r["quantity"], r["t1_quantity"]) for r in rows)
+    return {**new, "changed": changed}
+
+
+# ─── Positions: the ledger, reconciled with Upstox's holdings ───────────────
+
+def _lot_view(lots: List[dict], today: date) -> List[dict]:
+    out = []
+    for l in lots:
+        d = l.get("date")
+        out.append({"date": d, "qty": round(l["qty"], 4), "price": l.get("price"),
+                    "days": (today - _d(d)).days if d else None,
+                    "long_term": (today > _one_year_after(_d(d))) if d else None})
+    return out
+
+
+def _trim_fifo(lots: List[dict], qty: float) -> List[dict]:
+    """Keep the newest `qty` shares: older lots were sold first."""
+    out, need = [], qty
+    for l in reversed(lots):
+        if need <= EPS:
+            break
+        take = min(need, l["qty"])
+        out.append({**l, "qty": take})
+        need -= take
+    return list(reversed(out))
+
+
+def positions(db, refresh: bool = True) -> dict:
+    """
+    What is held now, per stock and broker.
+
+    Zerodha: the ledger (tradebook imports). Upstox: the ledger where it
+    agrees with Upstox's own holdings; otherwise Upstox's quantity and
+    average price, with the ledger's dated lots for as many shares as it
+    covers and an undated lot for the rest (bought before the three years the
+    trade history reaches). A stock the ledger holds that Upstox does not is
+    taken as sold, unless it was bought today (not a holding until T+1).
+    """
+    trades = _all_trades(db)
+    c = compute(trades)
     today = _today()
-    rows = []
+    tstr = today.isoformat()
+    s2i = _sym2isin(trades)
+    entries: Dict[str, dict] = {}
+
+    def entry(k, info):
+        return entries.setdefault(k, {"key": k, "symbol": info.get("symbol"), "isin": info.get("isin"),
+                                      "instrument_key": info.get("instrument_key") or "", "brokers": {}})
+
     for (brk, k), ls in c["lots"].items():
-        info = c["names"].get(k, {})
         qty = sum(l["qty"] for l in ls)
         if qty <= EPS:
             continue
         cost = sum(l["qty"] * l["price"] for l in ls)
-        lt_qty = sum(l["qty"] for l in ls if today > _one_year_after(_d(l["date"])))
-        rows.append({"key": k, "symbol": info.get("symbol"), "isin": info.get("isin"), "broker": brk,
-                     "qty": round(qty, 4), "avg_cost": cost / qty, "invested": cost,
-                     "first_buy": min(l["date"] for l in ls), "last_buy": max(l["date"] for l in ls),
-                     "long_term_qty": round(lt_qty, 4),
-                     "next_long_term": min((_one_year_after(_d(l["date"])) + timedelta(days=1)).isoformat()
-                                           for l in ls if today <= _one_year_after(_d(l["date"])))
-                                       if lt_qty < qty - EPS else None,
-                     "instrument_key": _instrument_key(info),
-                     "ltp": None, "value": None, "pnl": None, "pnl_pct": None, "day_change_pct": None})
+        entry(k, c["names"].get(k, {}))["brokers"][brk] = {
+            "qty": qty, "avg": cost / qty, "invested": cost, "lots": [dict(l) for l in ls],
+            "charges": sum(l["qty"] * l.get("charge_ps", 0) for l in ls), "source": "ledger"}
+
+    snap = upstox_holdings(db) if refresh else None
+    snapshot_ok = bool(snap) and not snap.get("error")
+    if snap and snap.get("rows") is not None:
+        today_net: Dict[str, float] = defaultdict(float)
+        today_lots: Dict[str, list] = defaultdict(list)
+        for t in trades:
+            if t.broker == "upstox" and t.trade_date == tstr:
+                k = _group_key(t, s2i)
+                today_net[k] += t.quantity if t.side == "BUY" else -t.quantity
+        for k, ls in c["lots"].items():
+            if k[0] == "upstox":
+                today_lots[k[1]] = [l for l in ls if l["date"] == tstr]
+        in_snap = set()
+        for h in snap["rows"]:
+            k = h["isin"] or s2i.get(h["symbol"]) or h["symbol"]
+            in_snap.add(k)
+            e = entry(k, {"symbol": h["symbol"], "isin": h["isin"], "instrument_key": h["instrument_key"]})
+            if not e.get("instrument_key"):
+                e["instrument_key"] = h["instrument_key"]
+            led = e["brokers"].get("upstox")
+            led_prev = (led["qty"] if led else 0.0) - today_net.get(k, 0.0)
+            cands = (h["quantity"], h["quantity"] + h["t1_quantity"])
+            if led and any(abs(x - led_prev) < 1e-6 for x in cands):
+                continue                      # the ledger agrees; keep its lots and costs
+            qty = h["quantity"] + h["t1_quantity"] + today_net.get(k, 0.0)
+            if qty <= EPS:
+                e["brokers"].pop("upstox", None)
+                continue
+            lots = sorted((led or {}).get("lots") or [], key=lambda l: l["date"])
+            known = sum(l["qty"] for l in lots)
+            if known > qty:
+                lots = _trim_fifo(lots, qty)
+            elif qty - known > EPS:
+                lots = [{"date": None, "qty": qty - known, "price": h["average_price"]}] + lots
+            e["brokers"]["upstox"] = {"qty": qty, "avg": h["average_price"], "invested": h["average_price"] * qty,
+                                      "lots": lots, "charges": None, "source": "upstox_holdings"}
+        if snapshot_ok:
+            for k, e in entries.items():
+                if k in in_snap or "upstox" not in e["brokers"]:
+                    continue
+                tl = today_lots.get(k) or []
+                q = sum(l["qty"] for l in tl)
+                if q > EPS:
+                    cost = sum(l["qty"] * l["price"] for l in tl)
+                    e["brokers"]["upstox"] = {"qty": q, "avg": cost / q, "invested": cost, "lots": tl,
+                                              "charges": None, "source": "ledger_today"}
+                else:
+                    e["brokers"].pop("upstox", None)
+
+    out = []
+    for k, e in entries.items():
+        if not e["brokers"]:
+            continue
+        lots_all = []
+        for brk, b in e["brokers"].items():
+            b["lots"] = _lot_view(b["lots"], today)
+            for l in b["lots"]:
+                lots_all.append({**l, "broker": brk})
+        lots_all.sort(key=lambda l: (l["date"] or "0000"))
+        qty = sum(b["qty"] for b in e["brokers"].values())
+        inv = sum(b["invested"] for b in e["brokers"].values())
+        if not e.get("instrument_key"):
+            e["instrument_key"] = _instrument_key(e)
+        out.append({**e, "qty": qty, "invested": inv, "avg": inv / qty if qty else None, "lots": lots_all,
+                    "broker": "both" if len(e["brokers"]) > 1 else next(iter(e["brokers"]))})
+    return {"positions": out, "upstox_snapshot_at": (snap or {}).get("at"),
+            "upstox_error": (snap or {}).get("error") if snap else "Upstox holdings not fetched yet",
+            "changed": bool(snap and snap.get("changed")), "compute": c}
+
+
+def holdings(db, broker: Optional[str] = None, with_prices: bool = True) -> dict:
+    """Open positions per stock and broker, with live value where a quote exists."""
+    pos = positions(db)
+    c = pos["compute"]
+    today = _today()
+    rows = []
+    for p in pos["positions"]:
+        for brk, b in p["brokers"].items():
+            if broker in BROKERS and brk != broker:
+                continue
+            known_lots = [l for l in b["lots"] if l["date"]]
+            unknown = sum(l["qty"] for l in b["lots"] if not l["date"])
+            lt_qty = sum(l["qty"] for l in known_lots if l["long_term"])
+            pending = [l for l in known_lots if not l["long_term"]]
+            rows.append({"key": p["key"], "symbol": p["symbol"], "isin": p["isin"], "broker": brk,
+                         "qty": round(b["qty"], 4), "avg_cost": b["avg"], "invested": b["invested"],
+                         "first_buy": known_lots[0]["date"] if known_lots else None,
+                         "last_buy": known_lots[-1]["date"] if known_lots else None,
+                         "lots": b["lots"], "undated_qty": round(unknown, 4), "source": b["source"],
+                         "long_term_qty": round(lt_qty, 4),
+                         "next_long_term": (min((_one_year_after(_d(l["date"])) + timedelta(days=1)).isoformat()
+                                                for l in pending) if pending else None),
+                         "instrument_key": p["instrument_key"],
+                         "ltp": None, "value": None, "pnl": None, "pnl_pct": None, "day_change_pct": None})
     if with_prices and rows:
         try:
             from app.main import get_active_feed
@@ -519,7 +732,8 @@ def holdings(db, broker: Optional[str] = None, with_prices: bool = True) -> dict
                 r["day_change_pct"] = ((ltp / close - 1) * 100) if close else None
     rows.sort(key=lambda r: -(r["value"] or r["invested"]))
     fy = fy_of(today)
-    real = [x for x in c["realised"] if fy_of(_d(x["sell_date"])) == fy]
+    real = [x for x in c["realised"] if fy_of(_d(x["sell_date"])) == fy
+            and (broker not in BROKERS or x["broker"] == broker)]
     invested = sum(r["invested"] for r in rows)
     priced = [r for r in rows if r["value"] is not None]
     return {
@@ -531,9 +745,11 @@ def holdings(db, broker: Optional[str] = None, with_prices: bool = True) -> dict
             "priced_invested": sum(r["invested"] for r in priced),
             "unpriced": len(rows) - len(priced),
             "realised_fy": fy,
-            "realised_fy_capital": sum(x["gain"] for x in real if x["term"] != "INTRADAY"),
-            "realised_fy_intraday": sum(x["gain"] for x in real if x["term"] == "INTRADAY"),
+            "realised_fy_capital": sum(x["tax_gain"] for x in real if x["term"] != "INTRADAY"),
+            "realised_fy_intraday": sum(x["tax_gain"] for x in real if x["term"] == "INTRADAY"),
         },
+        "upstox_snapshot_at": pos["upstox_snapshot_at"],
+        "upstox_error": pos["upstox_error"],
         "warnings": _warnings(c),
     }
 
@@ -571,8 +787,10 @@ def tax_summary(db, fy: str, broker: Optional[str] = None) -> dict:
     lt = [x for x in rows if x["term"] == "LTCG"]
     it = [x for x in rows if x["term"] == "INTRADAY"]
 
+    # Gains after estimated charges (services/charges.py): brokerage, exchange,
+    # SEBI, stamp, GST and DP are deductible; STT is not.
     def tot(xs, sign):
-        return sum(x["gain"] for x in xs if (x["gain"] > 0) == (sign > 0) and x["gain"] != 0)
+        return sum(x["tax_gain"] for x in xs if (x["tax_gain"] > 0) == (sign > 0) and x["tax_gain"] != 0)
 
     st_gain, st_loss = tot(st, 1), tot(st, -1)
     lt_gain, lt_loss = tot(lt, 1), tot(lt, -1)
@@ -586,7 +804,7 @@ def tax_summary(db, fy: str, broker: Optional[str] = None) -> dict:
     lt_taxable = max(0.0, lt_net - exemption)
 
     def wrate(xs, i):
-        g = [(x["gain"], _rates(_d(x["sell_date"]))[i]) for x in xs if x["gain"] > 0]
+        g = [(x["tax_gain"], _rates(_d(x["sell_date"]))[i]) for x in xs if x["tax_gain"] > 0]
         tg = sum(a for a, _ in g)
         return sum(a * r for a, r in g) / tg if tg else _rates(min(_today(), fy_bounds(fy)[1]))[i]
 
@@ -596,7 +814,8 @@ def tax_summary(db, fy: str, broker: Optional[str] = None) -> dict:
     names = c["names"]
     detail = sorted(({**x, "symbol": names.get(x["key"], {}).get("symbol"),
                       "isin": names.get(x["key"], {}).get("isin"),
-                      "sale_value": x["qty"] * x["sell_price"], "cost": x["qty"] * x["buy_price"]}
+                      "sale_value": x["qty"] * x["sell_price"], "cost": x["qty"] * x["buy_price"],
+                      "charges": x["buy_charges"] + x["sell_charges"]}
                      for x in rows), key=lambda x: (x["sell_date"], x["symbol"] or ""))
     return {
         "fy": fy,
@@ -607,14 +826,20 @@ def tax_summary(db, fy: str, broker: Optional[str] = None) -> dict:
         "short_term_loss_set_off_against_long_term": set_off,
         "long_term_loss_carried_forward": -lt_net if lt_net < 0 else 0.0,
         "short_term_loss_carried_forward": -st_net if st_net < 0 else 0.0,
-        "intraday": {"pnl": sum(x["gain"] for x in it), "turnover": sum(x["qty"] * x["sell_price"] for x in it),
-                     "trades": len(it)},
+        "intraday": {"pnl": sum(x["tax_gain"] for x in it), "gross": sum(x["gain"] for x in it),
+                     "turnover": sum(x["qty"] * x["sell_price"] for x in it), "trades": len(it)},
+        "charges": {"deductible": sum(x["buy_charges"] + x["sell_charges"] for x in rows),
+                    "stt": sum(x["stt"] for x in rows),
+                    "gross_gain": sum(x["gain"] for x in rows if x["term"] != "INTRADAY")},
         "estimated_tax": est,
         "sale_value": turnover,
         "rows": detail,
         "warnings": _warnings(c),
         "notes": [
-            "Estimate before 4% cess and any surcharge; brokerage, STT and other charges are not deducted.",
+            "Estimate before 4% cess and any surcharge.",
+            "Charges are estimated from each broker's published rates (the contract note is exact): brokerage, "
+            "exchange, SEBI, stamp duty, GST and DP charges are deducted from capital gains; STT is not deductible "
+            "there and is shown separately. Intraday profit is shown after all charges, STT included.",
             "Rates by sale date: STCG 15% / LTCG 10% before 23 Jul 2024, 20% / 12.5% from then.",
             f"LTCG exemption ₹{exemption:,.0f} for FY {fy}.",
             "Intraday (same-day buy and sell) is speculative business income, taxed at your slab — not included.",
@@ -629,12 +854,15 @@ def realised_csv(db, fy: str, broker: Optional[str] = None) -> str:
     out = io.StringIO()
     w = csv.writer(out)
     w.writerow(["Type", "Broker", "Symbol", "ISIN", "Buy date", "Sell date", "Quantity",
-                "Buy price", "Sell price", "Cost of acquisition", "Sale value", "Gain/Loss",
-                "Bought before 1 Feb 2018"])
+                "Buy price", "Sell price", "Purchase value", "Buy charges (est.)",
+                "Cost of acquisition", "Sale value", "Sale charges (est.)", "STT (est., not deductible)",
+                "Gain/Loss before charges", "Gain/Loss after charges", "Bought before 1 Feb 2018"])
     for x in s["rows"]:
         w.writerow([x["term"], x["broker"], x["symbol"], x["isin"] or "", x["buy_date"], x["sell_date"],
                     round(x["qty"], 4), round(x["buy_price"], 4), round(x["sell_price"], 4),
-                    round(x["cost"], 2), round(x["sale_value"], 2), round(x["gain"], 2),
+                    round(x["cost"], 2), round(x["buy_charges"], 2), round(x["cost"] + x["buy_charges"], 2),
+                    round(x["sale_value"], 2), round(x["sell_charges"], 2), round(x["stt"], 2),
+                    round(x["gain"], 2), round(x["tax_gain"], 2),
                     "yes" if x.get("grandfathered") else ""])
     return out.getvalue()
 
@@ -648,39 +876,34 @@ def financial_years(db) -> List[str]:
 
 # ─── The tracker's H / U / Z chips ──────────────────────────────────────────
 
-def sync_watchlist(db) -> dict:
+def sync_watchlist(db, pos: Optional[dict] = None) -> dict:
     """
-    Make the Stocks Tracker's holdings match the ledger, for stocks the ledger
-    knows: held -> H with the broker(s) that hold it (added to the watchlist if
-    missing); fully sold -> H cleared. Stocks with no trades on file, and
-    stocks with an unmatched sale (history incomplete), are left alone.
+    Make the Stocks Tracker's holdings match positions(): held -> H with the
+    broker(s) that hold it (added to the watchlist if missing); no longer held
+    -> H cleared, for stocks the ledger or Upstox knows. Stocks neither knows,
+    and stocks with an unmatched sale in the ledger, are left alone.
     """
     from app.database import Watchlist
     from app.services.holdings import mark_as_holding
-    c = compute(_all_trades(db))
-    held: Dict[str, set] = defaultdict(set)
-    keys_of: Dict[str, str] = {}
-    for (brk, k), ls in c["lots"].items():
-        if sum(l["qty"] for l in ls) > EPS:
-            sym = (c["names"].get(k, {}).get("symbol") or "").upper()
-            if sym:
-                held[sym].add(brk)
-                keys_of[sym] = _instrument_key(c["names"].get(k, {}))
-    all_t = _all_trades(db)
-    s2i = _sym2isin(all_t)
-    traded = {(c["names"].get(k, {}).get("symbol") or "").upper() for k in {_group_key(t, s2i) for t in all_t}}
+    pos = pos or positions(db)
+    c = pos["compute"]
+    held: Dict[str, dict] = {}
+    for p in pos["positions"]:
+        sym = (p.get("symbol") or "").upper()
+        if sym and p["qty"] > EPS:
+            held[sym] = p
+    known = {(n.get("symbol") or "").upper() for n in c["names"].values()}
     incomplete = {(c["names"].get(u["key"], {}).get("symbol") or "").upper() for u in c["unmatched"]}
     changed = 0
-    for sym, brks in held.items():
-        broker = "both" if len(brks) > 1 else next(iter(brks))
+    for sym, p in held.items():
         row = db.query(Watchlist).filter(Watchlist.symbol == sym).first()
         if row:
-            if not row.is_holding or row.broker != broker:
-                row.is_holding, row.broker = True, broker
+            if not row.is_holding or row.broker != p["broker"]:
+                row.is_holding, row.broker = True, p["broker"]
                 changed += 1
-        elif mark_as_holding(db, sym, keys_of.get(sym, ""), sym, broker=broker):
+        elif mark_as_holding(db, sym, p.get("instrument_key") or "", sym, broker=p["broker"]):
             changed += 1
-    for sym in traded - set(held) - incomplete:
+    for sym in known - set(held) - incomplete:
         row = db.query(Watchlist).filter(Watchlist.symbol == sym).first()
         if row and row.is_holding:
             row.is_holding, row.broker = False, None
