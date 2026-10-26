@@ -1773,6 +1773,7 @@ export default function App() {
                 <table className="stock-data-table">
                   <thead>
                     <tr>
+                      {watchlistTab === "holdings" && <th style={{ width: "58px" }}></th>}
                       <th className="col-symbol">Symbol</th>
                       <th className="col-name">Company</th>
                       {watchlistTab === "holdings" && (
@@ -1796,7 +1797,7 @@ export default function App() {
                       <th className="col-ai">AI</th>
                       <th className="col-sector">Sector</th>
                       <th className="col-res">Resistance</th>
-                      <th className="col-actions" style={watchlistTab === "holdings" ? { width: "110px" } : undefined}></th>
+                      <th className="col-actions"></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1815,6 +1816,12 @@ export default function App() {
                           className={`${isActive ? "active" : ""} ${flash === "up" ? "tick-up" : flash === "down" ? "tick-down" : ""
                             }`}
                         >
+                          {watchlistTab === "holdings" && (
+                            <td style={{ paddingRight: 0 }}>
+                              <SellButton item={item} pos={holdingPos.bySymbol[item.symbol.toUpperCase()]}
+                                onDone={() => { holdingPos.reload(); fetchWatchlist(watchlistPeriod); }} />
+                            </td>
+                          )}
                           <td>{renderSymbolCell(item)}</td>
                           <td>
                             <span className="truncate" style={{ color: "var(--text-secondary)", fontSize: "11px", display: "block" }}>
@@ -1963,10 +1970,6 @@ export default function App() {
                               >
                                 <RefreshCw size={12} className={detailsLoading[item.instrument_key] ? "animate-spin" : ""} />
                               </button>
-                              {watchlistTab === "holdings" && (
-                                <SellButton item={item} pos={holdingPos.bySymbol[item.symbol.toUpperCase()]}
-                                  onDone={() => { holdingPos.reload(); fetchWatchlist(watchlistPeriod); }} />
-                              )}
                               <button
                                 onClick={(e) => handleDeleteFromWatchlist(item.id, e)}
                                 className="action-btn-danger"
