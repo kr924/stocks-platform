@@ -531,7 +531,7 @@ input {
 }
 
 /* Column widths */
-.col-symbol { width: 95px; }
+.col-symbol { width: 118px; }
 .col-name { width: 190px; }
 .col-ltp { width: 90px; }
 .col-change { width: 75px; }
@@ -1034,3 +1034,46 @@ input {
     transform: scale(0.85);
   }
 }
+
+/* ===== WATCHLIST ROW CHIPS (symbol cell) =====
+   The symbol on its own line and the chips under it, so a long symbol never
+   pushes them out of the cell: W (on the watchlist, two clicks remove),
+   H (held, toggles) and where it is held (U / Z / U+Z). */
+.wl-sym {
+  font-weight: 700;
+  font-size: 12px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wl-chips {
+  display: flex;
+  gap: 3px;
+  margin-top: 3px;
+  flex-wrap: nowrap;
+}
+.wl-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  height: 16px;
+  padding: 0 5px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  line-height: 1;
+  border-radius: 4px;
+  border: 1px solid rgba(var(--ink-rgb), 0.14);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.wl-chip:hover { border-color: rgba(var(--ink-rgb), 0.35); color: var(--text-primary); }
+.wl-chip.wl-w { color: var(--accent); border-color: rgba(var(--accent-rgb), 0.35); }
+.wl-chip.wl-w:hover { color: var(--negative); border-color: rgba(var(--negative-rgb), 0.45); background: rgba(var(--negative-rgb), 0.08); }
+.wl-chip.wl-w.confirm { color: var(--negative); border-color: rgba(var(--negative-rgb), 0.6); background: rgba(var(--negative-rgb), 0.12); }
+.wl-chip.wl-h.on { color: var(--warning); border-color: rgba(var(--warning-rgb), 0.5); background: rgba(var(--warning-rgb), 0.12); }
+.wl-chip.wl-b { border-style: dashed; }
+.wl-chip.wl-b.on { border-style: solid; color: var(--ai); border-color: rgba(var(--ai-rgb), 0.45); background: rgba(var(--ai-rgb), 0.10); }

@@ -900,6 +900,17 @@ def get_watchlist(
     items = db.query(Watchlist).all()
     if not items:
         return []
+    # Holdings flagged before the broker column existed: the broker of the
+    # open position the app bought, when there is one.
+    bought_broker = {}
+    try:
+        from app.database import TradeConfig
+        from app.services.holdings import merge_broker
+        for sym, brk in (db.query(TradeConfig.symbol, TradeConfig.broker)
+                         .filter(TradeConfig.status.in_(["bought", "holding"])).all()):
+            bought_broker[(sym or "").upper()] = merge_broker(bought_broker.get((sym or "").upper()), brk)
+    except Exception:
+        pass
     try:
         keys = [item.instrument_key for item in items]
         quotes = feed.get_quotes(keys)
@@ -991,6 +1002,8 @@ def get_watchlist(
                 "low": ohlc.get("low", 0.0),
                 "close": prev_close,
                 "is_holding": item.is_holding,
+                "broker": (getattr(item, "broker", None) or bought_broker.get((item.symbol or "").upper()))
+                          if item.is_holding else None,
                 "analysis": analysis_map.get(item.instrument_key),
                 "depth_buy_pct": q.get("depth_buy_pct", 50.0),
                 "depth_sell_pct": q.get("depth_sell_pct", 50.0),
@@ -1051,12 +1064,38 @@ def toggle_holding(watchlist_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Watchlist item not found")
     try:
         item.is_holding = not item.is_holding
+        if not item.is_holding:
+            item.broker = None
         db.commit()
         db.refresh(item)
-        return {"status": "success", "is_holding": item.is_holding}
+        return {"status": "success", "is_holding": item.is_holding, "broker": item.broker}
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class WatchlistBrokerBody(BaseModel):
+    broker: Optional[str] = None
+
+
+@app.post("/api/watchlist/{watchlist_id}/broker")
+def set_watchlist_broker(watchlist_id: int, body: WatchlistBrokerBody, db: Session = Depends(get_db)):
+    """
+    Where a holding is held: "upstox", "zerodha", "both", or null to clear.
+    Setting a broker on a stock not marked held also marks it held.
+    """
+    from app.services.holdings import BROKERS
+    item = db.query(Watchlist).filter(Watchlist.id == watchlist_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Watchlist item not found")
+    broker = (body.broker or "").strip().lower() or None
+    if broker and broker not in BROKERS:
+        raise HTTPException(status_code=400, detail=f"broker must be one of {', '.join(BROKERS)}")
+    item.broker = broker
+    if broker:
+        item.is_holding = True
+    db.commit()
+    return {"status": "success", "is_holding": item.is_holding, "broker": item.broker}
 
 @app.get("/api/market/board")
 def get_index_board(period: str = Query("today"),

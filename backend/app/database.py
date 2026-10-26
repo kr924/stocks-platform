@@ -21,6 +21,10 @@ class Watchlist(Base):
     name = Column(String(200), nullable=False)
     instrument_key = Column(String(100), unique=True, index=True, nullable=False)
     is_holding = Column(Boolean, default=False, nullable=False)
+    # Where it is held: "upstox", "zerodha" or "both"; None when not held or
+    # not yet said. Set by an order placed through the app (its broker) or by
+    # hand from the tracker's chip.
+    broker = Column(String(20), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class EarningsBucket(Base):
@@ -616,6 +620,7 @@ def init_db():
         _safe_alter(conn, "ALTER TABLE ai_cache ADD COLUMN support_levels TEXT")
         _safe_alter(conn, "ALTER TABLE ai_cache ADD COLUMN analyst_recommendations TEXT")
         _safe_alter(conn, "ALTER TABLE watchlist ADD COLUMN is_holding BOOLEAN DEFAULT 0")
+        _safe_alter(conn, "ALTER TABLE watchlist ADD COLUMN broker VARCHAR(20)")
         _safe_alter(conn, "ALTER TABLE market_events ADD COLUMN ai_provider VARCHAR(50)")
         _safe_alter(conn, "ALTER TABLE news_stories ADD COLUMN ai_provider VARCHAR(50)")
         _safe_alter(conn, "ALTER TABLE news_items ADD COLUMN ai_provider VARCHAR(50)")

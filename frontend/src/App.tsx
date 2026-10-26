@@ -10,7 +10,6 @@ import {
   ExternalLink,
   X,
   Send,
-  Briefcase,
   Layers,
   Play,
   Pause,
@@ -73,6 +72,8 @@ interface WatchlistItem {
   high?: number;
   low?: number;
   is_holding?: boolean;
+  // Where it is held: "upstox" | "zerodha" | "both"; null when not said.
+  broker?: string | null;
   analysis?: StockAnalysis | null;
   depth_buy_pct?: number;
   depth_sell_pct?: number;
@@ -637,7 +638,7 @@ export default function App() {
         const data = await res.json();
         setWatchlist((prev) =>
           prev.map((item) =>
-            item.id === id ? { ...item, is_holding: data.is_holding } : item
+            item.id === id ? { ...item, is_holding: data.is_holding, broker: data.broker ?? null } : item
           )
         );
         setToast({
@@ -648,6 +649,46 @@ export default function App() {
     } catch (err) {
       console.error("Error toggling holding:", err);
     }
+  };
+
+  // Where a holding is held, cycled from the row's chip:
+  // not said → Upstox → Zerodha → both → not said.
+  const BROKER_CYCLE: (string | null)[] = [null, "upstox", "zerodha", "both"];
+  const handleCycleBroker = async (item: WatchlistItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const i = BROKER_CYCLE.indexOf(item.broker ?? null);
+    const next = BROKER_CYCLE[(i + 1) % BROKER_CYCLE.length];
+    try {
+      const res = await fetch(`${API_BASE}/api/watchlist/${item.id}/broker`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ broker: next }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setWatchlist((prev) => prev.map((w) =>
+          w.id === item.id ? { ...w, is_holding: data.is_holding, broker: data.broker ?? null } : w));
+      }
+    } catch (err) {
+      console.error("Error setting broker:", err);
+    }
+  };
+
+  // Removing from the watchlist takes two clicks on the row's W chip: the
+  // first arms it for 3 s ("Remove?"), the second removes. One stray click
+  // must not drop a stock, holdings included.
+  const [confirmRemoveId, setConfirmRemoveId] = useState<number | null>(null);
+  const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleRemoveChip = (id: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (confirmTimer.current) clearTimeout(confirmTimer.current);
+    if (confirmRemoveId === id) {
+      setConfirmRemoveId(null);
+      handleDeleteFromWatchlist(id, e);
+      return;
+    }
+    setConfirmRemoveId(id);
+    confirmTimer.current = setTimeout(() => setConfirmRemoveId(null), 3000);
   };
 
   // Toast auto-clear
@@ -1705,28 +1746,46 @@ export default function App() {
                             }`}
                         >
                           <td>
-                            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                              <span style={{ fontWeight: 700, color: "var(--text-primary)", fontSize: "12px" }}>
-                                {item.symbol}
-                              </span>
+                            {/* The symbol on its own line, so a long one never
+                                pushes the chips out of the cell; the chips
+                                below: W (on the watchlist; click twice to
+                                remove), H (held; click to toggle) and, for a
+                                holding, where it is held (U / Z / U+Z). */}
+                            <div className="wl-sym" title={item.symbol}>{item.symbol}</div>
+                            <div className="wl-chips">
                               <button
-                                onClick={(e) => handleToggleHolding(item.id, e)}
-                                style={{
-                                  background: "none",
-                                  border: "none",
-                                  padding: 2,
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  color: item.is_holding ? "var(--warning)" : "rgba(var(--ink-rgb),0.15)",
-                                  cursor: "pointer",
-                                  transition: "all 0.2s"
-                                }}
-                                className={`action-btn-holdings ${item.is_holding ? "active" : ""}`}
-                                title={item.is_holding ? "Remove from holdings" : "Add to holdings"}
+                                type="button"
+                                onClick={(e) => handleRemoveChip(item.id, e)}
+                                className={`wl-chip wl-w ${confirmRemoveId === item.id ? "confirm" : ""}`}
+                                title={confirmRemoveId === item.id
+                                  ? "Click again to remove from the watchlist"
+                                  : "On your watchlist — click to remove"}
                               >
-                                <Briefcase size={12} fill={item.is_holding ? "var(--warning)" : "none"} />
+                                {confirmRemoveId === item.id ? "Remove?" : <>W<X size={9} /></>}
                               </button>
+                              {confirmRemoveId !== item.id && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => handleToggleHolding(item.id, e)}
+                                    className={`wl-chip wl-h ${item.is_holding ? "on" : ""}`}
+                                    title={item.is_holding ? "Held — click to remove from Holdings" : "Not held — click to mark as a holding"}
+                                  >
+                                    H
+                                  </button>
+                                  {item.is_holding && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => handleCycleBroker(item, e)}
+                                      className={`wl-chip wl-b ${item.broker ? "on" : ""}`}
+                                      title={`Held at ${item.broker === "upstox" ? "Upstox" : item.broker === "zerodha" ? "Zerodha"
+                                        : item.broker === "both" ? "Upstox and Zerodha" : "— not set"}. Click to change.`}
+                                    >
+                                      {item.broker === "upstox" ? "U" : item.broker === "zerodha" ? "Z" : item.broker === "both" ? "U+Z" : "?"}
+                                    </button>
+                                  )}
+                                </>
+                              )}
                             </div>
                           </td>
                           <td>

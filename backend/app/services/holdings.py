@@ -34,7 +34,22 @@ def _resolve(symbol: str, instrument_key: str = "") -> str:
         return ""
 
 
-def mark_as_holding(db: Session, symbol: str, instrument_key: str = "", name: str = "") -> bool:
+BROKERS = ("upstox", "zerodha", "both")
+
+
+def merge_broker(current, new) -> str:
+    """'upstox' + 'zerodha' is 'both'; a blank side keeps the other."""
+    current = (current or "").lower() or None
+    new = (new or "").lower() or None
+    if not new or new == current:
+        return current
+    if not current:
+        return new
+    return "both"
+
+
+def mark_as_holding(db: Session, symbol: str, instrument_key: str = "", name: str = "",
+                    broker: str = "") -> bool:
     """
     Add a bought stock to the watchlist as a holding, or flag the existing row.
 
@@ -48,9 +63,11 @@ def mark_as_holding(db: Session, symbol: str, instrument_key: str = "", name: st
     try:
         row = db.query(Watchlist).filter(Watchlist.symbol == symbol).first()
         if row:
-            if row.is_holding:
+            merged = merge_broker(row.broker if row.is_holding else None, broker)
+            if row.is_holding and merged == row.broker:
                 return False
             row.is_holding = True
+            row.broker = merged
             db.commit()
             logger.info(f"📌 [HOLDINGS] {symbol} flagged as held")
             return True
@@ -59,7 +76,8 @@ def mark_as_holding(db: Session, symbol: str, instrument_key: str = "", name: st
         if not key:
             logger.warning(f"[HOLDINGS] {symbol} bought but resolves to no instrument — not added")
             return False
-        db.add(Watchlist(symbol=symbol, name=name or symbol, instrument_key=key, is_holding=True))
+        db.add(Watchlist(symbol=symbol, name=name or symbol, instrument_key=key, is_holding=True,
+                         broker=(broker or "").lower() or None))
         db.commit()
         logger.info(f"📌 [HOLDINGS] {symbol} added to the watchlist as held")
         return True
@@ -79,6 +97,7 @@ def clear_holding(db: Session, symbol: str) -> bool:
         if not row or not row.is_holding:
             return False
         row.is_holding = False
+        row.broker = None
         db.commit()
         logger.info(f"📌 [HOLDINGS] {symbol} cleared — sold")
         return True

@@ -483,7 +483,7 @@ def manual_buy(config_id: int, body: ManualOrderRequest = None, db: Session = De
         # The tracker's Holdings tab is the screen that shows live prices for
         # owned stock; it has to learn about this without being told by hand.
         from app.services.holdings import mark_as_holding
-        mark_as_holding(db, config.symbol, config.instrument_key or "")
+        mark_as_holding(db, config.symbol, config.instrument_key or "", broker=config.broker or "")
     else:
         config.notes = f"Manual buy failed: {result.message}"
 
@@ -1118,7 +1118,8 @@ def place_pending_result_order(
         config.buy_price = result.price
         config.bought_at = datetime.utcnow()
         from app.services.holdings import mark_as_holding
-        mark_as_holding(db, config.symbol, config.instrument_key or "", pending.company_name or "")
+        mark_as_holding(db, config.symbol, config.instrument_key or "", pending.company_name or "",
+                        broker=config.broker or "")
     else:
         config.notes = f"Order from result prompt failed: {result.message}"
 
