@@ -23,7 +23,7 @@ import { IntelligenceDashboard } from "./components/IntelligenceDashboard";
 import { TradingDashboard } from "./components/TradingDashboard";
 import { ResultAlerts } from "./components/ResultAlerts";
 import { PortfolioDashboard } from "./components/PortfolioDashboard";
-import { useHoldingPositions, HoldingsSummary, HeldCell, SellButton } from "./components/HoldingsTable";
+import { useHoldingPositions, HoldingsSummary, HeldCell, SellButton, qtyFor } from "./components/HoldingsTable";
 
 /**
  * Is it inside NSE trading hours right now? Mon-Fri, 09:00 to 15:35 IST.
@@ -424,6 +424,8 @@ export default function App() {
   // Quantities and purchase dates for the Holdings tab (Held column, Sell,
   // day's P&L); fetched only while that tab is open.
   const holdingPos = useHoldingPositions(watchlistTab === "holdings");
+  // Tracking name on the Holdings tab ("" = everyone): rows, Held lots and day's P&L follow it.
+  const [holdingsWho, setHoldingsWho] = useState<string>("");
 
   interface IndexData {
     name: string;
@@ -1378,7 +1380,9 @@ export default function App() {
   // Filter Watchlist items by selected subtab & sort
   const filteredWatchlist = watchlist
     .filter((w) => {
-      if (watchlistTab === "holdings") return w.is_holding;
+      if (watchlistTab === "holdings") {
+        return w.is_holding && (!holdingsWho || qtyFor(holdingPos.bySymbol[w.symbol.toUpperCase()], holdingsWho) > 0);
+      }
       return watchlistTab === "gainers" ? w.change >= 0 : w.change < 0;
     })
     .sort((a, b) => {
@@ -1753,6 +1757,9 @@ export default function App() {
               <HoldingsSummary
                 items={filteredWatchlist}
                 bySymbol={holdingPos.bySymbol}
+                names={holdingPos.names}
+                who={holdingsWho}
+                onWho={setHoldingsWho}
                 snapAt={holdingPos.snapAt}
                 upErr={holdingPos.upErr}
                 onSynced={() => { holdingPos.reload(); fetchWatchlist(watchlistPeriod); }}
@@ -1829,7 +1836,8 @@ export default function App() {
                             </span>
                           </td>
                           {watchlistTab === "holdings" && (
-                            <td><HeldCell pos={holdingPos.bySymbol[item.symbol.toUpperCase()]} /></td>
+                            <td><HeldCell pos={holdingPos.bySymbol[item.symbol.toUpperCase()]} who={holdingsWho}
+                                          showNames={holdingPos.names.length > 1} /></td>
                           )}
                           <td style={{ textAlign: "right", fontWeight: 700, color: "var(--text-primary)" }}>
                             {item.last_price > 0 ? `₹${item.last_price.toFixed(2)}` : "—"}

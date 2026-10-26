@@ -424,8 +424,24 @@ a capital-gains summary per financial year, derived from trades alone.
   with its broker(s), added to the watchlist if missing; no longer held → H
   cleared. Stocks neither source knows, or with an unmatched sale, are left
   alone.
-- `ops/check_portfolio.py` replays parsing, matching, charges, set-off and
-  the Upstox reconciliation against the live code.
+- **Accounts and tracking names** (owner's call, 26 Oct 2026). Every trade
+  carries its broker client ID (`portfolio_trades.account_id`); table
+  `portfolio_accounts` maps each ID to a tracking name, and several IDs can
+  share one (one person's Zerodha and Upstox). Zerodha's ID comes from the
+  tradebook's file name (`tradebook-QY8357-EQ.csv`, `client_id_from`), else a
+  "Client ID" line, else the account picked on the page; Upstox's from
+  `GET /v2/user/profile` (one Upstox login — the owner has one Upstox
+  account), kept in `system_settings.portfolio_upstox_account`, and untagged
+  Upstox trades belong to it. Matching is per broker **and client ID** — one
+  person's sale never matches another's purchase. Holdings, the by-name
+  breakdown (invested, value, unrealised, day's P&L, realised, intraday) and
+  the tracker's Day's P&L split by name; **tax is always per name** (each
+  person's own exemption and set-off; "everyone" carries a warning). Trades
+  imported before IDs existed are assigned once from the Accounts panel
+  (`POST /accounts/assign`).
+- `ops/check_portfolio.py` replays parsing, client IDs, matching per
+  account, charges, set-off per name and the Upstox reconciliation against
+  the live code.
 
 ## Like-for-like: a quarter against the same quarter last year
 

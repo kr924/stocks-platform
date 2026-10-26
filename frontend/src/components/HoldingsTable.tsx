@@ -19,10 +19,15 @@ export interface TrackerItem {
   last_price: number; change: number; close?: number; is_holding?: boolean; broker?: string | null;
 }
 
-export interface Lot { date: string | null; qty: number; days: number | null; long_term: boolean | null; broker: string }
+export interface Lot {
+  date: string | null; qty: number; days: number | null; long_term: boolean | null; broker: string;
+  account?: string; name?: string;
+}
+export interface Holder { broker: string; account: string; name: string; qty: number; avg: number | null; invested: number }
 export interface Position {
   key: string; symbol: string | null; isin: string | null; instrument_key: string;
   qty: number; avg: number | null; invested: number; broker: string; lots: Lot[];
+  holders?: Holder[]; names?: string[];
   brokers: Record<string, { qty: number; avg: number; invested: number; source: string }>;
 }
 
@@ -39,12 +44,14 @@ export function useHoldingPositions(active: boolean) {
   const [positions, setPositions] = useState<Position[]>([]);
   const [snapAt, setSnapAt] = useState<string | null>(null);
   const [upErr, setUpErr] = useState<string | null>(null);
+  const [names, setNames] = useState<string[]>([]);
   const load = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/portfolio/positions`);
       if (!res.ok) return;
       const data = await res.json();
       setPositions(Array.isArray(data.positions) ? data.positions : []);
+      setNames(Array.isArray(data.names) ? data.names : []);
       setSnapAt(data.upstox_snapshot_at || null);
       setUpErr(data.upstox_error || null);
     } catch { /* offline */ }
@@ -60,22 +67,37 @@ export function useHoldingPositions(active: boolean) {
     for (const p of positions) if (p.symbol) m[p.symbol.toUpperCase()] = p;
     return m;
   }, [positions]);
-  return { bySymbol, snapAt, upErr, reload: load };
+  return { bySymbol, names, snapAt, upErr, reload: load };
+}
+
+/** Quantity of a position held under one tracking name ("" = everyone). */
+export function qtyFor(p: Position | undefined, name: string): number {
+  if (!p) return 0;
+  if (!name) return p.qty;
+  return (Array.isArray(p.holders) ? p.holders : []).filter(h => h.name === name).reduce((a, h) => a + h.qty, 0);
 }
 
 /** Today's P&L across holdings: quantity × (live price − previous close). */
-export function HoldingsSummary({ items, bySymbol, snapAt, upErr, onSynced }: {
-  items: TrackerItem[]; bySymbol: Record<string, Position>; snapAt: string | null; upErr: string | null;
-  onSynced: () => void;
+export function HoldingsSummary({ items, bySymbol, names, who, onWho, snapAt, upErr, onSynced }: {
+  items: TrackerItem[]; bySymbol: Record<string, Position>; names: string[]; who: string; onWho: (n: string) => void;
+  snapAt: string | null; upErr: string | null; onSynced: () => void;
 }) {
   const [syncing, setSyncing] = useState(false);
   let day = 0, base = 0, counted = 0;
+  const perName: Record<string, number> = {};
   for (const it of items) {
     const p = bySymbol[it.symbol.toUpperCase()];
     if (!p || !(it.last_price > 0) || !it.close) continue;
-    day += p.qty * (it.last_price - it.close);
-    base += p.qty * it.close;
+    const move = it.last_price - it.close;
+    const q = qtyFor(p, who);
+    if (q <= 0) continue;
+    day += q * move;
+    base += q * it.close;
     counted += 1;
+    for (const h of (Array.isArray(p.holders) ? p.holders : [])) {
+      if (who && h.name !== who) continue;
+      perName[h.name] = (perName[h.name] || 0) + h.qty * move;
+    }
   }
   const sync = async () => {
     setSyncing(true);
@@ -91,6 +113,26 @@ export function HoldingsSummary({ items, bySymbol, snapAt, upErr, onSynced }: {
         <b style={{ color: col(day), fontSize: "14px" }}>{counted ? signed(day) : "—"}</b>
         {counted && base ? <b style={{ color: col(day) }}> ({pct(day / base * 100)})</b> : null}
       </span>
+      {!who && Object.keys(perName).length > 1 && (
+        <span style={{ color: "var(--text-muted)", fontSize: "11px" }}>
+          {Object.entries(perName).sort((a, b) => a[0].localeCompare(b[0])).map(([n, v], i) => (
+            <span key={n}>{i ? " · " : ""}{n} <b style={{ color: col(v) }}>{signed(v)}</b></span>
+          ))}
+        </span>
+      )}
+      {names.length > 1 && (
+        <span style={{ display: "inline-flex", gap: "3px" }}>
+          {["", ...names].map(n => (
+            <button key={n || "everyone"} onClick={() => onWho(n)} className="wl-chip"
+              style={{ height: "20px", fontSize: "10px", padding: "0 7px",
+                       color: who === n ? "var(--accent)" : undefined,
+                       borderColor: who === n ? "rgba(var(--accent-rgb),0.5)" : undefined,
+                       background: who === n ? "var(--accent-bg)" : undefined }}>
+              {n || "Everyone"}
+            </button>
+          ))}
+        </span>
+      )}
       <span style={{ marginLeft: "auto", color: "var(--text-faint)", fontSize: "11px" }}
             title={upErr ? `Upstox holdings: ${upErr}` : "Upstox holdings are re-read at most every 10 minutes; Zerodha comes from the tradebook imported on the Portfolio page."}>
         {upErr ? "⚠ Upstox holdings not read" : "Upstox holdings"}
@@ -104,20 +146,21 @@ export function HoldingsSummary({ items, bySymbol, snapAt, upErr, onSynced }: {
 }
 
 /** Each purchase as "qty · days" (LT past 12 months, "older" when undated). */
-export function HeldCell({ pos }: { pos?: Position }) {
+export function HeldCell({ pos, who = "", showNames = false }: { pos?: Position; who?: string; showNames?: boolean }) {
   if (!pos) {
     return <span style={{ color: "var(--text-faint)", fontSize: "11px" }}
                  title="Marked held by hand, or not in the Upstox holdings / imported tradebook">—</span>;
   }
-  const lots = Array.isArray(pos.lots) ? pos.lots : [];
+  const lots = (Array.isArray(pos.lots) ? pos.lots : []).filter(l => !who || l.name === who);
+  const tag = (l: Lot) => showNames && !who && l.name ? `${l.name.slice(0, 1).toUpperCase()} ` : "";
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: "3px", fontSize: "11px" }}
-         title={lots.map(l => `${l.broker === "upstox" ? "U" : "Z"} ${q(l.qty)} bought ${l.date ?? "before the trade history"}${l.days != null ? ` (${l.days} days)` : ""}${l.long_term ? " — long-term" : ""}`).join("\n")}>
+         title={lots.map(l => `${l.name ? `${l.name} · ` : ""}${l.broker === "upstox" ? "U" : "Z"} ${q(l.qty)} bought ${l.date ?? "before the trade history"}${l.days != null ? ` (${l.days} days)` : ""}${l.long_term ? " — long-term" : ""}`).join("\n")}>
       {lots.slice(0, 3).map((l, i) => (
         <span key={i} style={{ padding: "1px 5px", borderRadius: "4px", whiteSpace: "nowrap",
                                background: l.long_term ? "var(--positive-bg)" : "rgba(var(--ink-rgb),0.05)",
                                color: l.long_term ? "var(--positive-strong)" : "var(--text-secondary)" }}>
-          {q(l.qty)} · {l.days == null ? "older" : `${l.days}d`}{l.long_term ? " LT" : ""}
+          {tag(l)}{q(l.qty)} · {l.days == null ? "older" : `${l.days}d`}{l.long_term ? " LT" : ""}
         </span>
       ))}
       {lots.length > 3 && <span style={{ color: "var(--text-faint)" }}>+{lots.length - 3}</span>}

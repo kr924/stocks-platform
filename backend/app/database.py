@@ -416,6 +416,9 @@ class PortfolioTrade(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     uid = Column(String(200), unique=True, index=True, nullable=False)
     broker = Column(String(20), index=True, nullable=False)          # upstox | zerodha
+    # Broker client ID (Zerodha "QY8357", Upstox's user_id). Holdings, P&L and
+    # tax are broken down by the tracking name PortfolioAccount gives it.
+    account_id = Column(String(30), index=True, nullable=True)
     symbol = Column(String(60), index=True, nullable=False)
     isin = Column(String(20), index=True, nullable=True)
     exchange = Column(String(10), nullable=True)
@@ -430,6 +433,19 @@ class PortfolioTrade(Base):
     source = Column(String(30), nullable=False)                      # upstox_api | zerodha_csv | csv | manual
     note = Column(String(200), nullable=True)
     imported_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PortfolioAccount(Base):
+    """
+    A broker client ID and the tracking name it rolls up under. Several IDs
+    can share a name (one person's Zerodha and Upstox accounts); tax is
+    computed per name, since exemptions and set-off are per person.
+    """
+    __tablename__ = "portfolio_accounts"
+    client_id = Column(String(30), primary_key=True)
+    broker = Column(String(20), nullable=False)
+    name = Column(String(60), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 # ─── Trading Automation Engine Tables ────────────────────────────────────────
@@ -655,6 +671,7 @@ def init_db():
         _safe_alter(conn, "ALTER TABLE ai_cache ADD COLUMN analyst_recommendations TEXT")
         _safe_alter(conn, "ALTER TABLE watchlist ADD COLUMN is_holding BOOLEAN DEFAULT 0")
         _safe_alter(conn, "ALTER TABLE watchlist ADD COLUMN broker VARCHAR(20)")
+        _safe_alter(conn, "ALTER TABLE portfolio_trades ADD COLUMN account_id VARCHAR(30)")
         _safe_alter(conn, "ALTER TABLE market_events ADD COLUMN ai_provider VARCHAR(50)")
         _safe_alter(conn, "ALTER TABLE news_stories ADD COLUMN ai_provider VARCHAR(50)")
         _safe_alter(conn, "ALTER TABLE news_items ADD COLUMN ai_provider VARCHAR(50)")

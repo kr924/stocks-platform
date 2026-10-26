@@ -188,16 +188,39 @@ def _norm(h: str) -> str:
     return re.sub(r"[^a-z0-9/]+", "_", (h or "").strip().lower()).strip("_")
 
 
-def parse_csv(text: str, broker: str) -> dict:
+_CLIENT_ID_IN_NAME = re.compile(r"(?:tradebook|tax|pnl|ledger)[-_ ]+([A-Za-z]{2,4}\d{3,6})(?=[-_ .]|$)", re.I)
+_CLIENT_ID_TOKEN = re.compile(r"(?<![A-Za-z0-9])([A-Za-z]{2,4}\d{4,6})(?![A-Za-z0-9])")
+
+
+def client_id_from(filename: str = "", text: str = "") -> Optional[str]:
+    """
+    The broker client ID a tradebook belongs to: from Zerodha's file name
+    ("tradebook-QY8357-EQ.csv"), else a "Client ID" line above the header.
+    """
+    m = _CLIENT_ID_IN_NAME.search(filename or "") or _CLIENT_ID_TOKEN.search(
+        re.sub(r"\.(csv|xlsx?)$", "", filename or "", flags=re.I))
+    if m:
+        return m.group(1).upper()
+    for line in (text or "").splitlines()[:15]:
+        if re.search(r"client\s*id", line, re.I):
+            m = _CLIENT_ID_TOKEN.search(line.split(":", 1)[-1] if ":" in line else line.split(",", 1)[-1])
+            if m:
+                return m.group(1).upper()
+    return None
+
+
+def parse_csv(text: str, broker: str, account_id: Optional[str] = None) -> dict:
     """
     Rows from a tradebook CSV. The header row is found by its columns (the
     file may start with title lines), headers are matched by name, and only
-    equity trades are kept. Returns {rows, skipped, errors, columns}.
+    equity trades are kept. Every row is tagged with `account_id` (the client
+    ID). Returns {rows, skipped, errors, columns}.
     """
     broker = (broker or "").lower()
     if broker not in BROKERS:
         raise ValueError(f"broker must be one of {', '.join(BROKERS)}")
-    lines = list(csv.reader(io.StringIO((text or "").lstrip("﻿"))))
+    account_id = (account_id or "").strip().upper() or None
+    lines = list(csv.reader(io.StringIO((text or "").lstrip("\ufeff"))))
     head_i, cols = None, {}
     for i, line in enumerate(lines[:30]):
         names = [_norm(c) for c in line]
@@ -243,8 +266,8 @@ def parse_csv(text: str, broker: str) -> dict:
         trade_id = g("trade_id") or None
         rows.append({
             "uid": _uid(broker, exchange, trade_id, side,
-                        f"{day}:{symbol}:{side}:{qty}:{price}:{n}"),
-            "broker": broker, "symbol": symbol, "isin": g("isin").upper() or None,
+                        f"{account_id or ''}:{day}:{symbol}:{side}:{qty}:{price}:{n}"),
+            "broker": broker, "account_id": account_id, "symbol": symbol, "isin": g("isin").upper() or None,
             "exchange": exchange, "instrument_key": None,
             "trade_date": day, "trade_time": tm, "side": side,
             "quantity": abs(qty), "price": abs(price),
@@ -275,7 +298,12 @@ def _isin_from_key(key: str) -> Optional[str]:
     return tail if len(tail) == 12 and tail[:2].isalpha() else None
 
 
-def fetch_upstox(feed, years: int = 3) -> dict:
+def upstox_profile(feed) -> dict:
+    """GET /v2/user/profile: {user_id, user_name, ...} of the logged-in account."""
+    return (_upstox_get(feed, "/v2/user/profile", {}) or {}).get("data") or {}
+
+
+def fetch_upstox(feed, years: int = 3, account_id: Optional[str] = None) -> dict:
     """years=0: today's trades only (after a sell from the tracker)."""
     """
     Equity trades from Upstox: every financial year the API keeps (three),
@@ -308,7 +336,8 @@ def fetch_upstox(feed, years: int = 3) -> dict:
                 rows.append({
                     "uid": _uid("upstox", t.get("exchange"), t.get("trade_id"), side,
                                 f"{day}:{t.get('symbol')}:{side}:{qty}:{price}"),
-                    "broker": "upstox", "symbol": (t.get("symbol") or t.get("scrip_name") or "").upper(),
+                    "broker": "upstox", "account_id": account_id,
+                    "symbol": (t.get("symbol") or t.get("scrip_name") or "").upper(),
                     "isin": (t.get("isin") or _isin_from_key(key) or "").upper() or None,
                     "exchange": (t.get("exchange") or "").upper() or None,
                     "instrument_key": key or None,
@@ -337,7 +366,8 @@ def fetch_upstox(feed, years: int = 3) -> dict:
             rows.append({
                 "uid": _uid("upstox", t.get("exchange"), t.get("trade_id"), side,
                             f"{day}:{t.get('trading_symbol')}:{side}:{qty}:{price}:{t.get('order_id')}"),
-                "broker": "upstox", "symbol": (t.get("trading_symbol") or t.get("tradingsymbol") or "").upper(),
+                "broker": "upstox", "account_id": account_id,
+                "symbol": (t.get("trading_symbol") or t.get("tradingsymbol") or "").upper(),
                 "isin": _isin_from_key(key), "exchange": (t.get("exchange") or "").upper() or None,
                 "instrument_key": key, "trade_date": day, "trade_time": tm, "side": side,
                 "quantity": abs(qty), "price": abs(price),
@@ -354,7 +384,9 @@ def sync_upstox(db, years: int = 3) -> dict:
     import json
     from app.main import get_active_feed
     from app.database import SystemSetting
-    got = fetch_upstox(get_active_feed(), years=years)
+    feed = get_active_feed()
+    acct = upstox_account(db, feed)
+    got = fetch_upstox(feed, years=years, account_id=acct)
     res = store(db, got["rows"])
     res.update({"fetched": len(got["rows"]), "errors": got["errors"],
                 "at": datetime.utcnow().isoformat() + "Z"})
@@ -376,6 +408,91 @@ def sync_upstox(db, years: int = 3) -> dict:
     return res
 
 
+# ─── Accounts: client IDs and tracking names ────────────────────────────────
+
+UPSTOX_ACCOUNT_KEY = "portfolio_upstox_account"
+UNASSIGNED = "Unassigned"
+
+
+def accounts_map(db) -> Dict[str, dict]:
+    """{client_id: {broker, name}}"""
+    try:
+        from app.database import PortfolioAccount
+        return {a.client_id: {"broker": a.broker, "name": a.name} for a in db.query(PortfolioAccount).all()}
+    except Exception:
+        return {}
+
+
+def ensure_account(db, client_id: Optional[str], broker: str, name: Optional[str] = None) -> None:
+    """Create the account row the first time an ID is seen; its name defaults to the ID."""
+    from app.database import PortfolioAccount
+    cid = (client_id or "").strip().upper()
+    if not cid:
+        return
+    if not db.query(PortfolioAccount).filter(PortfolioAccount.client_id == cid).first():
+        db.add(PortfolioAccount(client_id=cid, broker=broker, name=(name or cid).strip()[:60]))
+        db.commit()
+
+
+def upstox_account(db, feed=None) -> Optional[str]:
+    """
+    The connected Upstox account's client ID, from its profile (asked once,
+    kept in system_settings). Trades and holdings from the Upstox API belong
+    to it. With feed=None it only reads what was stored.
+    """
+    from app.database import SystemSetting
+    row = db.query(SystemSetting).filter(SystemSetting.key == UPSTOX_ACCOUNT_KEY).first()
+    if row and row.value:
+        return row.value
+    if feed is None:
+        return None
+    try:
+        prof = upstox_profile(feed)
+    except Exception as e:
+        logger.info(f"[PORTFOLIO] Upstox profile unavailable: {e}")
+        return None
+    cid = (prof.get("user_id") or "").strip().upper()
+    if not cid:
+        return None
+    try:
+        if row:
+            row.value = cid
+        else:
+            db.add(SystemSetting(key=UPSTOX_ACCOUNT_KEY, value=cid))
+        db.commit()
+        ensure_account(db, cid, "upstox", prof.get("user_name") or cid)
+        # Trades synced before the account was known belong to it: there is
+        # one Upstox login.
+        from app.database import PortfolioTrade
+        db.query(PortfolioTrade).filter(PortfolioTrade.broker == "upstox",
+                                        PortfolioTrade.account_id.is_(None)).update(
+            {PortfolioTrade.account_id: cid}, synchronize_session=False)
+        db.commit()
+    except Exception:
+        db.rollback()
+    return cid
+
+
+def acct_resolver(db):
+    """t -> client ID; untagged Upstox trades belong to the connected Upstox account."""
+    ua = upstox_account(db) or ""
+    return lambda t: (getattr(t, "account_id", None) or (ua if t.broker == "upstox" else "") or "")
+
+
+def name_of(amap: Dict[str, dict], acct: str) -> str:
+    return (amap.get(acct) or {}).get("name") or acct or UNASSIGNED
+
+
+def tracking_names(db) -> List[str]:
+    amap = accounts_map(db)
+    names = sorted({a["name"] for a in amap.values()})
+    from app.database import PortfolioTrade
+    if db.query(PortfolioTrade.id).filter(PortfolioTrade.account_id.is_(None),
+                                          PortfolioTrade.broker != "upstox").first():
+        names.append(UNASSIGNED)
+    return names
+
+
 # ─── Matching ───────────────────────────────────────────────────────────────
 
 def _group_key(t, sym2isin: Optional[dict] = None) -> str:
@@ -393,10 +510,11 @@ def _sym2isin(trades) -> dict:
     return out
 
 
-def compute(trades) -> dict:
+def compute(trades, acct_of=None) -> dict:
     """
-    trades: PortfolioTrade rows (any order). Returns
-      lots      open lots per (broker, stock)
+    trades: PortfolioTrade rows (any order). Matched per demat account:
+    broker + client ID (acct_of(t), default t.account_id). Returns
+      lots      open lots per (broker, account, stock)
       realised  one row per matched sale (or intraday pair)
       unmatched sells with nothing to match
       names     {stock key: (symbol, isin, instrument_key)}
@@ -404,9 +522,10 @@ def compute(trades) -> dict:
     groups: Dict[tuple, list] = defaultdict(list)
     names: Dict[str, dict] = {}
     s2i = _sym2isin(trades)
+    acct_of = acct_of or (lambda t: getattr(t, "account_id", None) or "")
     for t in trades:
         k = _group_key(t, s2i)
-        groups[(t.broker, k)].append(t)
+        groups[(t.broker, acct_of(t), k)].append(t)
         n = names.setdefault(k, {"symbol": t.symbol, "isin": t.isin or (k if len(k) == 12 and k[:2].isalpha() else None),
                                  "instrument_key": t.instrument_key})
         if t.instrument_key and not n.get("instrument_key"):
@@ -416,7 +535,7 @@ def compute(trades) -> dict:
 
     lots: Dict[tuple, list] = {}
     realised, unmatched = [], []
-    for (broker, k), ts in groups.items():
+    for (broker, acct, k), ts in groups.items():
         by_day = defaultdict(list)
         for t in ts:
             by_day[t.trade_date].append(t)
@@ -435,7 +554,7 @@ def compute(trades) -> dict:
                 gain = intra * (savg - bavg)
                 # Speculative business income: every charge, STT included, is
                 # a business expense.
-                realised.append({"broker": broker, "key": k, "buy_date": day, "sell_date": day,
+                realised.append({"broker": broker, "account": acct, "key": k, "buy_date": day, "sell_date": day,
                                  "qty": intra, "buy_price": bavg, "sell_price": savg,
                                  "gain": gain, "buy_charges": 0.0, "sell_charges": ch["intra_other"],
                                  "stt": ch["intra_stt"], "tax_gain": gain - ch["intra_other"] - ch["intra_stt"],
@@ -453,7 +572,7 @@ def compute(trades) -> dict:
                 bd = _d(lot["date"])
                 gain = take * (savg - lot["price"])
                 bc, sc = take * lot["charge_ps"], take * sell_ps
-                realised.append({"broker": broker, "key": k, "buy_date": lot["date"], "sell_date": day,
+                realised.append({"broker": broker, "account": acct, "key": k, "buy_date": lot["date"], "sell_date": day,
                                  "qty": take, "buy_price": lot["price"], "sell_price": savg,
                                  "gain": gain, "buy_charges": bc, "sell_charges": sc,
                                  "stt": take * (lot["stt_ps"] + sell_stt_ps),
@@ -467,9 +586,9 @@ def compute(trades) -> dict:
                 if lot["qty"] <= EPS:
                     open_lots.pop(0)
             if left > EPS:
-                unmatched.append({"broker": broker, "key": k, "date": day, "qty": left, "price": savg})
+                unmatched.append({"broker": broker, "account": acct, "key": k, "date": day, "qty": left, "price": savg})
         if open_lots:
-            lots[(broker, k)] = open_lots
+            lots[(broker, acct, k)] = open_lots
     return {"lots": lots, "realised": realised, "unmatched": unmatched, "names": names}
 
 
@@ -587,39 +706,51 @@ def _trim_fifo(lots: List[dict], qty: float) -> List[dict]:
     return list(reversed(out))
 
 
-def positions(db, refresh: bool = True) -> dict:
-    """
-    What is held now, per stock and broker.
+def _by_name(trades, amap, acct_of, name: Optional[str]):
+    if not name:
+        return trades
+    return [t for t in trades if name_of(amap, acct_of(t)) == name]
 
-    Zerodha: the ledger (tradebook imports). Upstox: the ledger where it
-    agrees with Upstox's own holdings; otherwise Upstox's quantity and
-    average price, with the ledger's dated lots for as many shares as it
-    covers and an undated lot for the rest (bought before the three years the
-    trade history reaches). A stock the ledger holds that Upstox does not is
-    taken as sold, unless it was bought today (not a holding until T+1).
+
+def positions(db, refresh: bool = True, name: Optional[str] = None) -> dict:
     """
-    trades = _all_trades(db)
-    c = compute(trades)
+    What is held now, per stock, per holder (broker + client ID).
+
+    Zerodha: the ledger (tradebook imports). Upstox (one connected account):
+    the ledger where it agrees with Upstox's own holdings; otherwise Upstox's
+    quantity and average price, with the ledger's dated lots for as many
+    shares as it covers and an undated lot for the rest (bought before the
+    three years the trade history reaches). A stock the ledger holds that
+    Upstox does not is taken as sold, unless it was bought today (not a
+    holding until T+1). `name` limits it to one tracking name.
+    """
+    amap = accounts_map(db)
+    acct_of = acct_resolver(db)
+    trades = _by_name(_all_trades(db), amap, acct_of, name)
+    c = compute(trades, acct_of)
     today = _today()
     tstr = today.isoformat()
     s2i = _sym2isin(trades)
+    ua = upstox_account(db) or ""
     entries: Dict[str, dict] = {}
 
     def entry(k, info):
         return entries.setdefault(k, {"key": k, "symbol": info.get("symbol"), "isin": info.get("isin"),
-                                      "instrument_key": info.get("instrument_key") or "", "brokers": {}})
+                                      "instrument_key": info.get("instrument_key") or "", "holders": {}})
 
-    for (brk, k), ls in c["lots"].items():
+    for (brk, acct, k), ls in c["lots"].items():
         qty = sum(l["qty"] for l in ls)
         if qty <= EPS:
             continue
         cost = sum(l["qty"] * l["price"] for l in ls)
-        entry(k, c["names"].get(k, {}))["brokers"][brk] = {
+        entry(k, c["names"].get(k, {}))["holders"][(brk, acct)] = {
             "qty": qty, "avg": cost / qty, "invested": cost, "lots": [dict(l) for l in ls],
             "charges": sum(l["qty"] * l.get("charge_ps", 0) for l in ls), "source": "ledger"}
 
-    snap = upstox_holdings(db) if refresh else None
+    include_upstox = not name or name_of(amap, ua) == name
+    snap = upstox_holdings(db) if (refresh and include_upstox) else None
     snapshot_ok = bool(snap) and not snap.get("error")
+    hk = ("upstox", ua)
     if snap and snap.get("rows") is not None:
         today_net: Dict[str, float] = defaultdict(float)
         today_lots: Dict[str, list] = defaultdict(list)
@@ -627,9 +758,9 @@ def positions(db, refresh: bool = True) -> dict:
             if t.broker == "upstox" and t.trade_date == tstr:
                 k = _group_key(t, s2i)
                 today_net[k] += t.quantity if t.side == "BUY" else -t.quantity
-        for k, ls in c["lots"].items():
-            if k[0] == "upstox":
-                today_lots[k[1]] = [l for l in ls if l["date"] == tstr]
+        for key, ls in c["lots"].items():
+            if key[0] == "upstox":
+                today_lots[key[2]] = [l for l in ls if l["date"] == tstr]
         in_snap = set()
         for h in snap["rows"]:
             k = h["isin"] or s2i.get(h["symbol"]) or h["symbol"]
@@ -637,14 +768,14 @@ def positions(db, refresh: bool = True) -> dict:
             e = entry(k, {"symbol": h["symbol"], "isin": h["isin"], "instrument_key": h["instrument_key"]})
             if not e.get("instrument_key"):
                 e["instrument_key"] = h["instrument_key"]
-            led = e["brokers"].get("upstox")
+            led = e["holders"].get(hk)
             led_prev = (led["qty"] if led else 0.0) - today_net.get(k, 0.0)
             cands = (h["quantity"], h["quantity"] + h["t1_quantity"])
             if led and any(abs(x - led_prev) < 1e-6 for x in cands):
                 continue                      # the ledger agrees; keep its lots and costs
             qty = h["quantity"] + h["t1_quantity"] + today_net.get(k, 0.0)
             if qty <= EPS:
-                e["brokers"].pop("upstox", None)
+                e["holders"].pop(hk, None)
                 continue
             lots = sorted((led or {}).get("lots") or [], key=lambda l: l["date"])
             known = sum(l["qty"] for l in lots)
@@ -652,66 +783,81 @@ def positions(db, refresh: bool = True) -> dict:
                 lots = _trim_fifo(lots, qty)
             elif qty - known > EPS:
                 lots = [{"date": None, "qty": qty - known, "price": h["average_price"]}] + lots
-            e["brokers"]["upstox"] = {"qty": qty, "avg": h["average_price"], "invested": h["average_price"] * qty,
-                                      "lots": lots, "charges": None, "source": "upstox_holdings"}
+            e["holders"][hk] = {"qty": qty, "avg": h["average_price"], "invested": h["average_price"] * qty,
+                                "lots": lots, "charges": None, "source": "upstox_holdings"}
         if snapshot_ok:
             for k, e in entries.items():
-                if k in in_snap or "upstox" not in e["brokers"]:
+                if k in in_snap or hk not in e["holders"]:
                     continue
                 tl = today_lots.get(k) or []
                 q = sum(l["qty"] for l in tl)
                 if q > EPS:
                     cost = sum(l["qty"] * l["price"] for l in tl)
-                    e["brokers"]["upstox"] = {"qty": q, "avg": cost / q, "invested": cost, "lots": tl,
-                                              "charges": None, "source": "ledger_today"}
+                    e["holders"][hk] = {"qty": q, "avg": cost / q, "invested": cost, "lots": tl,
+                                        "charges": None, "source": "ledger_today"}
                 else:
-                    e["brokers"].pop("upstox", None)
+                    e["holders"].pop(hk, None)
 
     out = []
     for k, e in entries.items():
-        if not e["brokers"]:
+        if not e["holders"]:
             continue
-        lots_all = []
-        for brk, b in e["brokers"].items():
+        holders, lots_all = [], []
+        brokers: Dict[str, dict] = {}
+        for (brk, acct), b in e["holders"].items():
+            nm = name_of(amap, acct)
             b["lots"] = _lot_view(b["lots"], today)
+            holders.append({**b, "broker": brk, "account": acct, "name": nm})
             for l in b["lots"]:
-                lots_all.append({**l, "broker": brk})
+                lots_all.append({**l, "broker": brk, "account": acct, "name": nm})
+            agg = brokers.setdefault(brk, {"qty": 0.0, "invested": 0.0, "source": b["source"]})
+            agg["qty"] += b["qty"]
+            agg["invested"] += b["invested"]
+        for agg in brokers.values():
+            agg["avg"] = agg["invested"] / agg["qty"] if agg["qty"] else None
         lots_all.sort(key=lambda l: (l["date"] or "0000"))
-        qty = sum(b["qty"] for b in e["brokers"].values())
-        inv = sum(b["invested"] for b in e["brokers"].values())
-        if not e.get("instrument_key"):
-            e["instrument_key"] = _instrument_key(e)
-        out.append({**e, "qty": qty, "invested": inv, "avg": inv / qty if qty else None, "lots": lots_all,
-                    "broker": "both" if len(e["brokers"]) > 1 else next(iter(e["brokers"]))})
+        qty = sum(h["qty"] for h in holders)
+        inv = sum(h["invested"] for h in holders)
+        info = {"symbol": e["symbol"], "isin": e["isin"], "instrument_key": e["instrument_key"]}
+        out.append({"key": k, "symbol": e["symbol"], "isin": e["isin"],
+                    "instrument_key": e["instrument_key"] or _instrument_key(info),
+                    "qty": qty, "invested": inv, "avg": inv / qty if qty else None, "lots": lots_all,
+                    "holders": holders, "brokers": brokers,
+                    "names": sorted({h["name"] for h in holders}),
+                    "broker": "both" if len(brokers) > 1 else next(iter(brokers))})
     return {"positions": out, "upstox_snapshot_at": (snap or {}).get("at"),
-            "upstox_error": (snap or {}).get("error") if snap else "Upstox holdings not fetched yet",
-            "changed": bool(snap and snap.get("changed")), "compute": c}
+            "upstox_error": (snap or {}).get("error") if snap else (
+                None if not include_upstox else "Upstox holdings not fetched yet"),
+            "changed": bool(snap and snap.get("changed")), "compute": c, "accounts": amap}
 
 
-def holdings(db, broker: Optional[str] = None, with_prices: bool = True) -> dict:
-    """Open positions per stock and broker, with live value where a quote exists."""
-    pos = positions(db)
+def holdings(db, broker: Optional[str] = None, with_prices: bool = True, name: Optional[str] = None) -> dict:
+    """Open positions per stock and holder, with live value where a quote exists, and a breakdown by name."""
+    pos = positions(db, name=name)
     c = pos["compute"]
+    amap = pos["accounts"]
     today = _today()
     rows = []
     for p in pos["positions"]:
-        for brk, b in p["brokers"].items():
-            if broker in BROKERS and brk != broker:
+        for h in p["holders"]:
+            if broker in BROKERS and h["broker"] != broker:
                 continue
-            known_lots = [l for l in b["lots"] if l["date"]]
-            unknown = sum(l["qty"] for l in b["lots"] if not l["date"])
+            known_lots = [l for l in h["lots"] if l["date"]]
+            unknown = sum(l["qty"] for l in h["lots"] if not l["date"])
             lt_qty = sum(l["qty"] for l in known_lots if l["long_term"])
             pending = [l for l in known_lots if not l["long_term"]]
-            rows.append({"key": p["key"], "symbol": p["symbol"], "isin": p["isin"], "broker": brk,
-                         "qty": round(b["qty"], 4), "avg_cost": b["avg"], "invested": b["invested"],
+            rows.append({"key": p["key"], "symbol": p["symbol"], "isin": p["isin"], "broker": h["broker"],
+                         "account": h["account"], "name": h["name"],
+                         "qty": round(h["qty"], 4), "avg_cost": h["avg"], "invested": h["invested"],
                          "first_buy": known_lots[0]["date"] if known_lots else None,
                          "last_buy": known_lots[-1]["date"] if known_lots else None,
-                         "lots": b["lots"], "undated_qty": round(unknown, 4), "source": b["source"],
+                         "lots": h["lots"], "undated_qty": round(unknown, 4), "source": h["source"],
                          "long_term_qty": round(lt_qty, 4),
                          "next_long_term": (min((_one_year_after(_d(l["date"])) + timedelta(days=1)).isoformat()
                                                 for l in pending) if pending else None),
                          "instrument_key": p["instrument_key"],
-                         "ltp": None, "value": None, "pnl": None, "pnl_pct": None, "day_change_pct": None})
+                         "ltp": None, "value": None, "pnl": None, "pnl_pct": None, "day_change_pct": None,
+                         "day_pnl": None})
     if with_prices and rows:
         try:
             from app.main import get_active_feed
@@ -730,35 +876,44 @@ def holdings(db, broker: Optional[str] = None, with_prices: bool = True) -> dict
                 r["pnl_pct"] = (r["pnl"] / r["invested"] * 100) if r["invested"] else None
                 close = (q.get("ohlc") or {}).get("close") or 0
                 r["day_change_pct"] = ((ltp / close - 1) * 100) if close else None
+                r["day_pnl"] = (ltp - close) * r["qty"] if close else None
     rows.sort(key=lambda r: -(r["value"] or r["invested"]))
     fy = fy_of(today)
     real = [x for x in c["realised"] if fy_of(_d(x["sell_date"])) == fy
             and (broker not in BROKERS or x["broker"] == broker)]
-    invested = sum(r["invested"] for r in rows)
-    priced = [r for r in rows if r["value"] is not None]
+
+    def totals(rs, rl):
+        priced = [r for r in rs if r["value"] is not None]
+        return {"invested": sum(r["invested"] for r in rs),
+                "value": sum(r["value"] for r in priced) if priced else None,
+                "pnl": sum(r["pnl"] for r in priced) if priced else None,
+                "day_pnl": sum(r["day_pnl"] for r in priced if r["day_pnl"] is not None) if priced else None,
+                "priced_invested": sum(r["invested"] for r in priced),
+                "unpriced": len(rs) - len(priced),
+                "realised_fy": fy,
+                "realised_fy_capital": sum(x["tax_gain"] for x in rl if x["term"] != "INTRADAY"),
+                "realised_fy_intraday": sum(x["tax_gain"] for x in rl if x["term"] == "INTRADAY")}
+
+    by_name = []
+    for nm in sorted({r["name"] for r in rows} | {name_of(amap, x["account"]) for x in real}):
+        by_name.append({"name": nm, **totals([r for r in rows if r["name"] == nm],
+                                             [x for x in real if name_of(amap, x["account"]) == nm])})
     return {
         "rows": rows,
-        "totals": {
-            "invested": invested,
-            "value": sum(r["value"] for r in priced) if priced else None,
-            "pnl": sum(r["pnl"] for r in priced) if priced else None,
-            "priced_invested": sum(r["invested"] for r in priced),
-            "unpriced": len(rows) - len(priced),
-            "realised_fy": fy,
-            "realised_fy_capital": sum(x["tax_gain"] for x in real if x["term"] != "INTRADAY"),
-            "realised_fy_intraday": sum(x["tax_gain"] for x in real if x["term"] == "INTRADAY"),
-        },
+        "totals": totals(rows, real),
+        "by_name": by_name,
         "upstox_snapshot_at": pos["upstox_snapshot_at"],
         "upstox_error": pos["upstox_error"],
-        "warnings": _warnings(c),
+        "warnings": _warnings(c, amap),
     }
 
 
-def _warnings(c) -> List[str]:
+def _warnings(c, amap: Optional[dict] = None) -> List[str]:
     out = []
     for u in c["unmatched"][:30]:
         info = c["names"].get(u["key"], {})
-        out.append(f"{info.get('symbol') or u['key']} ({u['broker']}): sold {u['qty']:g} on {u['date']} "
+        who = name_of(amap or {}, u.get("account") or "")
+        out.append(f"{info.get('symbol') or u['key']} ({u['broker']}, {who}): sold {u['qty']:g} on {u['date']} "
                    f"with no earlier buy on file — import older history, or add the buy, IPO allotment "
                    f"or bonus by hand")
     if len(c["unmatched"]) > 30:
@@ -780,8 +935,11 @@ def _exemption(fy: str) -> float:
     return 100000.0 if int(fy[:4]) <= 2023 else 125000.0
 
 
-def tax_summary(db, fy: str, broker: Optional[str] = None) -> dict:
-    c = compute(_all_trades(db, broker))
+def tax_summary(db, fy: str, broker: Optional[str] = None, name: Optional[str] = None) -> dict:
+    """Per tracking name: exemptions and set-off are per person."""
+    amap = accounts_map(db)
+    acct_of = acct_resolver(db)
+    c = compute(_by_name(_all_trades(db, broker), amap, acct_of, name), acct_of)
     rows = [x for x in c["realised"] if fy_of(_d(x["sell_date"])) == fy]
     st = [x for x in rows if x["term"] == "STCG"]
     lt = [x for x in rows if x["term"] == "LTCG"]
@@ -815,10 +973,17 @@ def tax_summary(db, fy: str, broker: Optional[str] = None) -> dict:
     detail = sorted(({**x, "symbol": names.get(x["key"], {}).get("symbol"),
                       "isin": names.get(x["key"], {}).get("isin"),
                       "sale_value": x["qty"] * x["sell_price"], "cost": x["qty"] * x["buy_price"],
-                      "charges": x["buy_charges"] + x["sell_charges"]}
+                      "charges": x["buy_charges"] + x["sell_charges"],
+                      "name": name_of(amap, x.get("account") or "")}
                      for x in rows), key=lambda x: (x["sell_date"], x["symbol"] or ""))
+    names_in = sorted({name_of(amap, x.get("account") or "") for x in rows})
+    warnings = _warnings(c, amap)
+    if not name and len(names_in) > 1:
+        warnings = [f"These figures add up {len(names_in)} people ({', '.join(names_in)}). Tax is per person — "
+                    f"pick a name to see each one's own exemption and set-off."] + warnings
     return {
         "fy": fy,
+        "name": name,
         "stcg": {"gain": st_gain, "loss": st_loss, "net": st_gain + st_loss, "rate": st_rate},
         "ltcg": {"gain": lt_gain, "loss": lt_loss, "net": lt_gain + lt_loss, "rate": lt_rate,
                  "exemption": exemption, "exemption_used": min(exemption, max(0.0, lt_net)),
@@ -834,7 +999,7 @@ def tax_summary(db, fy: str, broker: Optional[str] = None) -> dict:
         "estimated_tax": est,
         "sale_value": turnover,
         "rows": detail,
-        "warnings": _warnings(c),
+        "warnings": warnings,
         "notes": [
             "Estimate before 4% cess and any surcharge.",
             "Charges are estimated from each broker's published rates (the contract note is exact): brokerage, "
@@ -848,17 +1013,17 @@ def tax_summary(db, fy: str, broker: Optional[str] = None) -> dict:
     }
 
 
-def realised_csv(db, fy: str, broker: Optional[str] = None) -> str:
+def realised_csv(db, fy: str, broker: Optional[str] = None, name: Optional[str] = None) -> str:
     """The FY's matched sales, one row each, in the shape the ITR capital-gains schedules ask for."""
-    s = tax_summary(db, fy, broker)
+    s = tax_summary(db, fy, broker, name)
     out = io.StringIO()
     w = csv.writer(out)
-    w.writerow(["Type", "Broker", "Symbol", "ISIN", "Buy date", "Sell date", "Quantity",
+    w.writerow(["Type", "Name", "Broker", "Symbol", "ISIN", "Buy date", "Sell date", "Quantity",
                 "Buy price", "Sell price", "Purchase value", "Buy charges (est.)",
                 "Cost of acquisition", "Sale value", "Sale charges (est.)", "STT (est., not deductible)",
                 "Gain/Loss before charges", "Gain/Loss after charges", "Bought before 1 Feb 2018"])
     for x in s["rows"]:
-        w.writerow([x["term"], x["broker"], x["symbol"], x["isin"] or "", x["buy_date"], x["sell_date"],
+        w.writerow([x["term"], x["name"], x["broker"], x["symbol"], x["isin"] or "", x["buy_date"], x["sell_date"],
                     round(x["qty"], 4), round(x["buy_price"], 4), round(x["sell_price"], 4),
                     round(x["cost"], 2), round(x["buy_charges"], 2), round(x["cost"] + x["buy_charges"], 2),
                     round(x["sale_value"], 2), round(x["sell_charges"], 2), round(x["stt"], 2),

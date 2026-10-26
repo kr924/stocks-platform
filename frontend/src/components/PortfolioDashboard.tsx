@@ -13,7 +13,7 @@ const API_BASE = import.meta.env.VITE_API_BASE || (window.location.hostname === 
 type BrokerFilter = "" | "upstox" | "zerodha";
 
 interface Holding {
-  key: string; symbol: string | null; isin: string | null; broker: string;
+  key: string; symbol: string | null; isin: string | null; broker: string; account?: string; name?: string;
   qty: number; avg_cost: number; invested: number; first_buy: string | null; last_buy: string | null;
   lots?: { date: string | null; qty: number; days: number | null; long_term: boolean | null }[];
   undated_qty?: number; source?: string;
@@ -22,10 +22,15 @@ interface Holding {
 }
 interface HoldingsResp {
   rows: Holding[];
-  totals: { invested: number; value: number | null; pnl: number | null; priced_invested: number; unpriced: number;
-            realised_fy: string; realised_fy_capital: number; realised_fy_intraday: number };
+  totals: Totals;
+  by_name?: (Totals & { name: string })[];
   warnings: string[];
 }
+interface Totals {
+  invested: number; value: number | null; pnl: number | null; day_pnl?: number | null; priced_invested: number; unpriced: number;
+  realised_fy: string; realised_fy_capital: number; realised_fy_intraday: number;
+}
+interface Account { client_id: string; broker: string; name: string; trades: number }
 interface TaxRow {
   broker: string; symbol: string | null; isin: string | null; buy_date: string; sell_date: string; qty: number;
   buy_price: number; sell_price: number; gain: number; term: string; grandfathered?: boolean; cost: number; sale_value: number;
@@ -45,11 +50,13 @@ interface TaxResp {
 interface Trade {
   id: number; broker: string; symbol: string; isin: string | null; exchange: string | null; trade_date: string;
   trade_time: string | null; side: string; quantity: number; price: number; trade_id: string | null; source: string; note: string | null;
+  account?: string | null; name?: string;
 }
 interface Summary {
   counts: Record<string, number>; span: Record<string, { first: string; last: string }>;
   financial_years: string[]; current_fy: string;
   upstox_sync: { added: number; fetched: number; errors: string[]; at: string } | null;
+  accounts?: Account[]; names?: string[]; upstox_account?: string | null; unassigned?: Record<string, number>;
 }
 
 const inr = (v: number | null | undefined, digits = 0) =>
@@ -83,8 +90,17 @@ export function PortfolioDashboard() {
   const [showAdd, setShowAdd] = useState(false);
   const [confirmDel, setConfirmDel] = useState<number | null>(null);
   const [sortKey, setSortKey] = useState<"value" | "pnl" | "pnl_pct" | "symbol" | "day">("value");
+  // Tracking name (several client IDs can share one). "" = everyone.
+  const [who, setWho] = useState<string>("");
+  // Tax is per person, so the tax tab always shows one name.
+  const [taxWho, setTaxWho] = useState<string>("");
+  const [importAccount, setImportAccount] = useState<string>("");
+  const [showAccounts, setShowAccounts] = useState(false);
 
-  const q = broker ? `broker=${broker}` : "";
+  const names = Array.isArray(summary?.names) ? summary!.names : [];
+  const accounts = Array.isArray(summary?.accounts) ? summary!.accounts : [];
+  const taxName = taxWho || who || names[0] || "";
+  const q = [broker ? `broker=${broker}` : "", who ? `name=${encodeURIComponent(who)}` : ""].filter(Boolean).join("&");
 
   const loadSummary = async () => {
     try {
@@ -98,7 +114,9 @@ export function PortfolioDashboard() {
   };
   const loadTax = async () => {
     if (!fy) return;
-    try { setTax(await getJSON<TaxResp>(`/api/portfolio/tax?fy=${fy}&${q}`)); } catch { /* ignore */ }
+    try {
+      setTax(await getJSON<TaxResp>(`/api/portfolio/tax?fy=${fy}${broker ? `&broker=${broker}` : ""}${taxName ? `&name=${encodeURIComponent(taxName)}` : ""}`));
+    } catch { /* ignore */ }
   };
   const loadTrades = async () => {
     try {
@@ -108,14 +126,14 @@ export function PortfolioDashboard() {
   const reloadAll = () => { loadSummary(); loadHoldings(); loadTax(); if (tab === "trades") loadTrades(); };
 
   useEffect(() => { loadSummary(); }, []);
-  useEffect(() => { loadHoldings(); }, [broker]);
+  useEffect(() => { loadHoldings(); }, [broker, who]);
   // Prices move: refresh holdings every 30 s while this view is open.
   useEffect(() => {
     const t = setInterval(loadHoldings, 30000);
     return () => clearInterval(t);
-  }, [broker]);
-  useEffect(() => { loadTax(); }, [fy, broker]);
-  useEffect(() => { if (tab === "trades") loadTrades(); }, [tab, broker]);
+  }, [broker, who]);
+  useEffect(() => { loadTax(); }, [fy, broker, taxName]);
+  useEffect(() => { if (tab === "trades") loadTrades(); }, [tab, broker, who]);
 
   const syncUpstox = async () => {
     setBusy("sync"); setMsg(null);
@@ -140,12 +158,12 @@ export function PortfolioDashboard() {
       const content = await f.text();
       const res = await fetch(`${API_BASE}/api/portfolio/import`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ broker: importBroker, filename: f.name, content }),
+        body: JSON.stringify({ broker: importBroker, filename: f.name, content, account_id: importAccount || null }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || res.status);
       setMsg({
-        text: `${f.name}: ${data.added} trade(s) added, ${data.duplicates} already on file`
+        text: `${f.name} (${data.account_id}): ${data.added} trade(s) added, ${data.duplicates} already on file`
           + (data.skipped_non_equity ? `, ${data.skipped_non_equity} F&O/other skipped` : "")
           + (data.errors?.length ? `. ${data.errors.length} line(s) unreadable: ${data.errors.slice(0, 2).join("; ")}` : "."),
         tone: data.errors?.length ? "err" : "ok",
@@ -200,6 +218,14 @@ export function PortfolioDashboard() {
             <button key={b || "all"} onClick={() => setBroker(b)} style={btn(broker === b)}>{label}</button>
           ))}
         </div>
+        {names.length > 0 && (
+          <div style={{ display: "inline-flex", gap: "4px", flexWrap: "wrap" }} title="Tracking name — set per client ID under Accounts">
+            {["", ...names].map(n => (
+              <button key={n || "everyone"} onClick={() => { setWho(n); if (n) setTaxWho(n); }}
+                style={{ ...btn(who === n), borderStyle: who === n ? "solid" : "dashed" }}>{n || "Everyone"}</button>
+            ))}
+          </div>
+        )}
         <div style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center" }}>
           <button onClick={syncUpstox} disabled={busy === "sync"} style={btn()}
             title="Trades from Upstox's trade-history API (last three financial years) and today's trades. Also runs at 16:10 on weekdays.">
@@ -210,6 +236,14 @@ export function PortfolioDashboard() {
             <option value="zerodha">Zerodha CSV</option>
             <option value="upstox">Upstox CSV</option>
           </select>
+          <select value={importAccount} onChange={e => setImportAccount(e.target.value)}
+            title="Zerodha's file name carries the client ID (tradebook-QY8357-EQ.csv); pick one only when it does not."
+            style={{ fontSize: "12px", padding: "5px 6px", background: "var(--surface-1)", color: "var(--text-primary)", border: "1px solid var(--border-default)", borderRadius: "7px" }}>
+            <option value="">ID from file name</option>
+            {accounts.filter(a => a.broker === importBroker).map(a => (
+              <option key={a.client_id} value={a.client_id}>{a.client_id} · {a.name}</option>
+            ))}
+          </select>
           <button onClick={() => fileRef.current?.click()} disabled={busy === "import"} style={btn()}
             title="Zerodha: Console → Reports → Tradebook → Equity, pick the dates, download CSV. Importing the same file again adds nothing.">
             {busy === "import" ? "Importing…" : "Import tradebook"}
@@ -217,6 +251,8 @@ export function PortfolioDashboard() {
           <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={onFile} style={{ display: "none" }} />
           <button onClick={() => setShowAdd(v => !v)} style={btn(showAdd)}
             title="IPO allotments, bonus shares (price 0), or trades older than your files">Add trade</button>
+          <button onClick={() => setShowAccounts(v => !v)} style={btn(showAccounts)}
+            title="Client IDs and the tracking names they roll up under">Accounts ({accounts.length})</button>
         </div>
       </div>
 
@@ -228,7 +264,17 @@ export function PortfolioDashboard() {
         </div>
       )}
 
-      {showAdd && <AddTrade onDone={() => { setShowAdd(false); reloadAll(); }} />}
+      {showAdd && <AddTrade accounts={accounts} onDone={() => { setShowAdd(false); reloadAll(); }} />}
+      {showAccounts && <Accounts accounts={accounts} unassigned={summary?.unassigned || {}}
+                                 upstoxAccount={summary?.upstox_account || null} onChanged={reloadAll} />}
+      {!showAccounts && (Object.entries(summary?.unassigned || {}) as [string, number][]).some(([b, n]) => b !== "upstox" && n > 0) && (
+        <div style={{ marginBottom: "12px", padding: "8px 12px", borderRadius: "8px", fontSize: "12px",
+                      background: "var(--warning-bg)", color: "var(--warning)" }}>
+          {(Object.entries(summary!.unassigned!) as [string, number][]).filter(([b]) => b !== "upstox").map(([b, n]) => `${n} ${b} trade(s)`).join(", ")} have no
+          client ID yet (imported before IDs were tracked). Open <b style={{ cursor: "pointer", textDecoration: "underline" }}
+          onClick={() => setShowAccounts(true)}>Accounts</b> to assign them.
+        </div>
+      )}
 
       {empty && (
         <div style={{ ...card, marginBottom: "14px", fontSize: "13px", color: "var(--text-secondary)", lineHeight: 1.7 }}>
@@ -251,6 +297,35 @@ export function PortfolioDashboard() {
         <Tile label={`Intraday FY ${t?.realised_fy || ""}`} value={signed(t?.realised_fy_intraday)} color={col(t?.realised_fy_intraday)}
               sub="speculative income" />
       </div>
+
+      {!who && (hold?.by_name?.length ?? 0) > 1 && (
+        <div style={{ ...card, padding: 0, overflowX: "auto", marginBottom: "14px" }}>
+          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "760px" }}>
+            <thead>
+              <tr>
+                {["BY NAME", "INVESTED", "VALUE", "UNREALISED P&L", "DAY'S P&L", `REALISED FY ${t?.realised_fy || ""}`, "INTRADAY FY"].map((h, i) => (
+                  <th key={h} style={th(i === 0 ? "left" : "right")}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {hold!.by_name!.map(b => (
+                <tr key={b.name} onClick={() => { setWho(b.name); setTaxWho(b.name); }} style={{ cursor: "pointer" }} title={`Show only ${b.name}`}>
+                  <td style={{ ...td("left"), fontWeight: 700, color: "var(--text-primary)" }}>{b.name}</td>
+                  <td style={td()}>{inr(b.invested)}</td>
+                  <td style={td()}>{inr(b.value)}</td>
+                  <td style={{ ...td(), color: col(b.pnl), fontWeight: 700 }}>
+                    {signed(b.pnl)} <span style={{ fontSize: "11px", fontWeight: 600 }}>{b.pnl != null && b.priced_invested ? pct(b.pnl / b.priced_invested * 100) : ""}</span>
+                  </td>
+                  <td style={{ ...td(), color: col(b.day_pnl) }}>{signed(b.day_pnl)}</td>
+                  <td style={{ ...td(), color: col(b.realised_fy_capital) }}>{signed(b.realised_fy_capital)}</td>
+                  <td style={{ ...td(), color: col(b.realised_fy_intraday) }}>{signed(b.realised_fy_intraday)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: "6px", marginBottom: "10px", alignItems: "center", flexWrap: "wrap" }}>
         {(["holdings", "tax", "trades"] as const).map(k => (
@@ -282,6 +357,7 @@ export function PortfolioDashboard() {
               <tr>
                 <th style={{ ...th("left"), cursor: "pointer" }} onClick={() => setSortKey("symbol")}>SYMBOL</th>
                 <th style={th("left")}>AT</th>
+                {names.length > 1 && <th style={th("left")}>NAME</th>}
                 <th style={th()}>QTY</th>
                 <th style={th()}>AVG COST</th>
                 <th style={th()}>LTP</th>
@@ -296,9 +372,10 @@ export function PortfolioDashboard() {
             </thead>
             <tbody>
               {rows.map(h => (
-                <tr key={`${h.broker}:${h.key}`}>
+                <tr key={`${h.broker}:${h.account || ""}:${h.key}`}>
                   <td style={{ ...td("left"), fontWeight: 700, color: "var(--text-primary)" }} title={h.isin || ""}>{h.symbol || h.key}</td>
                   <td style={td("left")}><span className="wl-chip wl-b on" style={{ cursor: "default" }}>{brokerChip(h.broker)}</span></td>
+                  {names.length > 1 && <td style={{ ...td("left"), color: "var(--text-secondary)" }} title={h.account || ""}>{h.name}</td>}
                   <td style={td()}>{qtyTxt(h.qty)}</td>
                   <td style={td()}>{inr(h.avg_cost, 2)}</td>
                   <td style={td()}>{h.ltp ? inr(h.ltp, 2) : "—"}</td>
@@ -320,7 +397,7 @@ export function PortfolioDashboard() {
                 </tr>
               ))}
               {rows.length === 0 && (
-                <tr><td colSpan={12} style={{ ...td("left"), color: "var(--text-faint)", fontStyle: "italic" }}>No open positions on file.</td></tr>
+                <tr><td colSpan={names.length > 1 ? 13 : 12} style={{ ...td("left"), color: "var(--text-faint)", fontStyle: "italic" }}>No open positions on file.</td></tr>
               )}
             </tbody>
           </table>
@@ -335,8 +412,18 @@ export function PortfolioDashboard() {
               style={{ fontSize: "12px", padding: "5px 6px", background: "var(--surface-1)", color: "var(--text-primary)", border: "1px solid var(--border-default)", borderRadius: "7px" }}>
               {(summary?.financial_years || [fy]).map(f => <option key={f} value={f}>FY {f}</option>)}
             </select>
+            {names.length > 0 && (
+              <>
+                <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>for</span>
+                <select value={taxName} onChange={e => setTaxWho(e.target.value)}
+                  title="Tax is per person: each name has its own ₹1.25 lakh LTCG exemption and loss set-off"
+                  style={{ fontSize: "12px", padding: "5px 6px", background: "var(--surface-1)", color: "var(--text-primary)", border: "1px solid var(--border-default)", borderRadius: "7px" }}>
+                  {names.map(n => <option key={n} value={n}>{n}</option>)}
+                </select>
+              </>
+            )}
             {fy && (
-              <a href={`${API_BASE}/api/portfolio/realised.csv?fy=${fy}${broker ? `&broker=${broker}` : ""}`}
+              <a href={`${API_BASE}/api/portfolio/realised.csv?fy=${fy}${broker ? `&broker=${broker}` : ""}${taxName ? `&name=${encodeURIComponent(taxName)}` : ""}`}
                  style={{ ...btn(), textDecoration: "none", marginLeft: "auto" }}>Download capital-gains CSV</a>
             )}
           </div>
@@ -423,8 +510,8 @@ export function PortfolioDashboard() {
             <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "820px" }}>
               <thead>
                 <tr>
-                  {["DATE", "SYMBOL", "AT", "SIDE", "QTY", "PRICE", "VALUE", "SOURCE", ""].map((h, i) => (
-                    <th key={i} style={th(i < 4 ? "left" : "right")}>{h}</th>
+                  {["DATE", "SYMBOL", "AT", "NAME", "SIDE", "QTY", "PRICE", "VALUE", "SOURCE", ""].map((h, i) => (
+                    <th key={i} style={th(i < 5 ? "left" : "right")}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -434,6 +521,7 @@ export function PortfolioDashboard() {
                     <td style={td("left")}>{tr.trade_date}{tr.trade_time ? ` ${tr.trade_time.slice(0, 5)}` : ""}</td>
                     <td style={{ ...td("left"), fontWeight: 600 }} title={tr.isin || ""}>{tr.symbol}</td>
                     <td style={td("left")}>{brokerChip(tr.broker)}</td>
+                    <td style={{ ...td("left"), color: "var(--text-secondary)" }} title={tr.account || "no client ID"}>{tr.name || "—"}</td>
                     <td style={{ ...td("left"), fontWeight: 700, color: tr.side === "BUY" ? "var(--positive)" : "var(--negative)" }}>{tr.side}</td>
                     <td style={td()}>{qtyTxt(tr.quantity)}</td>
                     <td style={td()}>{inr(tr.price, 2)}</td>
@@ -451,7 +539,7 @@ export function PortfolioDashboard() {
                   </tr>
                 ))}
                 {trades.length === 0 && (
-                  <tr><td colSpan={9} style={{ ...td("left"), color: "var(--text-faint)", fontStyle: "italic" }}>No trades.</td></tr>
+                  <tr><td colSpan={10} style={{ ...td("left"), color: "var(--text-faint)", fontStyle: "italic" }}>No trades.</td></tr>
                 )}
               </tbody>
             </table>
@@ -473,8 +561,8 @@ function Tile({ label, value, sub, color }: { label: string; value: string; sub?
 }
 
 /** By hand: IPO allotments, bonus shares (price 0), or history older than the files. */
-function AddTrade({ onDone }: { onDone: () => void }) {
-  const [f, setF] = useState({ broker: "zerodha", symbol: "", isin: "", trade_date: "", side: "BUY", quantity: "", price: "", note: "" });
+function AddTrade({ onDone, accounts }: { onDone: () => void; accounts: Account[] }) {
+  const [f, setF] = useState({ broker: "zerodha", account_id: "", symbol: "", isin: "", trade_date: "", side: "BUY", quantity: "", price: "", note: "" });
   const [err, setErr] = useState("");
   const set = (k: keyof typeof f) => (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF({ ...f, [k]: e.target.value });
   const submit = async () => {
@@ -482,7 +570,7 @@ function AddTrade({ onDone }: { onDone: () => void }) {
     if (!f.symbol.trim() || !f.trade_date || !(quantity > 0) || !(price >= 0)) { setErr("Symbol, date, quantity and price are needed."); return; }
     const res = await fetch(`${API_BASE}/api/portfolio/trades`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...f, quantity, price }),
+      body: JSON.stringify({ ...f, account_id: f.account_id || null, quantity, price }),
     });
     if (!res.ok) { setErr((await res.json()).detail || "Could not add"); return; }
     onDone();
@@ -491,7 +579,11 @@ function AddTrade({ onDone }: { onDone: () => void }) {
   return (
     <div style={{ background: "var(--surface-2)", border: "1px solid var(--border-default)", borderRadius: "12px", padding: "12px", marginBottom: "14px",
                   display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center" }}>
-      <select value={f.broker} onChange={set("broker")} style={inp}><option value="zerodha">Zerodha</option><option value="upstox">Upstox</option></select>
+      <select value={f.broker} onChange={e => setF({ ...f, broker: e.target.value, account_id: "" })} style={inp}><option value="zerodha">Zerodha</option><option value="upstox">Upstox</option></select>
+      <select value={f.account_id} onChange={set("account_id")} style={inp} title="Client ID the trade belongs to">
+        <option value="">{f.broker === "upstox" ? "Connected Upstox account" : "Client ID…"}</option>
+        {accounts.filter(a => a.broker === f.broker).map(a => <option key={a.client_id} value={a.client_id}>{a.client_id} · {a.name}</option>)}
+      </select>
       <input value={f.symbol} onChange={set("symbol")} placeholder="Symbol (e.g. INFY)" style={{ ...inp, width: "130px" }} />
       <input value={f.isin} onChange={set("isin")} placeholder="ISIN (optional)" style={{ ...inp, width: "140px" }} />
       <input type="date" value={f.trade_date} onChange={set("trade_date")} style={inp} />
@@ -504,6 +596,96 @@ function AddTrade({ onDone }: { onDone: () => void }) {
       <span style={{ fontSize: "11px", color: "var(--text-faint)", flexBasis: "100%" }}>
         Use the ISIN when the same company trades under a different symbol at the other broker — trades are matched by ISIN first.
       </span>
+    </div>
+  );
+}
+
+
+/** Client IDs and their tracking names; untagged trades from before IDs were tracked. */
+function Accounts({ accounts, unassigned, upstoxAccount, onChanged }: {
+  accounts: Account[]; unassigned: Record<string, number>; upstoxAccount: string | null; onChanged: () => void;
+}) {
+  const [edit, setEdit] = useState<Record<string, string>>({});
+  const [add, setAdd] = useState({ client_id: "", broker: "zerodha", name: "" });
+  const [assignTo, setAssignTo] = useState<Record<string, string>>({});
+  const [err, setErr] = useState("");
+  const post = async (path: string, body: object, method = "POST") => {
+    setErr("");
+    const res = await fetch(`${API_BASE}/api/portfolio${path}`, {
+      method, headers: { "Content-Type": "application/json" }, body: method === "DELETE" ? undefined : JSON.stringify(body),
+    });
+    if (!res.ok) { setErr((await res.json().catch(() => ({}))).detail || `HTTP ${res.status}`); return false; }
+    onChanged();
+    return true;
+  };
+  const inp = { padding: "5px 8px", fontSize: "12px", background: "var(--surface-1)", color: "var(--text-primary)", border: "1px solid var(--border-default)", borderRadius: "7px" };
+  const small = { ...inp, cursor: "pointer", fontWeight: 700 as const };
+  const names = Array.from(new Set(accounts.map(a => a.name))).sort();
+  return (
+    <div style={{ background: "var(--surface-2)", border: "1px solid var(--border-default)", borderRadius: "12px", padding: "12px 14px", marginBottom: "14px" }}>
+      <div style={{ fontSize: "13px", fontWeight: 800, color: "var(--text-primary)", marginBottom: "4px" }}>Accounts</div>
+      <div style={{ fontSize: "11px", color: "var(--text-muted)", marginBottom: "10px" }}>
+        Each broker client ID rolls up under a tracking name; several IDs can share one (your Zerodha and Upstox under the same name).
+        Holdings, P&L and tax break down by name. Zerodha IDs are read from the tradebook's file name; the Upstox ID from the connected login.
+      </div>
+      <table style={{ borderCollapse: "collapse", width: "100%", fontSize: "12px" }}>
+        <thead>
+          <tr>{["CLIENT ID", "BROKER", "TRACKING NAME", "TRADES", ""].map(h => (
+            <th key={h} style={{ textAlign: "left", padding: "4px 8px", fontSize: "10px", color: "var(--text-muted)", borderBottom: "1px solid var(--border-subtle)" }}>{h}</th>
+          ))}</tr>
+        </thead>
+        <tbody>
+          {accounts.map(a => (
+            <tr key={a.client_id}>
+              <td style={{ padding: "5px 8px", fontWeight: 700 }}>{a.client_id}{a.client_id === upstoxAccount ? " · connected" : ""}</td>
+              <td style={{ padding: "5px 8px" }}>{a.broker}</td>
+              <td style={{ padding: "5px 8px" }}>
+                <input value={edit[a.client_id] ?? a.name} list="pf-names" onChange={e => setEdit({ ...edit, [a.client_id]: e.target.value })} style={{ ...inp, width: "160px" }} />
+              </td>
+              <td style={{ padding: "5px 8px", color: "var(--text-muted)" }}>{a.trades}</td>
+              <td style={{ padding: "5px 8px", whiteSpace: "nowrap" }}>
+                {(edit[a.client_id] ?? a.name) !== a.name && (
+                  <button style={small} onClick={async () => {
+                    if (await post("/accounts", { client_id: a.client_id, broker: a.broker, name: edit[a.client_id] })) {
+                      const n = { ...edit }; delete n[a.client_id]; setEdit(n);
+                    }
+                  }}>Save</button>
+                )}
+                {a.trades === 0 && (
+                  <button style={{ ...small, marginLeft: "6px", color: "var(--negative)" }}
+                    onClick={() => post(`/accounts/${encodeURIComponent(a.client_id)}`, {}, "DELETE")}>Remove</button>
+                )}
+              </td>
+            </tr>
+          ))}
+          {accounts.length === 0 && (
+            <tr><td colSpan={5} style={{ padding: "6px 8px", color: "var(--text-faint)", fontStyle: "italic" }}>
+              None yet — they appear when you import a tradebook or sync Upstox, or add one below.
+            </td></tr>
+          )}
+        </tbody>
+      </table>
+      <datalist id="pf-names">{names.map(n => <option key={n} value={n} />)}</datalist>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", alignItems: "center", marginTop: "10px" }}>
+        <input value={add.client_id} onChange={e => setAdd({ ...add, client_id: e.target.value.toUpperCase() })} placeholder="Client ID (e.g. QY8357)" style={{ ...inp, width: "150px" }} />
+        <select value={add.broker} onChange={e => setAdd({ ...add, broker: e.target.value })} style={inp}>
+          <option value="zerodha">Zerodha</option><option value="upstox">Upstox</option>
+        </select>
+        <input value={add.name} list="pf-names" onChange={e => setAdd({ ...add, name: e.target.value })} placeholder="Tracking name" style={{ ...inp, width: "150px" }} />
+        <button style={small} disabled={!add.client_id.trim() || !add.name.trim()}
+          onClick={async () => { if (await post("/accounts", add)) setAdd({ client_id: "", broker: "zerodha", name: "" }); }}>Add account</button>
+      </div>
+      {(Object.entries(unassigned) as [string, number][]).filter(([, n]) => n > 0).map(([b, n]) => (
+        <div key={b} style={{ display: "flex", flexWrap: "wrap", gap: "6px", alignItems: "center", marginTop: "10px", fontSize: "12px", color: "var(--warning)" }}>
+          {n} {b} trade(s) have no client ID. Assign them to
+          <select value={assignTo[b] || ""} onChange={e => setAssignTo({ ...assignTo, [b]: e.target.value })} style={inp}>
+            <option value="">choose…</option>
+            {accounts.filter(a => a.broker === b).map(a => <option key={a.client_id} value={a.client_id}>{a.client_id} · {a.name}</option>)}
+          </select>
+          <button style={small} disabled={!assignTo[b]} onClick={() => post("/accounts/assign", { broker: b, client_id: assignTo[b] })}>Assign</button>
+        </div>
+      ))}
+      {err && <div style={{ fontSize: "12px", color: "var(--negative)", marginTop: "8px" }}>{err}</div>}
     </div>
   );
 }

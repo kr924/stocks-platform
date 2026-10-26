@@ -26,8 +26,8 @@ NIFTY24AUGFUT,,2024-08-01,NFO,FO,,buy,false,50,24000,116,9006,2024-08-01T10:00:0
 """
 
 
-def T(uid, broker, sym, isin, d, side, q, p):
-    return NS(uid=uid, broker=broker, symbol=sym, isin=isin, exchange="NSE", instrument_key=None, trade_date=d,
+def T(uid, broker, sym, isin, d, side, q, p, acct=None):
+    return NS(uid=uid, broker=broker, account_id=acct, symbol=sym, isin=isin, exchange="NSE", instrument_key=None, trade_date=d,
               trade_time=None, side=side, quantity=q, price=p, trade_id=uid, order_id=None,
               source="upstox_api" if broker == "upstox" else "zerodha_csv", note=None)
 
@@ -40,7 +40,19 @@ def main():
         if not cond:
             fails.append(msg)
 
-    r = P.parse_csv(CSV, "zerodha")
+    check(P.client_id_from("tradebook-QY8357-EQ.csv") == "QY8357", "client ID read from Zerodha's file name")
+    check(P.client_id_from("trades.csv", "Client ID,AB1234\nsymbol,isin") == "AB1234", "client ID read from a Client ID line")
+    check(P.client_id_from("my-trades-2025.csv") is None, "no client ID invented from an ordinary file name")
+
+    # Accounts: two Zerodha IDs under two names, Upstox under the first.
+    amap = {"QY8357": {"broker": "zerodha", "name": "Koushik"}, "AB1234": {"broker": "zerodha", "name": "Wife"},
+            "UP111": {"broker": "upstox", "name": "Koushik"}}
+    P.accounts_map = lambda db: amap
+    P.upstox_account = lambda db, feed=None: "UP111"
+    P.acct_resolver = lambda db: (lambda t: t.account_id or ("UP111" if t.broker == "upstox" else ""))
+
+    r = P.parse_csv(CSV, "zerodha", "QY8357")
+    check(all(x["account_id"] == "QY8357" for x in r["rows"]), "every imported row carries the client ID")
     check(len(r["rows"]) == 5 and r["skipped"] == 1, "CSV: 5 equity rows read, the F&O row skipped")
     check([x["uid"] for x in r["rows"]] == [x["uid"] for x in P.parse_csv(CSV, "zerodha")["rows"]],
           "CSV: the same file gives the same uids (re-import adds nothing)")
@@ -58,10 +70,25 @@ def main():
         T("a", "upstox", "X", "INE000000001", "2025-05-01", "BUY", 100, 500),
         T("b", "upstox", "X", "INE000000001", "2025-09-01", "SELL", 100, 400),
         T("c", "upstox", "Y", "INE000000002", "2023-05-01", "BUY", 100, 100),
-        T("d", "upstox", "Y", "INE000000002", "2025-10-01", "SELL", 100, 2000)]
-    s = P.tax_summary(None, "2025-26")
+        T("d", "upstox", "Y", "INE000000002", "2025-10-01", "SELL", 100, 2000),
+        T("e", "zerodha", "Y", "INE000000002", "2023-05-01", "BUY", 100, 100, "AB1234"),
+        T("f", "zerodha", "Y", "INE000000002", "2025-10-01", "SELL", 100, 2000, "AB1234")]
+    s = P.tax_summary(None, "2025-26", name="Koushik")
     check(s["short_term_loss_set_off_against_long_term"] > 0 and s["ltcg"]["exemption_used"] == 125000,
           "short-term loss set off against LTCG; ₹1.25 lakh exemption applied")
+    w = P.tax_summary(None, "2025-26", name="Wife")
+    check(abs(w["ltcg"]["gain"] - s["ltcg"]["gain"]) < 200 and w["stcg"]["net"] == 0
+          and w["short_term_loss_set_off_against_long_term"] == 0 and w["ltcg"]["exemption_used"] == 125000,
+          "each tracking name has its own gains, set-off and exemption")
+    check(any("Tax is per person" in x for x in P.tax_summary(None, "2025-26")["warnings"]),
+          "all names together carries the 'tax is per person' warning")
+    # Same stock bought by two people at Zerodha: matched per account, not across them.
+    P._all_trades = lambda db, broker=None: [
+        T("g", "zerodha", "Z", "INE000000009", "2025-01-01", "BUY", 10, 100, "QY8357"),
+        T("h", "zerodha", "Z", "INE000000009", "2025-02-01", "SELL", 10, 120, "AB1234")]
+    cc = P.compute(P._all_trades(None), P.acct_resolver(None))
+    check(len(cc["unmatched"]) == 1 and cc["unmatched"][0]["account"] == "AB1234",
+          "one person's sale never matches another person's purchase")
 
     P._today = lambda: P._d("2026-10-26")
     trades2 = [T("1", "upstox", "SAKAR", "INE732S01012", "2026-10-23", "BUY", 15, 952),
@@ -74,13 +101,16 @@ def main():
                                           "company_name": "", "quantity": q, "t1_quantity": t1, "average_price": avg}
     P.upstox_holdings = lambda db, **kw: {"at": "2026-10-26T05:00:00Z", "changed": True, "rows": [
         row("SAKAR", "INE732S01012", 0, 15, 952), row("OLD", "INE000000AAA", 30, 0, 80), row("API", "INE000000DDD", 4, 0, 250)]}
-    pos = {p["symbol"]: p for p in P.positions(None)["positions"]}
+    allpos = P.positions(None)["positions"]
+    pos = {p["symbol"]: p for p in allpos}
     check(pos["SAKAR"]["brokers"]["upstox"]["source"] == "ledger", "ledger kept where it agrees with Upstox (T+1 shares)")
     check(pos["OLD"]["qty"] == 30 and any(l["date"] is None and l["qty"] == 20 for l in pos["OLD"]["lots"]),
           "Upstox's quantity wins; shares older than the history get an undated lot")
     check("GONE" not in pos, "a stock Upstox no longer holds is dropped")
     check(pos["NEW"]["qty"] == 7, "today's buy is kept until it becomes a holding at T+1")
     check(pos["API"]["qty"] == 4, "a holding with no trades on file comes from Upstox")
+    check(all(h["name"] == "Koushik" for p in allpos for h in p["holders"]), "Upstox holdings carry the Upstox account's name")
+    check(P.positions(None, name="Wife")["positions"] == [], "filtering by another name leaves Upstox out")
 
     print(f"\n{len(fails)} failure(s)")
     sys.exit(1 if fails else 0)
