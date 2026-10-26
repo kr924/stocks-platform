@@ -398,6 +398,40 @@ class AIAlert(Base):
     )
 
 
+# ─── Portfolio ledger ───────────────────────────────────────────────────────
+
+class PortfolioTrade(Base):
+    """
+    One executed equity trade at Upstox or Zerodha, from any source: the
+    Upstox trade-history API, a broker tradebook CSV, or entered by hand
+    (IPO allotments, bonus shares, history older than the files go back).
+    services/portfolio.py matches sells to buys first-in-first-out per broker
+    and derives holdings and capital gains from these rows alone.
+
+    `uid` makes every import idempotent: broker + exchange + exchange trade
+    id + side when the source has a trade id, else the row's content and its
+    position in the file. Importing the same file twice adds nothing.
+    """
+    __tablename__ = "portfolio_trades"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    uid = Column(String(200), unique=True, index=True, nullable=False)
+    broker = Column(String(20), index=True, nullable=False)          # upstox | zerodha
+    symbol = Column(String(60), index=True, nullable=False)
+    isin = Column(String(20), index=True, nullable=True)
+    exchange = Column(String(10), nullable=True)
+    instrument_key = Column(String(100), nullable=True)
+    trade_date = Column(String(10), index=True, nullable=False)      # YYYY-MM-DD (IST)
+    trade_time = Column(String(8), nullable=True)                    # HH:MM:SS
+    side = Column(String(4), nullable=False)                         # BUY | SELL
+    quantity = Column(Float, nullable=False)
+    price = Column(Float, nullable=False)
+    trade_id = Column(String(60), nullable=True)
+    order_id = Column(String(60), nullable=True)
+    source = Column(String(30), nullable=False)                      # upstox_api | zerodha_csv | csv | manual
+    note = Column(String(200), nullable=True)
+    imported_at = Column(DateTime, default=datetime.utcnow)
+
+
 # ─── Trading Automation Engine Tables ────────────────────────────────────────
 
 class TradeConfig(Base):

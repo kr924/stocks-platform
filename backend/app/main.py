@@ -62,6 +62,10 @@ app.include_router(trading_router)
 from app.routers.telegram_webhook import router as telegram_router
 app.include_router(telegram_router)
 
+# Portfolio ledger: Upstox + Zerodha trades, holdings, capital gains
+from app.routers.portfolio import router as portfolio_router
+app.include_router(portfolio_router)
+
 @app.exception_handler(UpstoxAuthError)
 def upstox_auth_error_handler(request, exc: UpstoxAuthError):
     """FastAPI exception handler to automatically clear invalid/expired Upstox sessions."""
@@ -263,6 +267,12 @@ async def _intelligence_scheduler():
                         and _daily_due(last_run, "verdict_scorecard_date", today_str)):
                     asyncio.create_task(asyncio.to_thread(_run_verdict_scorecard))
 
+                # 16:10 Mon-Fri — the day's Upstox trades into the portfolio
+                # ledger (services/portfolio.py).
+                if (now_ist.weekday() < 5 and (now_ist.hour, now_ist.minute) >= (16, 10)
+                        and _daily_due(last_run, "portfolio_sync_date", today_str)):
+                    asyncio.create_task(asyncio.to_thread(_run_portfolio_sync))
+
                 # 08:00 — publish the digest page and send the single alert
                 if now_ist.hour >= 8 and _daily_due(last_run, "morning_digest_date", today_str):
                     asyncio.create_task(asyncio.to_thread(_run_morning_digest))
@@ -422,6 +432,19 @@ def _run_scheduled_buys():
 
 
 @_single_flight("estimates_prefetch")
+def _run_portfolio_sync():
+    """16:10 IST Mon-Fri — the day's Upstox trades into the portfolio ledger."""
+    try:
+        from app.services import portfolio
+        db = SessionLocal()
+        try:
+            portfolio.sync_upstox(db)
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"Portfolio sync error: {e}")
+
+
 def _run_verdict_scorecard():
     """16:00 IST Mon-Fri — closes for the AI verdict scorecard."""
     try:

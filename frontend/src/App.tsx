@@ -22,6 +22,7 @@ import { Chart } from "./components/Chart";
 import { IntelligenceDashboard } from "./components/IntelligenceDashboard";
 import { TradingDashboard } from "./components/TradingDashboard";
 import { ResultAlerts } from "./components/ResultAlerts";
+import { PortfolioDashboard } from "./components/PortfolioDashboard";
 
 /**
  * Is it inside NSE trading hours right now? Mon-Fri, 09:00 to 15:35 IST.
@@ -189,7 +190,7 @@ const formatQty = (qty: number): string => {
 };
 
 export default function App() {
-  const [activeView, setActiveView] = useState<"tracker" | "intelligence">("tracker");
+  const [activeView, setActiveView] = useState<"tracker" | "intelligence" | "trading" | "portfolio">("tracker");
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [detailsMap, setDetailsMap] = useState<Record<string, StockDetail>>({});
@@ -1591,6 +1592,10 @@ export default function App() {
       ) : activeView === "intelligence" ? (
         <div className="main-scroll-area" style={{ padding: 0, paddingBottom: "80px" }}>
           <IntelligenceDashboard />
+        </div>
+      ) : activeView === "portfolio" ? (
+        <div className="main-scroll-area" style={{ padding: 0, paddingBottom: "80px" }}>
+          <PortfolioDashboard />
         </div>
       ) : (
         <div className="main-scroll-area" style={{ paddingBottom: "80px" }}>
@@ -3474,6 +3479,23 @@ export default function App() {
           }}
         >
           ⚡ Auto Trading
+        </button>
+        <button
+          onClick={() => setActiveView("portfolio")}
+          style={{
+            padding: "8px 18px",
+            fontSize: "12px",
+            fontWeight: "700",
+            borderRadius: "7px",
+            border: "none",
+            cursor: "pointer",
+            backgroundColor: activeView === "portfolio" ? "var(--ai)" : "transparent",
+            color: activeView === "portfolio" ? "var(--on-accent)" : "var(--text-muted)",
+            boxShadow: activeView === "portfolio" ? "0 2px 10px rgba(var(--ai-rgb), 0.26)" : "none",
+            transition: "all 0.2s"
+          }}
+        >
+          💼 Portfolio
         </button>
       </div>
     </div>

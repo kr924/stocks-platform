@@ -228,6 +228,7 @@ the guard records "already run today" on first sight rather than re-running.
   digest and the boundary falls where nobody is trading. Anything older that was
   never digested is swept in too, so a missed run or a weekend cannot lose rows.
 - **16:00 Mon–Fri** closes for the AI verdict scorecard (below)
+- **16:10 Mon–Fri** Upstox trades into the portfolio ledger (below)
 
 Screener is keyed by **BSE scrip code** for BSE-only companies — `LIMECHM` 404s
 where `507759` resolves — and answers 429 when called back to back, so requests
@@ -361,6 +362,40 @@ been broken silently:
   be acted on; a past day shows its history, minus anything dismissed.
 
 ---
+
+## Portfolio — Upstox and Zerodha in one ledger
+
+`services/portfolio.py`, `routers/portfolio.py` (`/api/portfolio/*`), table
+`portfolio_trades`, the **💼 Portfolio** view. Holdings, realised profit and
+a capital-gains summary per financial year, derived from trades alone.
+
+- **Sources.** Upstox: `GET /v2/charges/historical-trades` (last three FYs,
+  one request per FY, paged) plus `get-trades-for-day`, on the app's token —
+  "Sync Upstox" and **16:10 Mon–Fri** (`daily_job:portfolio_sync_date`).
+  Zerodha: the Console tradebook **CSV**, read in the browser and posted as
+  text (no `python-multipart`, no Excel reader in the image; `.xlsx` is
+  refused with a pointer to the CSV). The header row is found by its
+  columns, so title lines above it are fine. Only equity is kept. By hand:
+  IPO allotments, bonus shares at price 0, older history.
+- **Idempotent.** `uid` = broker + exchange + exchange trade id + side, or the
+  row's content and line number when there is no trade id. Re-importing a
+  file or re-syncing adds nothing.
+- **Matching** (`compute`), per broker and per stock (ISIN; a row without one
+  borrows the ISIN another trade of the same symbol carries): per day, the
+  smaller of buys and sells is **intraday** (speculative, reported apart),
+  the rest of the buys becomes a lot at the day's average, the rest of the
+  sells is matched **FIFO**. Held more than 12 months → LTCG. A sale with no
+  lot is reported as a warning, never guessed — missing history or an
+  unentered bonus/split.
+- **Tax** (`tax_summary`) is an estimate: rates by sale date (15/10% before
+  23 Jul 2024, 20/12.5% from then), exemption ₹1 lakh to FY 2023-24 and
+  ₹1.25 lakh from FY 2024-25, short-term loss set off against long-term gains,
+  no charges deducted, no cess or surcharge, pre-1 Feb 2018 lots flagged at
+  actual cost. `realised.csv` exports one row per matched sale.
+- **The tracker's H / U / Z chips follow the ledger** (`sync_watchlist`, after
+  each import or sync): a stock held → H with its broker(s), added to the
+  watchlist if missing; fully sold → H cleared. Stocks with no trades on file,
+  or with an unmatched sale, are left alone.
 
 ## Like-for-like: a quarter against the same quarter last year
 
