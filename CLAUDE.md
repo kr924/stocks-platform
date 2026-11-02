@@ -332,6 +332,16 @@ suggestion cards, nothing to expand. It replaced a 560 px scroll box of cards,
 each with its own collapsible analysis — a scroll inside a scroll, and a click
 per company to see the numbers. Stacks under 900 px.
 
+Each list row's first line also carries **1D · 5D · 10D · 15D · 1M · 3M · 6M ·
+1Y**, then **RES** (since the result), then **⚡AI** on results (2 Nov 2026).
+1D is the day change already on the row. The others are the live price (else
+the last close) over the close N sessions back, from the same `period_bases`
+the earnings calendar uses. The listing attaches them (`period_bases` on each
+row) and queues `period_returns.ensure` for stocks not yet fetched today, so a
+new filing shows "…" until its one candle request lands. ⚡AI is Premium
+analyse from the list: a `span role="button"` (a button cannot sit inside the
+row's button) that stops propagation. It is dimmed without a premium key.
+
 **Arrival alerts live in App, not the dashboard** (`components/ResultAlerts.tsx`).
 They used to fire from TradingDashboard's 3-second poll, and App unmounts the
 dashboard on Stocks Tracker and AI Intelligence, so with ALERTS ON a filing

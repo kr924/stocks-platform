@@ -1007,6 +1007,34 @@ def list_pending_results(
         except Exception as e:
             logger.debug(f"Stored day prices unavailable: {e}")
 
+    # 5d .. 1y returns for each filing's stock: the closes they are measured
+    # from, fetched once a day per stock in the background
+    # (services/period_returns.py, shared with the earnings calendar). The
+    # panel divides the live price by these, so they move with the market.
+    if pendings:
+        try:
+            from app.services import period_returns as PR
+            from app.main import resolve_instrument_keys
+            key_of = {}
+            for p in pendings:
+                k = (p.instrument_key or "").replace(":", "|")
+                if "|" not in k:
+                    ks = resolve_instrument_keys(p.symbol or "")
+                    k = ks[0] if ks else ""
+                key_of[p.id] = k
+            keys = list(dict.fromkeys(k for k in key_of.values() if k))
+            have = PR.stored(db, keys)
+            for item in serialized:
+                k = key_of.get(item.get("id")) or ""
+                b = have.get(k)
+                if b is None and k and (k in have or PR.failed_today(k)):
+                    b = {"last_close": None, "bases": {}, "from": {}, "unavailable": True}
+                item["period_bases"] = b
+            if any(k not in have and not PR.failed_today(k) for k in keys):
+                PR.ensure(keys)
+        except Exception as e:
+            logger.debug(f"Period returns unavailable for the panel: {e}")
+
     # Screener figures, so the panel carries what the digest used to show
     # separately. Anything not yet on the rows is fetched behind the request.
     missing = _attach_screener(db, pendings, serialized)
