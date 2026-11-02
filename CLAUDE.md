@@ -356,6 +356,16 @@ tag replaced the previous toast silently), re-arms the tone on the first click
 after a reload, and counts unseen arrivals in the tab title. The ALERTS ON
 switch stays in the header and signals it with a `resultalerts` window event.
 
+**An open stream is not a working stream** (2 Nov 2026). When a client's SSE
+queue filled (100 events, a stalled laptop or tunnel), `sse_manager` removed
+it from the subscribers, but that client's response kept running on the
+orphaned queue and sent heartbeats forever. The browser saw a healthy stream,
+never hit `onerror`, never started the fallback poll, and no alert fired again
+until a reload. Now the queue holds 500 and drops its *oldest* event when
+full instead of the client; ResultAlerts reads today's pending list every
+15 s regardless of the stream (`seenRef` stops a double alert) and reopens a
+stream silent for 20 s. `SSE client stalled` in the logs marks the case.
+
 **Pause, not dismiss.** Pausing stops a row being quoted and leaves it in place
 with its last price; its symbol leaves the quote batch, which is where the
 metered Upstox allowance is spent. Dismiss removed the card outright, the wrong

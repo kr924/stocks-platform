@@ -42,6 +42,7 @@ class SSEManager:
         self._subscribers: Set[asyncio.Queue] = set()
         self._lock = asyncio.Lock()
         self._event_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._overflow_warned: Set[int] = set()
 
     @property
     def client_count(self) -> int:
@@ -53,7 +54,7 @@ class SSEManager:
         Register a new SSE client. Returns a Queue that will receive
         broadcast events as dicts with 'type' and 'data' keys.
         """
-        queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+        queue: asyncio.Queue = asyncio.Queue(maxsize=500)
         async with self._lock:
             self._subscribers.add(queue)
         logger.info(f"SSE client connected (total: {self.client_count})")
@@ -63,6 +64,7 @@ class SSEManager:
         """Remove a disconnected client's queue."""
         async with self._lock:
             self._subscribers.discard(queue)
+            self._overflow_warned.discard(id(queue))
         logger.info(f"SSE client disconnected (total: {self.client_count})")
 
     async def _async_broadcast(self, event_type: str, data: Dict[str, Any]) -> None:
@@ -73,18 +75,27 @@ class SSEManager:
             "timestamp": time.time(),
         }
 
-        dead_queues = []
         async with self._lock:
             for queue in self._subscribers:
                 try:
                     queue.put_nowait(message)
                 except asyncio.QueueFull:
-                    # Client is too slow — mark for removal
-                    dead_queues.append(queue)
-                    logger.warning("SSE client queue full, dropping client")
-
-            for dq in dead_queues:
-                self._subscribers.discard(dq)
+                    # A stalled client (a laptop asleep, a tab the tunnel is
+                    # buffering for) lets its queue fill. This used to remove
+                    # the queue from the subscribers — but the client's
+                    # response kept running on that queue, sending heartbeats
+                    # and nothing else, so the browser saw a healthy stream
+                    # that would never carry another event: no result alerts,
+                    # with no error anywhere to fall back on (2 Nov 2026).
+                    # Drop the oldest message instead and keep the client.
+                    try:
+                        queue.get_nowait()
+                        queue.put_nowait(message)
+                    except (asyncio.QueueEmpty, asyncio.QueueFull):
+                        pass
+                    if id(queue) not in self._overflow_warned:
+                        self._overflow_warned.add(id(queue))
+                        logger.warning("SSE client stalled: queue full, dropping its oldest events")
 
     def broadcast(self, event_type: str, data: Dict[str, Any]) -> None:
         """

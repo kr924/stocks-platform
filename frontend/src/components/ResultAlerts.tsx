@@ -12,7 +12,8 @@ const API_BASE = import.meta.env.VITE_API_BASE || (window.location.hostname === 
  *
  * Driven by the server's SSE stream ("pending_result_order", broadcast the
  * moment the order screen is created), not by the dashboard's 3-second poll.
- * If the stream is down, it falls back to polling today's pending list.
+ * Today's pending list is also read every 15 s as a safety net, and a stream
+ * silent for 20 s (no heartbeat) is reopened.
  *
  * The switch stays on the Order Decisions header (localStorage
  * "resultAlertsOn"); the header tells this component through a
@@ -127,11 +128,16 @@ export function ResultAlerts() {
     let pollTimer: ReturnType<typeof setInterval> | null = null;
     let retry: ReturnType<typeof setTimeout> | null = null;
     let closed = false;
+    // The server sends a heartbeat every 5 s. A stream that has said nothing
+    // for 20 s is stalled, even if the browser still calls it open — on
+    // 2 Nov 2026 a stream the server had stopped feeding kept looking healthy,
+    // so the fallback poll never started and no alert fired.
+    let lastMsg = Date.now();
+    const SILENT_MS = 20000;
 
     const istToday = () => new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
 
-    // Fallback while the stream is down: today's pending list every 10 s.
-    // The first read only seeds what is already there.
+    // Today's pending list. The first read only seeds what is already there.
     const poll = async () => {
       try {
         const res = await fetch(`${API_BASE}/api/trading/pending-results?status=pending&trade_date=${istToday()}`);
@@ -152,28 +158,43 @@ export function ResultAlerts() {
       try {
         es = new EventSource(`${API_BASE}/api/intelligence/stream`);
       } catch {
-        if (!pollTimer) pollTimer = setInterval(poll, 10000);
+        retry = setTimeout(connect, 15000);
         return;
       }
-      es.onopen = () => {
-        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-      };
+      lastMsg = Date.now();
+      const alive = () => { lastMsg = Date.now(); };
+      es.onopen = alive;
+      es.addEventListener("connected", alive);
+      es.addEventListener("heartbeat", alive);
       es.addEventListener("pending_result_order", (e: MessageEvent) => {
+        alive();
         try { announce(JSON.parse(e.data)); } catch { /* malformed */ }
       });
-      es.onerror = () => {
-        es?.close();
-        es = null;
-        if (!pollTimer) { poll(); pollTimer = setInterval(poll, 10000); }
-        retry = setTimeout(connect, 15000);
-      };
+      es.onerror = () => reconnectSoon(15000);
     };
 
+    const reconnectSoon = (ms: number) => {
+      es?.close();
+      es = null;
+      if (retry) clearTimeout(retry);
+      retry = setTimeout(connect, ms);
+    };
+
+    // A stalled stream is reopened straight away.
+    const watchdog = setInterval(() => {
+      if (es && Date.now() - lastMsg > SILENT_MS) reconnectSoon(0);
+    }, 5000);
+
+    // The list is read every 15 s whatever the stream is doing, so a filing
+    // the stream missed still alerts within 15 s. `seenRef` keeps a filing
+    // from alerting twice when both deliver it.
     poll();          // seed with what already exists, so a reload is silent
+    pollTimer = setInterval(poll, 15000);
     connect();
     return () => {
       closed = true;
       es?.close();
+      clearInterval(watchdog);
       if (pollTimer) clearInterval(pollTimer);
       if (retry) clearTimeout(retry);
       if (batchTimer.current) clearTimeout(batchTimer.current);
