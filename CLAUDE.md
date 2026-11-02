@@ -332,8 +332,10 @@ suggestion cards, nothing to expand. It replaced a 560 px scroll box of cards,
 each with its own collapsible analysis — a scroll inside a scroll, and a click
 per company to see the numbers. Stacks under 900 px.
 
-Each list row's first line also carries **1D · 5D · 10D · 15D · 1M · 3M · 6M ·
-1Y**, then **RES** (since the result), then **⚡AI** on results (2 Nov 2026).
+Each list row carries returns on its two existing lines, so it stays two lines
+tall (2 Nov 2026): **1D · 5D · 10D · 15D** and **RES** (since the result) beside
+the name, **1M · 3M · 6M · 1Y** and **⚡AI** (results only) beside the time.
+RES and ⚡AI sit in equal-width slots so both lines' returns end in one column.
 1D is the day change already on the row. The others are the live price (else
 the last close) over the close N sessions back, from the same `period_bases`
 the earnings calendar uses. The listing attaches them (`period_bases` on each

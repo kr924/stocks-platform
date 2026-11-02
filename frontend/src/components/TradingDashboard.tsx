@@ -3443,6 +3443,8 @@ export function TradingDashboard() {
           .od-rets>span{white-space:nowrap}
           .od-rets i{font-style:normal;color:var(--text-faint);font-weight:600;margin-right:2px;font-size:9px}
           .od-rets b{font-weight:700}
+          .od-res{min-width:58px;text-align:right}
+          .od-ai-slot{min-width:58px;display:inline-flex;justify-content:flex-end}
           .od-ai{display:inline-flex;align-items:center;gap:2px;padding:2px 6px;border-radius:5px;font-size:10px;font-weight:800;cursor:pointer;
                  color:var(--on-accent);background:var(--positive);white-space:nowrap}
           .od-ai:hover{filter:brightness(1.08)}
@@ -3547,6 +3549,16 @@ export function TradingDashboard() {
                 })];
               const reanalysingRow = !!actionLoading[`reanalyse_${p.id}`];
               const canPremium = isRes && !!aiSettings.premium_openrouter_key_set && !reanalysingRow;
+              // Two lines, not three: 1D-15D beside the name, 1M-1Y beside the time.
+              const retsTitle = pb?.unavailable ? "No price history for this stock" : !pb ? "Returns are being fetched…" :
+                rets.map(([l, v]) => `${l}: ${v == null ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(2)}%`}`).join("\n");
+              const retsEl = (part: [string, number | null][]) => (
+                <span className="od-rets" style={{ marginLeft: "auto" }} title={retsTitle}>
+                  {part.map(([l, v]) => (
+                    <span key={l}><i>{l}</i><b style={{ color: pctCol(v) }}>{v == null ? (pb || l === "1D" ? "—" : "…") : `${v > 0 ? "+" : ""}${Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(1)}`}</b></span>
+                  ))}
+                </span>
+              );
               return (
                 <button key={p.id} id={`od-row-${p.id}`} className={`od-row${sel ? " sel" : ""}`}
                   onClick={() => setSelectedResultId(p.id)}>
@@ -3565,36 +3577,34 @@ export function TradingDashboard() {
                         EST {p.like_for_like.estimates.overall}
                       </span>
                     )}
-                    <span className="od-rets" style={{ marginLeft: "auto" }}
-                      title={pb?.unavailable ? "No price history for this stock" : !pb ? "Returns are being fetched…" :
-                        rets.map(([l, v]) => `${l}: ${v == null ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(2)}%`}`).join("\n")}>
-                      {rets.map(([l, v]) => (
-                        <span key={l}><i>{l}</i><b style={{ color: pctCol(v) }}>{v == null ? (pb || l === "1D" ? "—" : "…") : `${v > 0 ? "+" : ""}${Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(1)}`}</b></span>
-                      ))}
-                    </span>
-                    <span style={{ fontSize: "12px", fontWeight: 700, color: pctCol(since), whiteSpace: "nowrap" }}
+                    {retsEl(rets.slice(0, 4))}
+                    <span className="od-res" style={{ fontSize: "12px", fontWeight: 700, color: pctCol(since), whiteSpace: "nowrap" }}
                       title="Since the result: live price against the price when the filing landed">
                       <i style={{ fontStyle: "normal", fontSize: "9px", fontWeight: 600, color: "var(--text-faint)", marginRight: "3px" }}>RES</i>
                       {since == null ? "—" : `${since > 0 ? "+" : ""}${since.toFixed(1)}%`}
                     </span>
-                    {isRes && (
-                      <span role="button" tabIndex={0} className={`od-ai${canPremium ? "" : " off"}`}
-                        title={!aiSettings.premium_openrouter_key_set ? "Set the premium OpenRouter key under AI settings first."
-                          : reanalysingRow ? "Starting…"
-                          : `Premium analyse with ${aiSettings.premium_openrouter_model} (premium key, whole PDF). Any analysis still running is replaced.`}
-                        onClick={(e) => { e.stopPropagation(); if (canPremium) handleReanalyse(p, true); }}
-                        onKeyDown={(e) => { if ((e.key === "Enter" || e.key === " ") && canPremium) { e.preventDefault(); e.stopPropagation(); handleReanalyse(p, true); } }}>
-                        <Zap size={10} />AI
-                      </span>
-                    )}
                   </div>
-                  <div style={{ marginTop: "2px", fontSize: "10px", color: "var(--text-muted)", display: "flex", gap: "6px" }}>
+                  <div style={{ marginTop: "2px", fontSize: "10px", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
                     <span>{hhmm}</span>
                     {!isRes && (
-                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0, flex: "0 1 auto" }}>
                         {(p.kind || "").replace(/_/g, " ")}
                       </span>
                     )}
+                    {retsEl(rets.slice(4))}
+                    {/* Same width as RES on the line above, so both lines' returns end in one column. */}
+                    <span className="od-ai-slot">
+                      {isRes && (
+                        <span role="button" tabIndex={0} className={`od-ai${canPremium ? "" : " off"}`}
+                          title={!aiSettings.premium_openrouter_key_set ? "Set the premium OpenRouter key under AI settings first."
+                            : reanalysingRow ? "Starting…"
+                            : `Premium analyse with ${aiSettings.premium_openrouter_model} (premium key, whole PDF). Any analysis still running is replaced.`}
+                          onClick={(e) => { e.stopPropagation(); if (canPremium) handleReanalyse(p, true); }}
+                          onKeyDown={(e) => { if ((e.key === "Enter" || e.key === " ") && canPremium) { e.preventDefault(); e.stopPropagation(); handleReanalyse(p, true); } }}>
+                          <Zap size={10} />AI
+                        </span>
+                      )}
+                    </span>
                   </div>
                   {isRes && (
                     <>
