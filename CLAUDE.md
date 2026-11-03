@@ -365,6 +365,20 @@ until a reload. Now the queue holds 500 and drops its *oldest* event when
 full instead of the client; ResultAlerts reads today's pending list every
 15 s regardless of the stream (`seenRef` stops a double alert) and reopens a
 stream silent for 20 s. `SSE client stalled` in the logs marks the case.
+**Test** beside ALERTS ON plays the tone, raises a test notification and
+reports each link in one line — browser permission, sound (AudioContext
+state), stream (last message), the 15 s list check, the switch, and the last
+real alert — so "no alert" can be pinned to the browser or the server. A
+suspended AudioContext (after a sleep) is resumed before the tone instead of
+skipping it silently.
+
+**Budget → quantity** (3 Nov 2026). The order form takes a ₹ budget; the
+quantity is `floor(budget / price)` at the limit price for a LIMIT order, else
+the live price, else the price at the result, else the last close, and follows
+the price until the order is placed (`resultQty`, used by the order call too).
+Typing a quantity clears the budget. The buy button carries the quantity and is
+disabled below one share. Each list row shows the current price beside the
+exchange chip (the last close, dimmed, when there is no live quote).
 
 **Pause, not dismiss.** Pausing stops a row being quoted and leaves it in place
 with its last price; its symbol leaves the quote batch, which is where the

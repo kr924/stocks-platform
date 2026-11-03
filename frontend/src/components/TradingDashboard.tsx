@@ -1416,6 +1416,9 @@ export function TradingDashboard() {
   const [resultOrderForm, setResultOrderForm] = useState<Record<number, {
     quantity: number; order_type: string; limit_price: string;
     stoploss_pct: number; stoploss_type: string; broker: string;
+    // ₹ to spend. When set, the quantity is worked out from it at the
+    // current price; typing a quantity clears it.
+    budget?: number;
   }>>({});
   const [pollerStatus, setPollerStatus] = useState<PollerStatus | null>(null);
   const [upcomingEarnings, setUpcomingEarnings] = useState<UpcomingEarningsItem[]>([]);
@@ -1606,6 +1609,19 @@ export function TradingDashboard() {
     // mounted on every view; this switch only tells it.
     window.dispatchEvent(new CustomEvent("resultalerts", { detail: alertsOn }));
   }, [alertsOn]);
+
+  // What ResultAlerts reports after a test: permission, sound, stream, last poll.
+  const [alertStatus, setAlertStatus] = useState<string>("");
+  useEffect(() => {
+    let t: ReturnType<typeof setTimeout> | null = null;
+    const on = (e: Event) => {
+      setAlertStatus(String((e as CustomEvent).detail || ""));
+      if (t) clearTimeout(t);
+      t = setTimeout(() => setAlertStatus(""), 20000);
+    };
+    window.addEventListener("resultalerts-status", on);
+    return () => { window.removeEventListener("resultalerts-status", on); if (t) clearTimeout(t); };
+  }, []);
 
   const enableAlerts = async () => {
     if (alertsOn) {
@@ -2105,8 +2121,30 @@ export function TradingDashboard() {
   const getResultForm = (id: number) =>
     resultOrderForm[id] || {
       quantity: 1, order_type: "MARKET", limit_price: "",
-      stoploss_pct: 2, stoploss_type: "software", broker: "upstox",
-    };
+      stoploss_pct: 2, stoploss_type: "software", broker: "upstox", budget: 0,
+    } as { quantity: number; order_type: string; limit_price: string;
+           stoploss_pct: number; stoploss_type: string; broker: string; budget?: number };
+
+  /**
+   * The price a buy will be sized at: the limit price for a limit order, else
+   * the live price, else the price when the filing landed, else the last close.
+   */
+  const resultUnitPrice = (pending: PendingResult, form: ReturnType<typeof getResultForm>) => {
+    const lim = form.order_type === "LIMIT" ? parseFloat(form.limit_price) : NaN;
+    if (lim > 0) return { px: lim, from: "limit price" };
+    const q = marketQuotesMap[pending.symbol.toUpperCase()] || {};
+    if (q.last_price > 0) return { px: q.last_price as number, from: "live price" };
+    if (pending.price_at_announcement) return { px: pending.price_at_announcement, from: "price at result" };
+    if (pending.period_bases?.last_close) return { px: pending.period_bases.last_close, from: "last close" };
+    return { px: 0, from: "" };
+  };
+
+  /** Quantity to order: from the budget when one is set, else as typed. */
+  const resultQty = (pending: PendingResult, form: ReturnType<typeof getResultForm>) => {
+    if (!form.budget || form.budget <= 0) return form.quantity;
+    const { px } = resultUnitPrice(pending, form);
+    return px > 0 ? Math.floor(form.budget / px) : 0;
+  };
 
   const updateResultForm = (id: number, patch: Partial<ReturnType<typeof getResultForm>>) => {
     setResultOrderForm(prev => ({ ...prev, [id]: { ...getResultForm(id), ...patch } }));
@@ -2114,13 +2152,15 @@ export function TradingDashboard() {
 
   const handlePlaceResultOrder = async (pending: PendingResult) => {
     const form = getResultForm(pending.id);
+    const qty = resultQty(pending, form);
+    if (!(qty >= 1)) return;
     setActionLoading(prev => ({ ...prev, [`result_${pending.id}`]: true }));
     try {
       const res = await fetch(`${API_BASE}/api/trading/pending-results/${pending.id}/order`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          quantity: form.quantity,
+          quantity: qty,
           order_type: form.order_type,
           limit_price: form.order_type === "LIMIT" && form.limit_price ? parseFloat(form.limit_price) : null,
           stoploss_pct: form.stoploss_pct,
@@ -3249,6 +3289,23 @@ export function TradingDashboard() {
               {alertsOn ? <Bell size={12} /> : <BellOff size={12} />}
               {alertsOn ? "ALERTS ON" : "Alerts off"}
             </button>
+            {alertsOn && (
+              <button
+                onClick={() => window.dispatchEvent(new Event("resultalerts-test"))}
+                title="Play the tone, raise a test notification, and show what the alerts can see: browser permission, sound, the live stream and the last check of the list."
+                style={{
+                  padding: "6px 8px", borderRadius: "6px", cursor: "pointer", fontSize: "11px", fontWeight: 700,
+                  background: "transparent", border: "1px solid rgba(var(--neutral-rgb), 0.18)", color: "var(--text-muted)",
+                }}>
+                Test
+              </button>
+            )}
+            {alertStatus && (
+              <span style={{ fontSize: "11px", color: alertStatus.includes("✕") ? "var(--negative)" : "var(--text-secondary)",
+                             maxWidth: "520px" }}>
+                {alertStatus}
+              </span>
+            )}
 
             <label title="Cash you have available. Each card shows what its order costs and what would be left."
               style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "11px", color: "var(--text-muted)" }}>
@@ -3444,6 +3501,7 @@ export function TradingDashboard() {
           .od-rets i{font-style:normal;color:var(--text-faint);font-weight:600;margin-right:2px;font-size:9px}
           .od-rets b{font-weight:700}
           .od-res{min-width:58px;text-align:right}
+          .od-ltp{font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
           .od-ai-slot{min-width:58px;display:inline-flex;justify-content:flex-end}
           .od-ai{display:inline-flex;align-items:center;gap:2px;padding:2px 6px;border-radius:5px;font-size:10px;font-weight:800;cursor:pointer;
                  color:var(--on-accent);background:var(--positive);white-space:nowrap}
@@ -3567,6 +3625,12 @@ export function TradingDashboard() {
                     <span className="od-chip" style={{ color: p.exchange === "nse" ? "var(--accent)" : "var(--ai)", background: "rgba(var(--ink-rgb),.05)" }}>
                       {(p.exchange || "").toUpperCase()}
                     </span>
+                    {nowPx != null && (
+                      <span className="od-ltp" title={q.last_price > 0 ? "Live price" : "Last close — no live quote"}
+                        style={{ color: q.last_price > 0 ? "var(--text-primary)" : "var(--text-faint)" }}>
+                        ₹{nowPx.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    )}
                     {p.position && <span className="od-chip" style={{ color: "var(--accent)", background: "rgba(var(--accent-rgb),.12)" }}>ORDERED</span>}
                     {p.paused && <span className="od-chip" style={{ color: "var(--text-muted)", background: "rgba(var(--ink-rgb),.05)" }}>PAUSED</span>}
                     {p.like_for_like?.estimates?.overall && (
@@ -3679,6 +3743,15 @@ export function TradingDashboard() {
           {(selectedPending ? [selectedPending] : []).map(pending => {
             const form = getResultForm(pending.id);
             const busy = !!actionLoading[`result_${pending.id}`];
+            // Budget → quantity, at the price the order would be sized at.
+            const { px: unitPx, from: unitFrom } = resultUnitPrice(pending, form);
+            const budgetQty = form.budget && form.budget > 0 ? (unitPx > 0 ? Math.floor(form.budget / unitPx) : 0) : null;
+            const qtyNow = budgetQty ?? form.quantity;
+            const fmtRs = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+            const budgetNote = budgetQty == null ? ""
+              : unitPx <= 0 ? "no price to size from"
+              : budgetQty === 0 ? `under 1 share at ${fmtRs(unitPx)}`
+              : `${budgetQty} × ${fmtRs(unitPx)} (${unitFrom}) = ${fmtRs(budgetQty * unitPx)}`;
             const ai = pending.ai_analysis;
             const quote = marketQuotesMap[pending.symbol.toUpperCase()] || {};
             // The detail pane shows one filing, so its analysis is always open.
@@ -3826,11 +3899,28 @@ export function TradingDashboard() {
                 </div>
 
                 {/* Order form */}
-                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: "10px" }}>
+                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: "10px", paddingBottom: budgetNote ? "14px" : 0 }}>
+                  <label style={{ fontSize: "10px", color: "var(--text-muted)", position: "relative" }}
+                    title="Amount to spend. The quantity is worked out from it at the current price (the limit price for a LIMIT order) and follows the price until you place the order.">
+                    BUDGET ₹
+                    <input type="number" inputMode="decimal" min={0} step={500} placeholder="—"
+                      value={form.budget ? String(form.budget) : ""}
+                      onChange={e => {
+                        const n = parseFloat(e.target.value);
+                        updateResultForm(pending.id, { budget: n > 0 ? n : 0 });
+                      }}
+                      style={{ display: "block", width: "100px", marginTop: "3px", padding: "6px 8px", background: "rgba(var(--bg-sunken-rgb),0.8)", border: "1px solid rgba(var(--ink-rgb),0.12)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "12px" }} />
+                    {budgetNote && (
+                      <span style={{ position: "absolute", left: 0, top: "100%", marginTop: "2px", whiteSpace: "nowrap", fontSize: "10px",
+                                     color: budgetQty === 0 ? "var(--negative)" : "var(--text-muted)" }}>
+                        {budgetNote}
+                      </span>
+                    )}
+                  </label>
                   <label style={{ fontSize: "10px", color: "var(--text-muted)" }}>
                     QTY
-                    <NumberField integer min={1} value={form.quantity}
-                      onValue={n => updateResultForm(pending.id, { quantity: n })}
+                    <NumberField integer min={1} value={qtyNow}
+                      onValue={n => updateResultForm(pending.id, { quantity: n, budget: 0 })}
                       style={{ display: "block", width: "70px", marginTop: "3px", padding: "6px 8px", background: "rgba(var(--bg-sunken-rgb),0.8)", border: "1px solid rgba(var(--ink-rgb),0.12)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "12px" }} />
                   </label>
                   <label style={{ fontSize: "10px", color: "var(--text-muted)" }}>
@@ -3869,14 +3959,15 @@ export function TradingDashboard() {
                   {/* Once a position exists the buy is done; the only action
                       left on this filing is getting out of it. */}
                   {!pending.position && (
-                    <button onClick={() => handlePlaceResultOrder(pending)} disabled={busy}
+                    <button onClick={() => handlePlaceResultOrder(pending)} disabled={busy || !(qtyNow >= 1)}
+                      title={qtyNow >= 1 && unitPx > 0 ? `${qtyNow} shares ≈ ${fmtRs(qtyNow * unitPx)}` : undefined}
                       style={{
-                        padding: "8px 16px", background: busy ? "rgba(var(--positive-rgb), 0.26)" : "var(--positive)",
+                        padding: "8px 16px", background: busy || !(qtyNow >= 1) ? "rgba(var(--positive-rgb), 0.26)" : "var(--positive)",
                         border: "none", borderRadius: "6px", color: "var(--on-accent)", fontSize: "12px", fontWeight: 700,
-                        cursor: busy ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: "6px"
+                        cursor: busy || !(qtyNow >= 1) ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: "6px"
                       }}>
                       <ShoppingBag size={14} />
-                      {busy ? "Placing…" : canTradeNow() ? "Place Buy Order" : "Queue Buy for 09:15"}
+                      {busy ? "Placing…" : `${canTradeNow() ? "Buy" : "Queue Buy for 09:15"} · ${qtyNow >= 1 ? qtyNow : 0}`}
                     </button>
                   )}
                   {pending.position?.can_sell && (

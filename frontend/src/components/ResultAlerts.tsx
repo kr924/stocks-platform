@@ -29,6 +29,9 @@ export function ResultAlerts() {
   const batchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const titleRef = useRef<string>(document.title);
   const unseenRef = useRef(0);
+  // For the header's Test button: what the last stream message and poll were.
+  const streamRef = useRef<{ state: string; lastMsg: number; lastPoll: number; pollOk: boolean; lastAlert: string }>(
+    { state: "connecting", lastMsg: 0, lastPoll: 0, pollOk: false, lastAlert: "" });
 
   useEffect(() => {
     const read = () => {
@@ -57,7 +60,38 @@ export function ResultAlerts() {
       }
     };
     document.addEventListener("visibilitychange", onVisible);
+
+    // Header "Test": the same tone and notification a filing raises, then a
+    // status line saying which part is not working.
+    const onTest = async () => {
+      const parts: string[] = [];
+      const perm = typeof Notification === "undefined" ? "unsupported" : Notification.permission;
+      parts.push(perm === "granted" ? "notifications ✓" : `notifications ✕ (${perm})`);
+      try {
+        audioRef.current = audioRef.current || new AudioContext();
+        if (audioRef.current.state !== "running") await audioRef.current.resume();
+      } catch { /* no audio */ }
+      const st = audioRef.current?.state || "none";
+      parts.push(st === "running" ? "sound ✓" : `sound ✕ (${st})`);
+      if (st === "running") play(audioRef.current!);
+      if (perm === "granted") {
+        try {
+          const n = new Notification("Test — result alerts", { body: "This is what a new filing looks like.", tag: `result-test-${Date.now()}` });
+          n.onclick = () => { window.focus(); n.close(); };
+        } catch (e) { parts[0] = `notifications ✕ (${(e as Error).message})`; }
+      }
+      const s = streamRef.current;
+      const ago = (t: number) => (t ? `${Math.round((Date.now() - t) / 1000)}s ago` : "never");
+      parts.push(s.state === "open" && Date.now() - s.lastMsg < 20000
+        ? `stream ✓ (${ago(s.lastMsg)})` : `stream ✕ (${s.state}, last ${ago(s.lastMsg)})`);
+      parts.push(s.pollOk ? `list check ✓ (${ago(s.lastPoll)})` : `list check ✕ (${ago(s.lastPoll)})`);
+      if (!onRef.current) parts.push("switch ✕ off");
+      parts.push(`last alert: ${s.lastAlert || "none since this page loaded"}`);
+      window.dispatchEvent(new CustomEvent("resultalerts-status", { detail: parts.join(" · ") }));
+    };
+    window.addEventListener("resultalerts-test", onTest);
     return () => {
+      window.removeEventListener("resultalerts-test", onTest);
       window.removeEventListener("resultalerts", onToggle);
       window.removeEventListener("storage", onToggle);
       document.removeEventListener("pointerdown", arm);
@@ -66,8 +100,18 @@ export function ResultAlerts() {
   }, []);
 
   const tone = () => {
-    const ctx = audioRef.current;
-    if (!ctx || ctx.state !== "running") return;
+    let ctx = audioRef.current;
+    // A context can be created without a click once the page has had one
+    // (sticky activation), and one suspended by a sleep can be resumed.
+    try { if (!ctx) ctx = audioRef.current = new AudioContext(); } catch { return; }
+    if (ctx.state !== "running") {
+      ctx.resume().then(() => { if (ctx!.state === "running") play(ctx!); }).catch(() => {});
+      return;
+    }
+    play(ctx);
+  };
+
+  const play = (ctx: AudioContext) => {
     try {
       [0, 0.18].forEach((offset, i) => {
         const osc = ctx.createOscillator();
@@ -89,6 +133,8 @@ export function ResultAlerts() {
     const items = batchRef.current;
     batchRef.current = [];
     if (!items.length || !onRef.current) return;
+    streamRef.current.lastAlert = `${new Date().toLocaleTimeString()} ${items.map(i => i.symbol).join(", ")}`;
+    console.info("[alerts]", items.map(i => i.symbol).join(", "));
     tone();
     if (document.hidden) {
       unseenRef.current += items.length;
@@ -141,6 +187,8 @@ export function ResultAlerts() {
     const poll = async () => {
       try {
         const res = await fetch(`${API_BASE}/api/trading/pending-results?status=pending&trade_date=${istToday()}`);
+        streamRef.current.lastPoll = Date.now();
+        streamRef.current.pollOk = res.ok;
         if (!res.ok) return;
         const data = await res.json();
         const rows = Array.isArray(data.pending) ? data.pending : [];
@@ -150,7 +198,7 @@ export function ResultAlerts() {
           return;
         }
         rows.forEach((r: any) => announce(r));
-      } catch { /* offline */ }
+      } catch { streamRef.current.pollOk = false; /* offline */ }
     };
 
     const connect = () => {
@@ -162,7 +210,8 @@ export function ResultAlerts() {
         return;
       }
       lastMsg = Date.now();
-      const alive = () => { lastMsg = Date.now(); };
+      streamRef.current.state = "connecting";
+      const alive = () => { lastMsg = Date.now(); streamRef.current.state = "open"; streamRef.current.lastMsg = lastMsg; };
       es.onopen = alive;
       es.addEventListener("connected", alive);
       es.addEventListener("heartbeat", alive);
@@ -170,7 +219,7 @@ export function ResultAlerts() {
         alive();
         try { announce(JSON.parse(e.data)); } catch { /* malformed */ }
       });
-      es.onerror = () => reconnectSoon(15000);
+      es.onerror = () => { streamRef.current.state = "error"; reconnectSoon(15000); };
     };
 
     const reconnectSoon = (ms: number) => {
