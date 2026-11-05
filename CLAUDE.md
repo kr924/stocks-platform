@@ -1011,6 +1011,14 @@ longer in the automatic chain (`skip_gemcall`). Its code path remains in
   encrypted filing as a decrypted copy from the start, and on a 400 for any
   other filing retries once with a rewritten copy (garbage-collected,
   recompressed) before falling back to the selected pages.
+  TIRUMALCHM turned out not to be encrypted but **cut off**: 992 KB ending
+  mid-stream with no `%%EOF`, which PyMuPDF "repaired" into 0 pages. A
+  download without the end-of-file marker is now incomplete
+  (`pdf_looks_complete`): `fetch_filing_pdf` tries the next way in and one
+  more plain GET before settling for the largest partial copy, the full PDF
+  is not sent (`_full_pdf_skip` says "download is incomplete"), and a PDF
+  with no readable pages gives `prepare_for_ai` mode `none` with a reason
+  rather than an empty selection the model would answer from the headline.
 - **Free-model limits are per account, not per key** ("Making additional
   accounts or API keys will not affect your rate limits"): 20/min, and 50/day
   until the account has bought $10 of credit, then 1,000/day. The free key

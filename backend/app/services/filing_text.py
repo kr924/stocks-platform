@@ -166,6 +166,11 @@ def prepare_for_ai(pdf_bytes: Optional[bytes]) -> dict:
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     except Exception as e:
         return {"mode": "none", "reason": f"PDF could not be opened: {e}"}
+    if doc.page_count == 0:
+        # A cut-off download keeps its objects but loses the page tree at the
+        # end of the file (TIRUMALCHM, 5 Nov 2026). An empty "selection"
+        # would send the model nothing and let it answer from the headline.
+        return {"mode": "none", "reason": "the PDF has no readable pages (download incomplete or damaged)"}
 
     try:
         pages = []

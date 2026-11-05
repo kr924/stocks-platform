@@ -778,6 +778,17 @@ def _as_pdf(data: bytes) -> Optional[bytes]:
     return None
 
 
+def pdf_looks_complete(data: Optional[bytes]) -> bool:
+    """
+    A PDF ends with %%EOF (an incremental update appends another). A download
+    cut off part-way does not, and loses the cross-reference table and the
+    page tree that sit at the end: TIRUMALCHM's 992 KB filing (5 Nov 2026)
+    opened in PyMuPDF with 0 pages, Google refused it as "invalid argument",
+    and the selected pages had nothing to select.
+    """
+    return bool(data) and b"%%EOF" in data[-2048:]
+
+
 def fetch_filing_pdf(attachment_url: str) -> Optional[bytes]:
     """
     The filing's bytes, from BSE or NSE, or None. Why it failed, if it did,
@@ -798,11 +809,21 @@ def fetch_filing_pdf(attachment_url: str) -> Optional[bytes]:
         return None
     from app.services import bse_http
     tried = []
+    partial = []      # cut-off downloads, kept in case nothing better comes
 
     def attempt(name, fn):
         try:
             res = fn()
             pdf = _as_pdf(res.content) if res.status_code == 200 else None
+            if pdf and not pdf_looks_complete(pdf) and pdf is res.content:
+                # Cut off part-way (no %%EOF, or fewer bytes than the server
+                # said it would send): try the next way in, keep this as a
+                # last resort.
+                want = res.headers.get("Content-Length") if hasattr(res, "headers") else None
+                tried.append(f"{name}: incomplete, {len(pdf)} bytes"
+                             + (f" of {want}" if want else "") + ", no end-of-file marker")
+                partial.append(pdf)
+                return None
             if pdf:
                 return pdf
             tried.append(f"{name}: HTTP {res.status_code}, {len(res.content or b'')} bytes"
@@ -833,6 +854,19 @@ def fetch_filing_pdf(attachment_url: str) -> Optional[bytes]:
         pdf = attempt(name, fn)
         if pdf:
             return pdf
+    if partial:
+        # A dropped connection usually: one more plain try a moment later.
+        import time as _t
+        _t.sleep(2)
+        pdf = attempt("plain GET, again", lambda: requests.get(
+            attachment_url, timeout=60, headers={"User-Agent": _BROWSER_UA}))
+        if pdf:
+            return pdf
+        best = max(partial, key=len)
+        _last_fetch_reason.v = "; ".join(tried)
+        logger.warning(f"[FILING PDF] {attachment_url}: only incomplete copies ({_last_fetch_reason.v}); "
+                       f"using the largest, {len(best)} bytes")
+        return best
     _last_fetch_reason.v = "; ".join(tried)
     logger.warning(f"[FILING PDF] {attachment_url}: {_last_fetch_reason.v}")
     return None
@@ -988,6 +1022,9 @@ def _do_analyze_earnings_disclosure_2step(
         else:
             from app.services.filing_text import prepare_for_ai
             doc_prep = prepare_for_ai(raw_pdf)
+            if doc_prep["mode"] == "none" and doc_prep.get("reason"):
+                failures.append(f"the filing could not be read here: {doc_prep['reason']}"
+                                + (f" ({last_fetch_reason()})" if last_fetch_reason() else ""))
             if doc_prep["mode"] == "pdf" and len(doc_prep["pdf"]) > MAX_INLINE_PDF_BYTES:
                 failures.append(f"the filing's pages come to {len(doc_prep['pdf']) // 1048576} MB, "
                                 f"too large to send; sent as a link")
@@ -1307,6 +1344,10 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
             return "PDF not downloaded"
         if len(raw_pdf) > FULL_PDF_MAX_BYTES:
             return f"PDF is {len(raw_pdf) / 1048576:.1f} MB, over the {FULL_PDF_MAX_BYTES // 1048576} MB limit"
+        if not pdf_looks_complete(raw_pdf):
+            # A provider refuses a cut-off file ("invalid argument"); the
+            # pages PyMuPDF can still recover go as the selected pages.
+            return f"PDF download is incomplete ({len(raw_pdf) // 1024} KB, no end-of-file marker)"
         try:
             # A model that cannot read a PDF would get OpenRouter's paid OCR
             # of every page; it keeps the selected pages instead.
