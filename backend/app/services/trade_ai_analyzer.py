@@ -1372,8 +1372,9 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
                 # fall through to the selected pages rather than giving up.
                 reason = str(e).replace("All OpenRouter models failed: ", "")
                 failures.append(f"full PDF on {model} failed, retried with the selected pages: {reason[:200]}")
-                earlier.append(f"full PDF: {reason[:200]}")
-                logger.warning(f"[AUTO AI] #{symbol}: full PDF failed on {model}: {reason[:200]}")
+                earlier.append(f"full PDF: {reason[:300]}")
+                logger.warning(f"[AUTO AI] #{symbol}: full PDF failed on {model} "
+                               f"({len(raw_pdf) // 1024} KB): {reason[:600]}")
         report = {}
         # Text mode carries the filing in the prompt; nothing to attach.
         pdf = doc_prep.get("pdf") if doc_prep["mode"] == "pdf" else None

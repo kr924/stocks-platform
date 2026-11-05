@@ -144,6 +144,21 @@ OPENROUTER_MAX_TOKENS = 16000
 CREDIT_CHECK_RETRY_S = 2.0
 
 
+def _raw_reason(raw) -> str:
+    """The provider's own error message out of OpenRouter's metadata.raw,
+    which is usually a JSON string like {"error": {"message": ...}}."""
+    text = raw if isinstance(raw, str) else json.dumps(raw)
+    try:
+        obj = json.loads(text) if isinstance(raw, str) else raw
+        if isinstance(obj, dict):
+            e = obj.get("error", obj)
+            if isinstance(e, dict) and e.get("message"):
+                return str(e["message"])[:240]
+    except Exception:
+        pass
+    return text[:240]
+
+
 def _credit_check_busy(code, message) -> bool:
     """
     OpenRouter's own credit check timing out ("could not verify available
@@ -401,7 +416,7 @@ def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url
                         e = err if isinstance(err, dict) else {"message": str(err or "no answer in the response")}
                         meta = e.get("metadata") or {}
                         provider = meta.get("provider_name")
-                        raw = str(meta.get("raw") or "")[:100]
+                        raw = _raw_reason(meta.get("raw")) if meta.get("raw") else ""
                         errors.append(f"{model_name}: {str(e.get('message'))[:140]}"
                                       + (f" [{provider}]" if provider else "")
                                       + (f" ({raw})" if raw else ""))
@@ -439,11 +454,21 @@ def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url
                             logger.warning(f"[OPENROUTER] {model_name} answered after: {'; '.join(report['failed'])[:400]}")
                     return parsed
                 else:
+                    detail = ""
                     try:
-                        msg = ((res.json() or {}).get("error") or {}).get("message") or res.text[:120]
+                        err = (res.json() or {}).get("error") or {}
+                        msg = err.get("message") or res.text[:120]
+                        # "Provider returned error" says nothing; the provider's
+                        # own words are in metadata.raw (TIRUMALCHM's full PDF
+                        # on Argon, 5 Nov 2026, was a bare 400 without them).
+                        meta = err.get("metadata") or {}
+                        if meta.get("provider_name"):
+                            detail += f" [{meta['provider_name']}]"
+                        if meta.get("raw"):
+                            detail += f" ({_raw_reason(meta['raw'])})"
                     except Exception:
                         msg = res.text[:120]
-                    errors.append(f"{model_name}: HTTP {res.status_code} {str(msg)[:140]}")
+                    errors.append(f"{model_name}: HTTP {res.status_code} {str(msg)[:140]}{detail[:300]}")
                     if (not credit_retried and _credit_check_busy(res.status_code, msg)
                             and not (deadline and _time.time() > deadline - 10)):
                         credit_retried = True
