@@ -1350,31 +1350,56 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
             logger.info(f"[AUTO AI] #{symbol}: full PDF not sent to {model}: {skip}")
             earlier.append(f"full PDF not sent: {skip}")
         if not skip:
-            report = {}
-            _step("reading the full PDF", tier=tier, model=model)
-            try:
-                logger.info(f"🔬 [AUTO AI OPENROUTER PREMIUM]: {model} reading the full filing "
-                            f"({len(raw_pdf) // 1024} KB) for #{symbol}")
-                or_res = call_openrouter(prompt_full, attempt["key"], model=model,
-                                         attachment_url=attachment_url, attachment_bytes=raw_pdf,
-                                         pdf_engine="native",
-                                         free_only=False, fallbacks=[model], report=report,
-                                         deadline=ai_deadline, cancel=_stale,
-                                         progress=_progress_fn("reading the full PDF", tier, report))
-                raw = json.dumps(or_res["analyses"][0]) if (or_res and or_res.get("analyses")) else (
-                    json.dumps(or_res) if or_res else None)
-                if raw:
-                    why = _substituted(model, report)
-                    return raw, (f"OpenRouter {label} ({report.get('model') or model}, full PDF)"
-                                 + (f" — {_short(model)} failed: {why}" if why else ""))
-            except Exception as e:
-                # Too large for the provider, or a model that refused the file:
-                # fall through to the selected pages rather than giving up.
-                reason = str(e).replace("All OpenRouter models failed: ", "")
-                failures.append(f"full PDF on {model} failed, retried with the selected pages: {reason[:200]}")
-                earlier.append(f"full PDF: {reason[:300]}")
-                logger.warning(f"[AUTO AI] #{symbol}: full PDF failed on {model} "
-                               f"({len(raw_pdf) // 1024} KB): {reason[:600]}")
+            from app.services.filing_text import rewrite_pdf
+            # An encrypted filing goes as a decrypted copy from the start; any
+            # other one is rewritten and sent again only if the provider
+            # rejects the file as filed (a 400 / "invalid argument").
+            send, how = raw_pdf, "as filed"
+            dec, note = rewrite_pdf(raw_pdf)
+            if dec:
+                send, how = dec, note
+                logger.info(f"[AUTO AI] #{symbol}: filing {note}")
+            tried_rewrite = bool(dec)
+            while True:
+                report = {}
+                _step("reading the full PDF", tier=tier, model=model)
+                try:
+                    logger.info(f"🔬 [AUTO AI OPENROUTER PREMIUM]: {model} reading the full filing "
+                                f"({len(send) // 1024} KB, {how}) for #{symbol}")
+                    or_res = call_openrouter(prompt_full, attempt["key"], model=model,
+                                             attachment_url=attachment_url, attachment_bytes=send,
+                                             pdf_engine="native",
+                                             free_only=False, fallbacks=[model], report=report,
+                                             deadline=ai_deadline, cancel=_stale,
+                                             progress=_progress_fn("reading the full PDF", tier, report))
+                    raw = json.dumps(or_res["analyses"][0]) if (or_res and or_res.get("analyses")) else (
+                        json.dumps(or_res) if or_res else None)
+                    if raw:
+                        why = _substituted(model, report, earlier)
+                        return raw, (f"OpenRouter {label} ({report.get('model') or model}, full PDF"
+                                     + (f", {how}" if how != "as filed" else "") + ")"
+                                     + (f" — {_short(model)} failed: {why}" if why and (report.get('model') or model) != model
+                                        else (f" — {why}" if why else "")))
+                    break
+                except Exception as e:
+                    # Too large for the provider, or a model that refused the file:
+                    # fall through to the selected pages rather than giving up.
+                    reason = str(e).replace("All OpenRouter models failed: ", "")
+                    rejected_file = ("HTTP 400" in reason or "invalid argument" in reason.lower())
+                    if rejected_file and not tried_rewrite and not _stale():
+                        tried_rewrite = True
+                        alt, note = rewrite_pdf(raw_pdf, force=True)
+                        if alt:
+                            logger.warning(f"[AUTO AI] #{symbol}: full PDF rejected as filed ({reason[:300]}); "
+                                           f"retrying a rewritten copy: {note}")
+                            earlier.append(f"full PDF as filed: {reason[:200]}")
+                            send, how = alt, note
+                            continue
+                    failures.append(f"full PDF on {model} failed, retried with the selected pages: {reason[:200]}")
+                    logger.warning(f"[AUTO AI] #{symbol}: full PDF failed on {model} "
+                                   f"({len(send) // 1024} KB, {how}): {reason[:600]}")
+                    earlier.append(f"full PDF: {reason[:300]}")
+                    break
         report = {}
         # Text mode carries the filing in the prompt; nothing to attach.
         pdf = doc_prep.get("pdf") if doc_prep["mode"] == "pdf" else None

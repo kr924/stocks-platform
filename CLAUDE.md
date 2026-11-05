@@ -1002,6 +1002,15 @@ longer in the automatic chain (`skip_gemcall`). Its code path remains in
   credit check timing out (429 "could not verify available credits … Retry
   shortly"). The second is not a rate limit, so `_credit_check_busy` retries
   that model once after 2 s before falling back.
+  A third: Google rejecting the file itself — TIRUMALCHM's 992 KB filing,
+  "400 Provider returned error [Google AI Studio] (Request contains an
+  invalid argument.)". OpenRouter puts the provider's own words in
+  `error.metadata.raw`, now kept on every error (`_raw_reason`). Exchange
+  PDFs are often owner-password encrypted (signed, copying disallowed), which
+  PyMuPDF opens and a provider may not: `filing_text.rewrite_pdf` sends an
+  encrypted filing as a decrypted copy from the start, and on a 400 for any
+  other filing retries once with a rewritten copy (garbage-collected,
+  recompressed) before falling back to the selected pages.
 - **Free-model limits are per account, not per key** ("Making additional
   accounts or API keys will not affect your rate limits"): 20/min, and 50/day
   until the account has bought $10 of credit, then 1,000/day. The free key

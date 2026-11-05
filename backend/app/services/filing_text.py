@@ -221,3 +221,42 @@ def prepare_for_ai(pdf_bytes: Optional[bytes]) -> dict:
         return {"mode": "pdf", "pdf": pdf_bytes, "pages": [], "reason": str(e)}
     finally:
         doc.close()
+
+
+def rewrite_pdf(pdf_bytes: Optional[bytes], force: bool = False):
+    """
+    A copy of the filing a model provider will accept, or (None, reason).
+
+    Google rejected TIRUMALCHM's 992 KB filing with "Request contains an
+    invalid argument" (5 Nov 2026) while the selected pages, rebuilt by
+    PyMuPDF, went through. Exchange filings are often encrypted with an
+    owner password (digitally signed, copying disallowed) or carry broken
+    cross-reference tables; PyMuPDF opens both, a provider may not. The copy
+    is decrypted, garbage-collected and recompressed. Without `force`, only
+    an encrypted file is rewritten; with it, any file is.
+    Returns (bytes, note) or (None, reason).
+    """
+    if not pdf_bytes:
+        return None, "no PDF"
+    try:
+        import fitz
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    except Exception as e:
+        return None, f"could not be opened: {e}"
+    try:
+        if doc.needs_pass:
+            return None, "needs a password to open"
+        enc = (doc.metadata or {}).get("encryption")
+        if not enc and not force:
+            return None, "not encrypted"
+        out = doc.tobytes(garbage=3, deflate=True, clean=True,
+                          encryption=fitz.PDF_ENCRYPT_NONE)
+        note = f"decrypted ({enc})" if enc else "rewritten"
+        return out, f"{note}, {len(pdf_bytes) // 1024} KB → {len(out) // 1024} KB"
+    except Exception as e:
+        return None, f"rewrite failed: {e}"
+    finally:
+        try:
+            doc.close()
+        except Exception:
+            pass
