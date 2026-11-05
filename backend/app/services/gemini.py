@@ -141,6 +141,18 @@ def call_openai(prompt: str, api_key: str) -> dict:
 
 _NO_RETRY_CODES = {"401", "402", "403", "429"}
 OPENROUTER_MAX_TOKENS = 16000
+CREDIT_CHECK_RETRY_S = 2.0
+
+
+def _credit_check_busy(code, message) -> bool:
+    """
+    OpenRouter's own credit check timing out ("could not verify available
+    credits for this request in time. Retry shortly."), sent as a 429. Unlike
+    a real rate limit it says nothing about the model; one retry a moment
+    later usually goes through. Treated as a rate limit, it handed a premium
+    Argon run to flash-lite (5 Nov 2026).
+    """
+    return str(code) == "429" and "verify available credits" in str(message or "").lower()
 
 
 def _post_with_wall_clock(url: str, payload: dict, headers: dict, limit: float):
@@ -315,7 +327,12 @@ def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url
         if deadline and _time.time() > deadline - 5:
             errors.append(f"{model_name}: not tried, the analysis ran out of time")
             break
-        for use_json_format in [True, False]:
+        attempts = [True, False]     # JSON mode, then without it
+        credit_retried = False
+        i = 0
+        while i < len(attempts):
+            use_json_format = attempts[i]
+            i += 1
             if cancel and cancel():
                 raise RuntimeError("superseded by a newer analysis")
             payload = {
@@ -388,6 +405,12 @@ def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url
                         errors.append(f"{model_name}: {str(e.get('message'))[:140]}"
                                       + (f" [{provider}]" if provider else "")
                                       + (f" ({raw})" if raw else ""))
+                        if (not credit_retried and _credit_check_busy(e.get("code"), e.get("message"))
+                                and not (deadline and _time.time() > deadline - 10)):
+                            credit_retried = True
+                            _time.sleep(CREDIT_CHECK_RETRY_S)
+                            attempts.insert(i, use_json_format)
+                            continue
                         # Rate limits, credit and key errors do not depend on
                         # JSON mode; the same model would only fail again.
                         if str(e.get("code")) in _NO_RETRY_CODES:
@@ -408,8 +431,11 @@ def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url
                     logger.info(f"✨ [OPENROUTER] Analysis successfully generated using model '{model_name}'!")
                     if report is not None:
                         report["model"] = model_name
-                        report["failed"] = list(dict.fromkeys(errors))
-                        if errors:
+                        # Only other models' failures: a retry of this one
+                        # that went through is not a substitution.
+                        report["failed"] = list(dict.fromkeys(
+                            e for e in errors if not e.startswith(f"{model_name}:")))
+                        if report["failed"]:
                             logger.warning(f"[OPENROUTER] {model_name} answered after: {'; '.join(report['failed'])[:400]}")
                     return parsed
                 else:
@@ -418,6 +444,12 @@ def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url
                     except Exception:
                         msg = res.text[:120]
                     errors.append(f"{model_name}: HTTP {res.status_code} {str(msg)[:140]}")
+                    if (not credit_retried and _credit_check_busy(res.status_code, msg)
+                            and not (deadline and _time.time() > deadline - 10)):
+                        credit_retried = True
+                        _time.sleep(CREDIT_CHECK_RETRY_S)
+                        attempts.insert(i, use_json_format)
+                        continue
                     if str(res.status_code) in _NO_RETRY_CODES:
                         break
             except Exception as e:

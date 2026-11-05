@@ -996,6 +996,12 @@ longer in the automatic chain (`skip_gemcall`). Its code path remains in
   A premium run that does **not** send the whole PDF now says why
   (`_full_pdf_skip`: free key, not downloaded, over 15 MB, model does not read
   PDFs) in the log, the progress line and the provider.
+  Two more refusals seen the same day: **files need $0.50 of balance**
+  (402 "requires at least $0.50 in balance for files" — the full PDF cannot
+  be sent below that, the selected pages still can), and OpenRouter's own
+  credit check timing out (429 "could not verify available credits … Retry
+  shortly"). The second is not a rate limit, so `_credit_check_busy` retries
+  that model once after 2 s before falling back.
 - **Free-model limits are per account, not per key** ("Making additional
   accounts or API keys will not affect your rate limits"): 20/min, and 50/day
   until the account has bought $10 of credit, then 1,000/day. The free key
