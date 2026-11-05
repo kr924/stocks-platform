@@ -257,7 +257,7 @@ interface TradePosition {
 }
 
 /** What a running analysis is doing right now (server-side, per symbol). */
-interface AiProgress { step?: string; model?: string; tier?: string; elapsed_s?: number }
+interface AiProgress { step?: string; model?: string; tier?: string; elapsed_s?: number; note?: string }
 
 /** "reading the full PDF · gemini-4-argon (premium) · 42s" */
 function aiProgressText(pr?: AiProgress | null): string {
@@ -265,7 +265,9 @@ function aiProgressText(pr?: AiProgress | null): string {
   const model = (pr.model || "").split("/").pop() || "";
   const parts = [pr.step || "running",
                  model ? `${model}${pr.tier ? ` (${pr.tier})` : ""}` : "",
-                 typeof pr.elapsed_s === "number" ? `${pr.elapsed_s}s` : ""].filter(Boolean);
+                 typeof pr.elapsed_s === "number" ? `${pr.elapsed_s}s` : "",
+                 // On a fallback: why the model asked for is not the one running.
+                 pr.note || ""].filter(Boolean);
   return `AI ${parts.join(" · ")}`;
 }
 
@@ -4503,7 +4505,8 @@ export function TradingDashboard() {
                                   negatives={pending.ai_status === "done" && ai ? ai.negatives : []}
                                   flags={pending.ai_status === "done" && ai ? ai.red_flags : []}
                                   notes={pending.ai_status === "done" && ai
-                                    ? [ai.checks?.gate ? `⛔ The model said BUY; withheld because: ${(ai.checks.gate.reasons || []).join("; ")}` : null,
+                                    ? [ai.provider ? `Model: ${ai.provider.replace(/^OpenRouter /, "")}` : null,
+                                       ai.checks?.gate ? `⛔ The model said BUY; withheld because: ${(ai.checks.gate.reasons || []).join("; ")}` : null,
                                        ...checkLines(ai.checks),
                                        ai.versus_trend ? `Vs trend (AI): ${ai.versus_trend}` : null,
                                        ai.reaction_risk ? `Reaction risk: ${ai.reaction_risk}` : null]

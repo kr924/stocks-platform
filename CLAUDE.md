@@ -980,6 +980,19 @@ longer in the automatic chain (`skip_gemcall`). Its code path remains in
   The verdict itself stays NA — never HOLD.
 - `flow_used` is `openrouter_premium` / `openrouter_free` / `custom_rest_api`;
   `provider` names the model that actually answered, fallbacks included.
+- **A fallback says why it is answering** (5 Nov 2026). Premium analyse on
+  `google/gemini-4-argon` showed argon for a few seconds, then
+  `gemini-2.5-flash-lite`, and OpenRouter's logs held only flash-lite: argon
+  failed fast on both the full PDF and the selected pages, the chain moved
+  to its fallbacks (`flash-lite`, `gpt-4o-mini`), and the failure was thrown
+  away once one answered. Now `call_openrouter` keeps earlier models'
+  failures in `report["failed"]`, the progress line reads "… · after
+  <model>: <reason>", and `provider` ends "— argon failed: <reason>"; the AI
+  card shows it as "Model: …". Every request also carries `max_tokens`
+  (`OPENROUTER_MAX_TOKENS`, 16k): without it OpenRouter reserves credit for
+  the model's whole output window (65k on argon at $10/M) and answers 402
+  "requires more credits" before the model sees anything — the most likely
+  reason argon was refused, and one that never appears in OpenRouter's logs.
 - **Free-model limits are per account, not per key** ("Making additional
   accounts or API keys will not affect your rate limits"): 20/min, and 50/day
   until the account has bought $10 of credit, then 1,000/day. The free key

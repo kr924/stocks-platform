@@ -1309,9 +1309,33 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
         except Exception:
             return True
 
+    def _short(m):
+        return (m or "").split("/")[-1]
+
+    def _substituted(model, report, earlier=()):
+        """
+        Why the answer came from a model other than the one asked for, or "".
+        A fallback that answers used to hide the chosen model's failure
+        completely: Premium analyse on gemini-4-argon showed flash-lite's
+        verdict with nothing to say argon had been refused (5 Nov 2026).
+        """
+        answered = report.get("model") or model
+        why = [*earlier, *(report.get("failed") or [])]
+        if not why and answered == model:
+            return ""
+        return "; ".join(dict.fromkeys(w[:220] for w in why))[:600]
+
+    def _progress_fn(text, tier, report):
+        def f(m):
+            failed = report.get("failed") or []
+            _step(text, tier=tier, model=m,
+                  note=(f"after {failed[-1][:160]}" if failed else ""))
+        return f
+
     def _openrouter(attempt):
         tier, model = attempt["tier"], attempt["model"]
         label = "Premium" if tier == "premium" else "Free"
+        earlier = []
         if _full_pdf_ok(tier, model):
             report = {}
             _step("reading the full PDF", tier=tier, model=model)
@@ -1323,16 +1347,19 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
                                          pdf_engine="native",
                                          free_only=False, fallbacks=[model], report=report,
                                          deadline=ai_deadline, cancel=_stale,
-                                         progress=lambda m: _step("reading the full PDF", tier=tier, model=m))
+                                         progress=_progress_fn("reading the full PDF", tier, report))
                 raw = json.dumps(or_res["analyses"][0]) if (or_res and or_res.get("analyses")) else (
                     json.dumps(or_res) if or_res else None)
                 if raw:
-                    return raw, f"OpenRouter {label} ({report.get('model') or model}, full PDF)"
+                    why = _substituted(model, report)
+                    return raw, (f"OpenRouter {label} ({report.get('model') or model}, full PDF)"
+                                 + (f" — {_short(model)} failed: {why}" if why else ""))
             except Exception as e:
                 # Too large for the provider, or a model that refused the file:
                 # fall through to the selected pages rather than giving up.
                 reason = str(e).replace("All OpenRouter models failed: ", "")
                 failures.append(f"full PDF on {model} failed, retried with the selected pages: {reason[:200]}")
+                earlier.append(f"full PDF: {reason[:200]}")
                 logger.warning(f"[AUTO AI] #{symbol}: full PDF failed on {model}: {reason[:200]}")
         report = {}
         # Text mode carries the filing in the prompt; nothing to attach.
@@ -1357,9 +1384,9 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
                                      attachment_bytes=pdf,
                                      free_only=(tier == "free"), fallbacks=fallbacks,
                                      report=report, deadline=ai_deadline, cancel=_stale,
-                                     progress=lambda m: _step(
+                                     progress=_progress_fn(
                                          "reading the selected pages" if doc_prep["mode"] == "text"
-                                         else "reading the filing", tier=tier, model=m))
+                                         else "reading the filing", tier, report))
             raw = None
             if or_res and "analyses" in or_res and or_res["analyses"]:
                 raw = json.dumps(or_res["analyses"][0])
@@ -1369,7 +1396,10 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
             if raw:
                 logger.info(f"✅ [AUTO AI OPENROUTER {label.upper()} SUCCESS]: {answered} responded for #{symbol}")
                 print(f"✅ [AUTO AI OPENROUTER {label.upper()} SUCCESS]: {answered} responded for #{symbol}")
-            return raw, f"OpenRouter {label} ({answered})"
+            why = _substituted(model, report, earlier) if raw else ""
+            lead = f"{_short(model)} failed" if answered != model else "first try failed"
+            return raw, (f"OpenRouter {label} ({answered})"
+                         + (f" — {lead}: {why}" if why else ""))
         except Exception as e:
             logger.error(f"❌ [AUTO AI OPENROUTER {label.upper()} ERROR]: {model} failed for #{symbol}: {e}")
             print(f"❌ [AUTO AI OPENROUTER {label.upper()} ERROR]: {model} failed for #{symbol}: {e}")

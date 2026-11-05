@@ -140,6 +140,7 @@ def call_openai(prompt: str, api_key: str) -> dict:
 
 
 _NO_RETRY_CODES = {"401", "402", "403", "429"}
+OPENROUTER_MAX_TOKENS = 16000
 
 
 def _post_with_wall_clock(url: str, payload: dict, headers: dict, limit: float):
@@ -322,7 +323,15 @@ def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url
                 "messages": [
                     {"role": "system", "content": "Respond only with a raw, valid JSON object matching the requested schema. Do not output markdown code blocks or conversational text."},
                     {"role": "user", "content": user_content}
-                ]
+                ],
+                # Without a cap OpenRouter reserves credit for the model's
+                # whole output window before it starts (65k tokens on Gemini
+                # 4 Argon at $10/M = $0.65) and answers 402 "requires more
+                # credits" when the balance is below that. The request never
+                # reaches the model, so it is missing from OpenRouter's logs,
+                # and the chain moved on to flash-lite (5 Nov 2026). The answer
+                # is a few thousand tokens; 16k leaves room for reasoning.
+                "max_tokens": OPENROUTER_MAX_TOKENS,
             }
             # JSON mode was previously skipped whenever a file was attached —
             # exactly the request where structured output matters most.
@@ -346,6 +355,10 @@ def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url
                 ]
                 
             try:
+                # Earlier models' failures so far, so the caller can say why
+                # it is now on a fallback, and keep it once one answers.
+                if report is not None:
+                    report["failed"] = list(dict.fromkeys(errors))
                 if progress is not None:
                     progress(model_name)
                 res = _post_with_wall_clock(
@@ -395,6 +408,9 @@ def call_openrouter(prompt: str, api_key: str, model: str = None, attachment_url
                     logger.info(f"✨ [OPENROUTER] Analysis successfully generated using model '{model_name}'!")
                     if report is not None:
                         report["model"] = model_name
+                        report["failed"] = list(dict.fromkeys(errors))
+                        if errors:
+                            logger.warning(f"[OPENROUTER] {model_name} answered after: {'; '.join(report['failed'])[:400]}")
                     return parsed
                 else:
                     try:
