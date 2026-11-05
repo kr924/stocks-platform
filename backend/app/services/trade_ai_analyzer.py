@@ -1299,15 +1299,22 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
 
         return result_raw
 
-    def _full_pdf_ok(tier, model) -> bool:
-        if tier != "premium" or not raw_pdf or len(raw_pdf) > FULL_PDF_MAX_BYTES:
-            return False
+    def _full_pdf_skip(tier, model) -> str:
+        """Why this attempt does not send the whole PDF, or "" when it does."""
+        if tier != "premium":
+            return "free key"
+        if not raw_pdf:
+            return "PDF not downloaded"
+        if len(raw_pdf) > FULL_PDF_MAX_BYTES:
+            return f"PDF is {len(raw_pdf) / 1048576:.1f} MB, over the {FULL_PDF_MAX_BYTES // 1048576} MB limit"
         try:
             # A model that cannot read a PDF would get OpenRouter's paid OCR
             # of every page; it keeps the selected pages instead.
-            return openrouter_models.reads_pdf(model) is not False
+            if openrouter_models.reads_pdf(model) is False:
+                return f"{_short(model)} does not read PDFs"
         except Exception:
-            return True
+            pass
+        return ""
 
     def _short(m):
         return (m or "").split("/")[-1]
@@ -1325,18 +1332,24 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
             return ""
         return "; ".join(dict.fromkeys(w[:220] for w in why))[:600]
 
-    def _progress_fn(text, tier, report):
+    def _progress_fn(text, tier, report, base_note=""):
         def f(m):
             failed = report.get("failed") or []
             _step(text, tier=tier, model=m,
-                  note=(f"after {failed[-1][:160]}" if failed else ""))
+                  note=(f"after {failed[-1][:160]}" if failed else base_note))
         return f
 
     def _openrouter(attempt):
         tier, model = attempt["tier"], attempt["model"]
         label = "Premium" if tier == "premium" else "Free"
         earlier = []
-        if _full_pdf_ok(tier, model):
+        skip = _full_pdf_skip(tier, model)
+        if skip and tier == "premium":
+            # Said out loud: on 5 Nov a premium run read the selected pages and
+            # nothing anywhere said why the whole PDF had not been sent.
+            logger.info(f"[AUTO AI] #{symbol}: full PDF not sent to {model}: {skip}")
+            earlier.append(f"full PDF not sent: {skip}")
+        if not skip:
             report = {}
             _step("reading the full PDF", tier=tier, model=model)
             try:
@@ -1386,7 +1399,8 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
                                      report=report, deadline=ai_deadline, cancel=_stale,
                                      progress=_progress_fn(
                                          "reading the selected pages" if doc_prep["mode"] == "text"
-                                         else "reading the filing", tier, report))
+                                         else "reading the filing", tier, report,
+                                         base_note=(earlier[-1][:160] if earlier else "")))
             raw = None
             if or_res and "analyses" in or_res and or_res["analyses"]:
                 raw = json.dumps(or_res["analyses"][0])
@@ -1397,9 +1411,9 @@ Output ONLY raw JSON. No prose, no markdown fences. Shape:
                 logger.info(f"✅ [AUTO AI OPENROUTER {label.upper()} SUCCESS]: {answered} responded for #{symbol}")
                 print(f"✅ [AUTO AI OPENROUTER {label.upper()} SUCCESS]: {answered} responded for #{symbol}")
             why = _substituted(model, report, earlier) if raw else ""
-            lead = f"{_short(model)} failed" if answered != model else "first try failed"
+            lead = f"{_short(model)} failed: " if answered != model else ""
             return raw, (f"OpenRouter {label} ({answered})"
-                         + (f" — {lead}: {why}" if why else ""))
+                         + (f" — {lead}{why}" if why else ""))
         except Exception as e:
             logger.error(f"❌ [AUTO AI OPENROUTER {label.upper()} ERROR]: {model} failed for #{symbol}: {e}")
             print(f"❌ [AUTO AI OPENROUTER {label.upper()} ERROR]: {model} failed for #{symbol}: {e}")

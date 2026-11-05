@@ -993,6 +993,9 @@ longer in the automatic chain (`skip_gemcall`). Its code path remains in
   the model's whole output window (65k on argon at $10/M) and answers 402
   "requires more credits" before the model sees anything — the most likely
   reason argon was refused, and one that never appears in OpenRouter's logs.
+  A premium run that does **not** send the whole PDF now says why
+  (`_full_pdf_skip`: free key, not downloaded, over 15 MB, model does not read
+  PDFs) in the log, the progress line and the provider.
 - **Free-model limits are per account, not per key** ("Making additional
   accounts or API keys will not affect your rate limits"): 20/min, and 50/day
   until the account has bought $10 of credit, then 1,000/day. The free key
