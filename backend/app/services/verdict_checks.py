@@ -236,7 +236,7 @@ def price_context(db, symbol: str) -> dict:
     if not symbol:
         return out
     sym = symbol.strip().upper()
-    price, key = None, ""
+    price, key, landed = None, "", None
     try:
         from app.database import PendingResultOrder
         since = datetime.utcnow() - timedelta(days=2)
@@ -246,6 +246,7 @@ def price_context(db, symbol: str) -> dict:
         if p:
             price = p.price_at_announcement
             key = (p.instrument_key or "").replace(":", "|")
+            landed = p.event_time
     except Exception:
         pass
     keys = [key] if key and "|" in key else []
@@ -254,7 +255,14 @@ def price_context(db, symbol: str) -> dict:
         keys += [k for k in resolve_instrument_keys(sym) if k not in keys]
     except Exception:
         pass
-    if price is None and keys:
+    # The live price stands in for the price at the result only while the
+    # result is minutes old. Later (a Premium analyse after the stock has
+    # reacted) it carries the reaction itself: TTKPRESTIG had no price at
+    # announcement on 6 Nov 2026, and its +10% move after the result was
+    # counted as a +19% "run-up into the result". The previous close is the
+    # honest stand-in then.
+    fresh = landed is None or (datetime.utcnow() - landed) <= timedelta(minutes=5)
+    if price is None and keys and fresh:
         try:
             from app.services.results_router import get_ltp
             price = get_ltp(keys[0], sym)
@@ -264,6 +272,7 @@ def price_context(db, symbol: str) -> dict:
     bases = _bases_now(keys[0]) if keys else None
     if price is None and bases:
         price = bases.get("last_close")
+        out["price_note"] = "previous close (no price recorded when the result landed)"
     out["price"] = price
     rets = {}
     if price and bases:
@@ -309,7 +318,8 @@ def price_text(pc: dict) -> str:
     r = pc.get("returns") or {}
     parts = []
     if pc.get("price"):
-        parts.append(f"price ₹{pc['price']:,.2f}")
+        parts.append(f"price ₹{pc['price']:,.2f}"
+                     + (f" ({pc['price_note']})" if pc.get("price_note") else ""))
     for name, label in (("5d", "5 sessions"), ("1m", "1 month"), ("1y", "1 year")):
         if r.get(name) is not None:
             parts.append(f"{label} {r[name]:+.1f}%")

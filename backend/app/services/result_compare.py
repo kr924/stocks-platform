@@ -256,6 +256,21 @@ def implausible_filing_read(ex_metrics: dict, scr_yoy: Optional[dict],
              if isinstance(b, (int, float)) and b >= MIN_BASE]
     if not bases:
         return ""
+    # The year-ago column read as the current one. TTKPRESTIG's Sep 2026 read
+    # came out at ₹833.7 Cr against Screener's Sep 2025 ₹834 Cr ("-0.0% YoY")
+    # while the quarter's revenue was ₹1,009 Cr (6 Nov 2026). A real quarter
+    # almost never lands within 0.1% of the same quarter last year; within
+    # 0.3% it takes profit landing on last year's too.
+    yo = comparable(scr_yoy, "revenue")
+    if isinstance(yo, (int, float)) and yo >= MIN_BASE:
+        off = abs(cur / yo - 1)
+        pat_cur = (ex_metrics.get("pat") or {}).get("current_qtr")
+        pat_yo = comparable(scr_yoy, "pat")
+        pat_same = (isinstance(pat_cur, (int, float)) and isinstance(pat_yo, (int, float))
+                    and abs(pat_yo) >= MIN_BASE and abs(pat_cur / pat_yo - 1) <= 0.01)
+        if off <= 0.001 or (off <= 0.003 and pat_same):
+            return (f"revenue read as {cur:,.2f} Cr is the same quarter last year's figure "
+                    f"(₹{yo:,.2f} Cr) — looks like the year-ago column was read")
     ratios = [cur / b for b in bases]
     logs = [math.log10(r) for r in ratios]
     k = round(logs[0])

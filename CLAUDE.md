@@ -515,7 +515,10 @@ read was computed from them.
   both Screener bases (−88% YoY, −89% QoQ) and showed SELL. If revenue sits
   near a power of ten off both bases, or more than 4× off both in the same
   direction, the read is dropped (`ocr_rejected`). The OCR tab still shows it,
-  labelled.
+  labelled. A read within 0.1% of Screener's same quarter last year (0.3% with PAT
+  also matching) is the year-ago column read as the current one and is
+  dropped the same way: TTKPRESTIG's Sep 2026 read ₹833.7 Cr against Sep
+  2025's ₹834 Cr ("−0.0% YoY") while the quarter was ₹1,009 Cr (6 Nov 2026).
 - **…unless it is a clean unit misread** (`unit_correction`, checked first).
   Nestle files in ₹ million; the read took it as lakh, so ₹67,821.7 mn became
   ₹678 Cr. If revenue and PAT sit at the same 10^k off both Screener bases, or
@@ -1076,7 +1079,10 @@ said BUY: "no serious red flag" was a sentence only the model enforced.
   - *Price going in*: 5-session / 1-month / 1-year returns (period bases,
     one candle request if not stored), distance from the 52-week high, P/E
     and market cap from Screener's page (`parse_top_ratios`, now kept on
-    every Screener snapshot as `ratios`).
+    every Screener snapshot as `ratios`). Measured from `price_at_announcement`; without one, the live price
+    only while the result is under 5 minutes old, else the previous close —
+    a Premium analyse run after the stock had reacted counted TTKPRESTIG's
+    post-result +10% as a run-up into the result (6 Nov 2026).
 - **After the call**, arithmetic on the AI's figures (`trend_check`):
   `above` = EBITDA more than 15% over the higher of last quarter and the
   3-quarter average (seasonal: YoY growth more than 15% ahead of the trailing
