@@ -1214,19 +1214,24 @@ export default function App() {
   };
 
   // Search autocomplete
+  const searchSeq = useRef(0);
   const handleSearchChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setSearchQuery(val);
+    // Typing fast sends several searches; only the newest may fill the list.
+    const seq = ++searchSeq.current;
     if (val.trim().length > 0) {
       try {
-        const res = await fetch(`${API_BASE}/api/market/search?query=${val}`);
+        const res = await fetch(`${API_BASE}/api/market/search?query=${encodeURIComponent(val.trim())}`);
+        if (seq !== searchSeq.current) return;
         if (res.status === 401) {
           setAuthState({ authenticated: false, provider: "upstox", updated_at: null });
           setSearchResults([]);
           return;
         }
         const data = await res.json();
-        setSearchResults(data);
+        if (seq !== searchSeq.current) return;
+        setSearchResults(Array.isArray(data) ? data : []);
         setShowSearchDropdown(true);
       } catch (err) {
         console.error("Search error:", err);
@@ -1686,7 +1691,15 @@ export default function App() {
                       onClick={() => handleAddToWatchlist(item)}
                       className="search-item"
                     >
-                      <span style={{ fontSize: "12px", fontWeight: "600", color: "var(--text-primary)" }}>{item.symbol}</span>
+                      <span style={{ fontSize: "12px", fontWeight: "600", color: "var(--text-primary)", display: "flex", alignItems: "center", gap: "6px" }}>
+                        {item.symbol}
+                        {item.exchange && (
+                          <span style={{ fontSize: "9px", fontWeight: 700, padding: "1px 5px", borderRadius: "4px",
+                                         color: item.exchange === "BSE" ? "var(--ai)" : "var(--accent)",
+                                         background: "rgba(var(--ink-rgb),.06)" }}>{item.exchange}</span>
+                        )}
+                        {item.scrip_code && <span style={{ fontSize: "9px", fontWeight: 500, color: "var(--text-faint)" }}>{item.scrip_code}</span>}
+                      </span>
                       <span style={{ fontSize: "9px", color: "var(--text-muted)" }} className="truncate">{item.name}</span>
                     </div>
                   ))}

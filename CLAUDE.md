@@ -666,6 +666,23 @@ history chart survives Screener being unreachable.
 
 ---
 
+## Stock search — every NSE and BSE listing
+
+`services/stock_search.py`, `GET /api/market/search` (Stocks Tracker's
+"Search and add stock"). It used to be Upstox's instrument search with
+`exchanges=NSE`, ten results in Upstox's order: BSE-only companies (~2,400)
+could not be found, ETFs crowded out companies, and without an Upstox login it
+fell back to the Nifty 50 (16 Nov 2026). Now it searches the symbol registry
+(NSE main board, NSE SME and BSE, joined on ISIN, full names) plus the Upstox
+dumps for what the registry lacks (ETFs and funds), 15 results: exact symbol
+or BSE scrip code, then symbol prefix, name prefix, word prefix, symbol
+contains, name contains; funds rank half a step down. A dual-listed company
+appears once as "NSE · BSE" with its NSE key; a BSE-only one gets its
+`BSE_EQ|…` key from the dump (`resolve_instrument_keys`, never synthesised).
+A scrip code matches by prefix only from 4 digits. Upstox's search remains
+the fallback if this comes back empty. The dropdown shows the exchange and
+scrip code, and drops replies to a query the user has already typed past.
+
 ## The earnings calendar
 
 Sorted by meeting date then symbol by default, a fixed order. Live "Change %"

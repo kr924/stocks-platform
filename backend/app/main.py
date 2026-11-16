@@ -1228,7 +1228,18 @@ def get_indices(db: Session = Depends(get_db), feed: BaseMarketFeed = Depends(ge
 
 @app.get("/api/market/search")
 def search_stocks(query: str = Query(..., min_length=1), feed: BaseMarketFeed = Depends(get_active_feed)):
-    """Autocomplete search for NSE stocks based on symbol or company name."""
+    """
+    Autocomplete over every NSE and BSE listing (services/stock_search.py):
+    the symbol registry plus the Upstox dumps for funds. Upstox's own search,
+    NSE only and ten results, is the fallback if that comes back empty.
+    """
+    try:
+        from app.services.stock_search import search as _search_all
+        found = _search_all(query)
+        if found:
+            return found
+    except Exception as e:
+        logger.warning(f"Stock search over the registry failed, using Upstox's: {e}")
     try:
         return feed.search(query)
     except Exception as e:

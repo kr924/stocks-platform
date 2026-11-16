@@ -324,3 +324,15 @@ def stats() -> dict:
         "csv_path": _CSV_PATH,
         "loaded": _loaded,
     }
+
+
+def all_records() -> List[SymbolRecord]:
+    """Every listing in the registry, once each (for the stock search)."""
+    _load()
+    seen, out = set(), []
+    for m in (_by_isin, _by_nse_symbol, _by_scrip_cd):
+        for rec in m.values():
+            if id(rec) not in seen:
+                seen.add(id(rec))
+                out.append(rec)
+    return out
