@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 
 const API_BASE = import.meta.env.VITE_API_BASE || (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" ? "http://localhost:8000" : "");
@@ -46,6 +46,7 @@ interface TaxResp {
   intraday: { pnl: number; turnover: number; trades: number };
   estimated_tax: number; sale_value: number; rows: TaxRow[]; warnings: string[]; notes: string[];
   charges?: { deductible: number; stt: number; gross_gain: number };
+  mf_other?: { rows: TaxRow[]; slab_gain: number; ltcg_gain: number; ltcg_tax: number };
 }
 interface Trade {
   id: number; broker: string; symbol: string; isin: string | null; exchange: string | null; trade_date: string;
@@ -59,6 +60,43 @@ interface Summary {
   accounts?: Account[]; names?: string[]; upstox_account?: string | null; unassigned?: Record<string, number>;
 }
 
+interface MfLot { date: string | null; qty: number; days: number | null; long_term: boolean | null; cost: number }
+interface MfRow {
+  name: string; accounts: string[]; folios: string[]; isin: string; scheme: string; amc: string | null; category: string | null;
+  tax_class: "equity" | "debt" | "other"; tax_why: string | null; overridden: boolean;
+  units: number; invested: number; avg_nav: number | null; nav: number | null; nav_date: string | null; nav_source: string | null;
+  value: number | null; pnl: number | null; pnl_pct: number | null; day_change_pct: number | null; day_pnl: number | null;
+  xirr: number | null; lots: MfLot[]; long_term_units: number; next_long_term: string | null; undated_units: number;
+  portfolio: { as_of: string | null; equity_pct: number | null; filename: string | null; n: number } | null;
+}
+interface MfTotals {
+  invested: number; value: number | null; pnl: number | null; priced_invested: number; day_pnl: number | null;
+  unpriced: number; xirr: number | null; realised_fy: string; realised_fy_gain: number;
+}
+interface MfResp {
+  rows: MfRow[]; totals: MfTotals; by_name: (MfTotals & { name: string })[]; warnings: string[];
+  nav: { last_ok: string | null; error: string | null; running: boolean };
+  statements: { account: string; from: string | null; to: string | null }[];
+}
+interface ExpFund { scheme: string; isin: string; name: string; pct_of_fund: number; amount: number; as_of?: string; value?: number; amc?: string | null }
+interface ExpRow {
+  key: string; isin: string | null; symbol: string | null; company: string; industry: string; kind: string;
+  direct_value: number; direct_invested: number; fund_value: number; fund_invested: number;
+  total: number; invested: number; pct: number | null; funds: ExpFund[]; holders: string[];
+}
+interface ExpIndustry {
+  industry: string; direct_value: number; fund_value: number; invested: number; total: number; pct: number | null;
+  stocks: { key: string; symbol: string | null; company: string; total: number; direct_value: number; fund_value: number }[];
+  rest?: boolean; unknown?: boolean; funds?: ExpFund[];
+}
+interface ExposureResp {
+  total: number; direct_total: number; fund_total: number; broken_down_total: number;
+  rest: { value: number; invested: number; funds: ExpFund[] };
+  not_broken_down: ExpFund[];
+  funds: { isin: string; scheme: string; as_of: string | null; stale: boolean; equity_pct: number | null; stocks: number }[];
+  rows: ExpRow[]; industries: ExpIndustry[]; names: string[]; notes: string[];
+}
+
 const inr = (v: number | null | undefined, digits = 0) =>
   v == null || isNaN(v) ? "—" : `₹${v.toLocaleString("en-IN", { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
 const signed = (v: number | null | undefined, digits = 0) =>
@@ -66,7 +104,7 @@ const signed = (v: number | null | undefined, digits = 0) =>
 const pct = (v: number | null | undefined) => v == null || isNaN(v) ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(2)}%`;
 const col = (v: number | null | undefined) => v == null || isNaN(v) ? "var(--text-faint)" : v > 0 ? "var(--positive)" : v < 0 ? "var(--negative)" : "var(--text-muted)";
 const qtyTxt = (q: number) => Number.isInteger(q) ? q.toLocaleString("en-IN") : q.toFixed(3);
-const brokerChip = (b: string) => b === "upstox" ? "U" : b === "zerodha" ? "Z" : b === "both" ? "U+Z" : "?";
+const brokerChip = (b: string) => b === "upstox" ? "U" : b === "zerodha" ? "Z" : b === "both" ? "U+Z" : b === "mf" ? "MF" : "?";
 
 async function getJSON<T>(path: string): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`);
@@ -76,7 +114,10 @@ async function getJSON<T>(path: string): Promise<T> {
 
 export function PortfolioDashboard() {
   const [broker, setBroker] = useState<BrokerFilter>("");
-  const [tab, setTab] = useState<"holdings" | "tax" | "trades">("holdings");
+  const [tab, setTab] = useState<"holdings" | "funds" | "exposure" | "tax" | "trades">("holdings");
+  const [mf, setMf] = useState<MfResp | null>(null);
+  const [exp, setExp] = useState<ExposureResp | null>(null);
+  const [expLoading, setExpLoading] = useState(false);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [hold, setHold] = useState<HoldingsResp | null>(null);
   const [fy, setFy] = useState<string>("");
@@ -123,7 +164,20 @@ export function PortfolioDashboard() {
       setTrades(await getJSON<Trade[]>(`/api/portfolio/trades?limit=1000&${q}${tradeFilter.trim() ? `&symbol=${encodeURIComponent(tradeFilter.trim())}` : ""}`));
     } catch { /* ignore */ }
   };
-  const reloadAll = () => { loadSummary(); loadHoldings(); loadTax(); if (tab === "trades") loadTrades(); };
+  const loadMf = async () => {
+    try { setMf(await getJSON<MfResp>(`/api/portfolio/mf/holdings${who ? `?name=${encodeURIComponent(who)}` : ""}`)); } catch { /* ignore */ }
+  };
+  const loadExp = async () => {
+    setExpLoading(true);
+    try { setExp(await getJSON<ExposureResp>(`/api/portfolio/exposure${who ? `?name=${encodeURIComponent(who)}` : ""}`)); }
+    catch (e: any) { setMsg({ text: `Could not build the exposure view: ${e.message}`, tone: "err" }); }
+    finally { setExpLoading(false); }
+  };
+  const reloadAll = () => {
+    loadSummary(); loadHoldings(); loadTax(); loadMf();
+    if (tab === "trades") loadTrades();
+    if (tab === "exposure") loadExp();
+  };
 
   useEffect(() => { loadSummary(); }, []);
   useEffect(() => { loadHoldings(); }, [broker, who]);
@@ -134,6 +188,8 @@ export function PortfolioDashboard() {
   }, [broker, who]);
   useEffect(() => { loadTax(); }, [fy, broker, taxName]);
   useEffect(() => { if (tab === "trades") loadTrades(); }, [tab, broker, who]);
+  useEffect(() => { loadMf(); }, [who]);
+  useEffect(() => { if (tab === "exposure") loadExp(); }, [tab, who]);
 
   const syncUpstox = async () => {
     setBusy("sync"); setMsg(null);
@@ -191,7 +247,7 @@ export function PortfolioDashboard() {
   }, [hold, sortKey]);
 
   const t = hold?.totals;
-  const empty = summary && Object.keys(summary.counts || {}).length === 0;
+  const empty = summary && Object.keys(summary.counts || {}).length === 0 && !(mf?.rows?.length);
   const lastSync = summary?.upstox_sync?.at ? new Date(summary.upstox_sync.at) : null;
 
   const card = { background: "var(--surface-1)", border: "1px solid var(--border-default)", borderRadius: "12px", padding: "16px" };
@@ -282,12 +338,13 @@ export function PortfolioDashboard() {
           1. <b>Sync Upstox</b> pulls your Upstox equity trades for the last three financial years (log in to Upstox first).<br />
           2. For Zerodha, open Console → Reports → Tradebook → Equity, choose a date range (repeat per year if needed),
           download <b>CSV</b>, then <b>Import tradebook</b>.<br />
-          3. Shares from an IPO, a bonus, or older than the files go in with <b>Add trade</b>.
+          3. Shares from an IPO, a bonus, or older than the files go in with <b>Add trade</b>.<br />
+          4. Mutual funds: open <b>Mutual funds</b> and import your CAMS / KFintech consolidated statement (PDF).
         </div>
       )}
 
-      {/* Tiles */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: "10px", marginBottom: "14px" }}>
+      {/* Tiles (shares; the fund and exposure tabs carry their own) */}
+      {tab !== "funds" && tab !== "exposure" && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: "10px", marginBottom: "14px" }}>
         <Tile label="Invested" value={inr(t?.invested)} />
         <Tile label="Current value" value={inr(t?.value)} sub={t?.unpriced ? `${t.unpriced} without a live price` : undefined} />
         <Tile label="Unrealised P&L" value={signed(t?.pnl)} color={col(t?.pnl)}
@@ -296,9 +353,9 @@ export function PortfolioDashboard() {
               sub="delivery (capital gains)" />
         <Tile label={`Intraday FY ${t?.realised_fy || ""}`} value={signed(t?.realised_fy_intraday)} color={col(t?.realised_fy_intraday)}
               sub="speculative income" />
-      </div>
+      </div>}
 
-      {!who && (hold?.by_name?.length ?? 0) > 1 && (
+      {tab !== "funds" && tab !== "exposure" && !who && (hold?.by_name?.length ?? 0) > 1 && (
         <div style={{ ...card, padding: 0, overflowX: "auto", marginBottom: "14px" }}>
           <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "760px" }}>
             <thead>
@@ -328,9 +385,11 @@ export function PortfolioDashboard() {
       )}
 
       <div style={{ display: "flex", gap: "6px", marginBottom: "10px", alignItems: "center", flexWrap: "wrap" }}>
-        {(["holdings", "tax", "trades"] as const).map(k => (
-          <button key={k} onClick={() => setTab(k)} style={btn(tab === k)}>
-            {k === "holdings" ? `Holdings (${rows.length})` : k === "tax" ? "Capital gains & tax" : "Trades"}
+        {(["holdings", "funds", "exposure", "tax", "trades"] as const).map(k => (
+          <button key={k} onClick={() => setTab(k)} style={btn(tab === k)}
+            title={k === "exposure" ? "Every stock you own, directly and through your mutual funds, and by industry" : undefined}>
+            {k === "holdings" ? `Holdings (${rows.length})` : k === "funds" ? `Mutual funds (${mf?.rows?.length ?? 0})`
+              : k === "exposure" ? "Exposure" : k === "tax" ? "Capital gains & tax" : "Trades"}
           </button>
         ))}
         <span style={{ marginLeft: "auto", fontSize: "11px", color: "var(--text-faint)" }}>
@@ -341,7 +400,7 @@ export function PortfolioDashboard() {
         </span>
       </div>
 
-      {(hold?.warnings?.length ?? 0) > 0 && (
+      {tab === "holdings" && (hold?.warnings?.length ?? 0) > 0 && (
         <details style={{ ...card, padding: "10px 14px", marginBottom: "10px", borderColor: "var(--warning-border)", background: "var(--warning-bg)" }}>
           <summary style={{ cursor: "pointer", fontSize: "12px", fontWeight: 700, color: "var(--warning)" }}>
             {hold!.warnings.length} thing(s) to check — the figures for these stocks are incomplete
@@ -402,6 +461,14 @@ export function PortfolioDashboard() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {tab === "funds" && (
+        <FundsTab data={mf} names={names} who={who} onReload={reloadAll} setMsg={setMsg} />
+      )}
+
+      {tab === "exposure" && (
+        <ExposureTab data={exp} loading={expLoading} onRefresh={loadExp} onFunds={() => setTab("funds")} />
       )}
 
       {tab === "tax" && (
@@ -492,6 +559,37 @@ export function PortfolioDashboard() {
                   </tbody>
                 </table>
               </div>
+              {(tax.mf_other?.rows?.length ?? 0) > 0 && (
+                <div style={{ ...card, padding: 0, overflowX: "auto", marginBottom: "8px" }}>
+                  <div style={{ padding: "10px 12px 4px", fontSize: "12px", fontWeight: 700, color: "var(--text-primary)" }}>
+                    Mutual funds not taxed as equity
+                    <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>
+                      {" "}— at your slab {signed(tax.mf_other!.slab_gain)}; long-term at 12.5% {signed(tax.mf_other!.ltcg_gain)}
+                      {tax.mf_other!.ltcg_tax > 0 ? ` (≈ ${inr(tax.mf_other!.ltcg_tax)} tax)` : ""}. Not in the estimate above.
+                    </span>
+                  </div>
+                  <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "760px" }}>
+                    <thead>
+                      <tr>{["TYPE", "SCHEME", "BOUGHT", "SOLD", "UNITS", "COST", "SALE VALUE", "GAIN"].map((h, i) => (
+                        <th key={h} style={th(i < 2 ? "left" : "right")}>{h}</th>))}</tr>
+                    </thead>
+                    <tbody>
+                      {tax.mf_other!.rows.map((r, i) => (
+                        <tr key={i}>
+                          <td style={{ ...td("left"), fontWeight: 700, color: "var(--ai)" }}>{r.term === "SLAB" ? "AT SLAB" : "LTCG 12.5%"}</td>
+                          <td style={{ ...td("left"), maxWidth: "320px", overflow: "hidden", textOverflow: "ellipsis" }} title={r.symbol || ""}>{r.symbol}</td>
+                          <td style={td()}>{r.buy_date}</td>
+                          <td style={td()}>{r.sell_date}</td>
+                          <td style={td()}>{qtyTxt(r.qty)}</td>
+                          <td style={td()}>{inr(r.cost)}</td>
+                          <td style={td()}>{inr(r.sale_value)}</td>
+                          <td style={{ ...td(), color: col(r.gain), fontWeight: 700 }}>{signed(r.gain)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
               {tax.notes.map((n, i) => <div key={i} style={{ fontSize: "11px", color: "var(--text-faint)", lineHeight: 1.6 }}>{n}</div>)}
             </>
           )}
@@ -626,7 +724,8 @@ function Accounts({ accounts, unassigned, upstoxAccount, onChanged }: {
       <div style={{ fontSize: "13px", fontWeight: 800, color: "var(--text-primary)", marginBottom: "4px" }}>Accounts</div>
       <div style={{ fontSize: "11px", color: "var(--text-muted)", marginBottom: "10px" }}>
         Each broker client ID rolls up under a tracking name; several IDs can share one (your Zerodha and Upstox under the same name).
-        Holdings, P&L and tax break down by name. Zerodha IDs are read from the tradebook's file name; the Upstox ID from the connected login.
+        Holdings, P&L and tax break down by name. Zerodha IDs are read from the tradebook's file name; the Upstox ID from the connected login;
+        mutual funds are filed under the PAN on the statement.
       </div>
       <table style={{ borderCollapse: "collapse", width: "100%", fontSize: "12px" }}>
         <thead>
@@ -669,7 +768,7 @@ function Accounts({ accounts, unassigned, upstoxAccount, onChanged }: {
       <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", alignItems: "center", marginTop: "10px" }}>
         <input value={add.client_id} onChange={e => setAdd({ ...add, client_id: e.target.value.toUpperCase() })} placeholder="Client ID (e.g. QY8357)" style={{ ...inp, width: "150px" }} />
         <select value={add.broker} onChange={e => setAdd({ ...add, broker: e.target.value })} style={inp}>
-          <option value="zerodha">Zerodha</option><option value="upstox">Upstox</option>
+          <option value="zerodha">Zerodha</option><option value="upstox">Upstox</option><option value="mf">Mutual funds (PAN)</option>
         </select>
         <input value={add.name} list="pf-names" onChange={e => setAdd({ ...add, name: e.target.value })} placeholder="Tracking name" style={{ ...inp, width: "150px" }} />
         <button style={small} disabled={!add.client_id.trim() || !add.name.trim()}
@@ -686,6 +785,500 @@ function Accounts({ accounts, unassigned, upstoxAccount, onChanged }: {
         </div>
       ))}
       {err && <div style={{ fontSize: "12px", color: "var(--negative)", marginTop: "8px" }}>{err}</div>}
+    </div>
+  );
+}
+
+
+// ─── Mutual funds ───────────────────────────────────────────────────────────
+
+const cardStyle = { background: "var(--surface-1)", border: "1px solid var(--border-default)", borderRadius: "12px", padding: "16px" };
+const btnStyle = (on = false) => ({
+  padding: "6px 12px", fontSize: "12px", fontWeight: 700 as const, borderRadius: "7px", cursor: "pointer",
+  border: `1px solid ${on ? "rgba(var(--accent-rgb),0.45)" : "var(--border-default)"}`,
+  background: on ? "var(--accent-bg)" : "transparent", color: on ? "var(--accent)" : "var(--text-secondary)",
+});
+const thStyle = (align: "left" | "right" = "right") => ({
+  textAlign: align, padding: "6px 10px", fontSize: "10px", fontWeight: 600 as const, color: "var(--text-muted)",
+  borderBottom: "1px solid var(--border-subtle)", whiteSpace: "nowrap" as const, letterSpacing: "0.3px",
+});
+const tdStyle = (align: "left" | "right" = "right") => ({
+  textAlign: align, padding: "7px 10px", fontSize: "12px", borderBottom: "1px solid var(--border-subtle)", whiteSpace: "nowrap" as const,
+});
+const inputStyle = { fontSize: "12px", padding: "5px 8px", background: "var(--surface-1)", color: "var(--text-primary)",
+                     border: "1px solid var(--border-default)", borderRadius: "7px" };
+
+const fileB64 = (f: File) => new Promise<string>((resolve, reject) => {
+  const r = new FileReader();
+  r.onload = () => resolve(String(r.result).split(",")[1] || "");
+  r.onerror = () => reject(r.error);
+  r.readAsDataURL(f);
+});
+
+async function postJSON(path: string, body: object) {
+  const res = await fetch(`${API_BASE}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+  return data;
+}
+
+// Where each fund house publishes its month-end portfolios.
+const AMC_PAGES: [RegExp, string][] = [
+  [/hdfc/i, "https://www.hdfcfund.com/statutory-disclosure/portfolio/monthly-portfolio"],
+  [/motilal/i, "https://www.motilaloswalmf.com/download/month-end-portfolio"],
+  [/tata/i, "https://www.tatamutualfund.com/schemes-related/portfolio"],
+];
+const amcPage = (amc: string | null) => AMC_PAGES.find(([re]) => re.test(amc || ""))?.[1] || null;
+const classLabel = (c: string) => c === "equity" ? "Equity" : c === "debt" ? "Debt" : "Other";
+const fmtDate = (d: string | null | undefined) => d ? new Date(d + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—";
+const daysSince = (d: string | null | undefined) => d ? Math.floor((Date.now() - new Date(d + "T00:00:00").getTime()) / 86400000) : null;
+
+interface MfTxn { id: number; date: string; scheme: string; isin: string; folio: string; kind: string; description: string | null;
+                  amount: number | null; units: number | null; nav: number | null; balance: number | null; name: string }
+
+function FundsTab({ data, names, who, onReload, setMsg }: {
+  data: MfResp | null; names: string[]; who: string; onReload: () => void;
+  setMsg: (m: { text: string; tone: "ok" | "err" } | null) => void;
+}) {
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState("");
+  const [showTx, setShowTx] = useState(false);
+  const [txns, setTxns] = useState<MfTxn[]>([]);
+  const [forScheme, setForScheme] = useState<string | null>(null);
+  const casRef = useRef<HTMLInputElement | null>(null);
+  const pfRef = useRef<HTMLInputElement | null>(null);
+  const rows = Array.isArray(data?.rows) ? data!.rows : [];
+  const t = data?.totals;
+  const many = names.length > 1;
+
+  useEffect(() => {
+    if (!showTx) return;
+    getJSON<MfTxn[]>(`/api/portfolio/mf/transactions${who ? `?name=${encodeURIComponent(who)}` : ""}`).then(setTxns).catch(() => setTxns([]));
+  }, [showTx, who, data]);
+
+  const importCas = async (e: ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+    setBusy("cas"); setMsg(null);
+    try {
+      const r = await postJSON("/api/portfolio/mf/import", { filename: f.name, content_b64: await fileB64(f), password: password || null });
+      setPassword("");
+      setMsg({ tone: r.errors?.length ? "err" : "ok",
+               text: `${f.name}: ${r.schemes} scheme(s), ${r.added} transaction line(s) added, ${r.duplicates} already on file`
+                 + (r.period_from ? ` · statement ${fmtDate(r.period_from)} → ${fmtDate(r.period_to)}` : "")
+                 + (r.errors?.length ? `. Check: ${r.errors.slice(0, 2).join("; ")}` : ". NAVs are being fetched from AMFI.") });
+      onReload();
+      setTimeout(onReload, 8000);
+    } catch (err: any) {
+      setMsg({ text: `Statement import failed: ${err.message}`, tone: "err" });
+    } finally { setBusy(""); }
+  };
+
+  const uploadPortfolios = async (e: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";
+    if (!files.length) return;
+    const scheme = forScheme;
+    setForScheme(null);
+    setBusy("pf"); setMsg(null);
+    const lines: string[] = [];
+    let bad = false;
+    for (const f of files) {
+      try {
+        const r = await postJSON("/api/portfolio/mf/portfolio-file", { filename: f.name, content_b64: await fileB64(f), scheme_isin: scheme });
+        const m = (r.matched || []).map((x: any) => `${x.scheme.split(" - ")[0]} (${fmtDate(x.as_of)}${x.date_found ? "" : " — date assumed"}, ${x.stocks} stocks, ${x.equity_pct}% in shares)`);
+        const um = (r.unmatched || []).map((x: any) => `${x.scheme} — best guess "${x.best}" was not close enough`);
+        if (!m.length) bad = true;
+        lines.push(`${f.name}: ${m.length ? m.join("; ") : "no scheme you hold matched"}${um.length ? `. ${um.join("; ")}` : ""}`);
+      } catch (err: any) {
+        bad = true;
+        lines.push(`${f.name}: ${err.message}`);
+      }
+    }
+    setMsg({ text: lines.join(" · "), tone: bad ? "err" : "ok" });
+    setBusy("");
+    onReload();
+  };
+
+  const refreshNavs = async () => {
+    setBusy("nav"); setMsg(null);
+    try {
+      const r = await postJSON("/api/portfolio/mf/navs/refresh", {});
+      setMsg({ text: `NAVs: ${r.updated} scheme(s) updated from AMFI${r.missing ? `, ${r.missing} not in AMFI's file` : ""}.`, tone: "ok" });
+      onReload();
+    } catch (err: any) { setMsg({ text: `NAV refresh failed: ${err.message}`, tone: "err" }); }
+    finally { setBusy(""); }
+  };
+
+  const setClass = async (isin: string, cls: string) => {
+    try { await postJSON("/api/portfolio/mf/tax-class", { isin, tax_class: cls || null }); onReload(); }
+    catch (err: any) { setMsg({ text: err.message, tone: "err" }); }
+  };
+
+  const pickFor = (isin: string | null) => { setForScheme(isin); setTimeout(() => pfRef.current?.click(), 0); };
+  const navNote = data?.nav?.error ? `AMFI unreachable (${data.nav.error.slice(0, 80)}) — values use the statement's NAV`
+    : data?.nav?.running ? "Fetching NAVs from AMFI…"
+    : data?.nav?.last_ok ? `NAVs from AMFI, checked ${new Date(data.nav.last_ok).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : "";
+  const missingPf = rows.filter(r => !r.portfolio);
+  const stalePf = rows.filter(r => r.portfolio && (daysSince(r.portfolio.as_of) ?? 0) > 50);
+
+  return (
+    <div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center", marginBottom: "10px" }}>
+        <input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="off"
+          placeholder="Statement password, if any" title="Only used to open the PDF; never stored" style={{ ...inputStyle, width: "190px" }} />
+        <button onClick={() => casRef.current?.click()} disabled={busy === "cas"} style={btnStyle()}
+          title="CAMS or KFintech Consolidated Account Statement (detailed, with transactions), from the first investment to today. Re-importing adds only what is new.">
+          {busy === "cas" ? "Reading statement…" : "Import CAS (PDF)"}
+        </button>
+        <input ref={casRef} type="file" accept=".pdf,application/pdf" onChange={importCas} style={{ display: "none" }} />
+        <button onClick={() => pickFor(null)} disabled={busy === "pf"} style={btnStyle()}
+          title="Each fund house's month-end portfolio file (Excel, PDF or zip). Several files at once are fine; each sheet is matched to the schemes you hold.">
+          {busy === "pf" ? "Reading portfolios…" : "Upload fund portfolios"}
+        </button>
+        <input ref={pfRef} type="file" multiple accept=".xlsx,.xls,.xlsm,.pdf,.zip" onChange={uploadPortfolios} style={{ display: "none" }} />
+        <button onClick={refreshNavs} disabled={busy === "nav"} style={btnStyle()} title="Latest NAVs from AMFI (also fetched every morning at 07:00)">
+          {busy === "nav" ? "Fetching…" : "Refresh NAVs"}
+        </button>
+        <button onClick={() => setShowTx(v => !v)} style={btnStyle(showTx)}>Transactions</button>
+        <span style={{ marginLeft: "auto", fontSize: "11px", color: data?.nav?.error ? "var(--warning)" : "var(--text-faint)" }}>{navNote}</span>
+      </div>
+
+      {rows.length === 0 && (
+        <div style={{ ...cardStyle, marginBottom: "14px", fontSize: "13px", color: "var(--text-secondary)", lineHeight: 1.7 }}>
+          <b style={{ color: "var(--text-primary)" }}>No mutual funds on file yet.</b><br />
+          1. Ask CAMS for a <b>Consolidated Account Statement</b> (camsonline.com → Investors → Statements → CAS – CAMS+KFintech):
+          statement type <b>Detailed</b>, period from your first investment to today. It arrives by email as a PDF covering every fund house.<br />
+          2. <b>Import CAS (PDF)</b> here, with the password you set on the request form. Every folio and transaction is read; importing a newer statement later adds only what is new.<br />
+          3. For the Exposure tab, add each fund's <b>month-end portfolio</b> from its fund house's website (Excel or PDF) with <b>Upload fund portfolios</b>. Once a month is enough.
+        </div>
+      )}
+
+      {rows.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "10px", marginBottom: "12px" }}>
+          <Tile label="Invested" value={inr(t?.invested)} sub="cost of units held, stamp duty included" />
+          <Tile label="Current value" value={inr(t?.value)} sub={t?.unpriced ? `${t.unpriced} without a NAV` : undefined} />
+          <Tile label="Unrealised P&L" value={signed(t?.pnl)} color={col(t?.pnl)}
+                sub={t?.pnl != null && t.priced_invested ? pct(t.pnl / t.priced_invested * 100) : undefined} />
+          <Tile label="Day's change" value={signed(t?.day_pnl)} color={col(t?.day_pnl)} sub="latest NAV against the one before" />
+          <Tile label="XIRR" value={t?.xirr == null ? "—" : `${t.xirr.toFixed(2)}%`} color={col(t?.xirr)} sub="every purchase and redemption, annualised" />
+          <Tile label={`Realised FY ${t?.realised_fy || ""}`} value={signed(t?.realised_fy_gain)} color={col(t?.realised_fy_gain)} sub="redemptions, before tax" />
+        </div>
+      )}
+
+      {!who && (data?.by_name?.length ?? 0) > 1 && (
+        <div style={{ ...cardStyle, padding: 0, overflowX: "auto", marginBottom: "12px" }}>
+          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "640px" }}>
+            <thead><tr>{["BY NAME", "INVESTED", "VALUE", "P&L", "DAY", "XIRR"].map((h, i) => <th key={h} style={thStyle(i ? "right" : "left")}>{h}</th>)}</tr></thead>
+            <tbody>
+              {data!.by_name.map(b => (
+                <tr key={b.name}>
+                  <td style={{ ...tdStyle("left"), fontWeight: 700 }}>{b.name}</td>
+                  <td style={tdStyle()}>{inr(b.invested)}</td>
+                  <td style={tdStyle()}>{inr(b.value)}</td>
+                  <td style={{ ...tdStyle(), color: col(b.pnl), fontWeight: 700 }}>{signed(b.pnl)}</td>
+                  <td style={{ ...tdStyle(), color: col(b.day_pnl) }}>{signed(b.day_pnl)}</td>
+                  <td style={{ ...tdStyle(), color: col(b.xirr) }}>{b.xirr == null ? "—" : `${b.xirr.toFixed(2)}%`}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {((data?.warnings?.length ?? 0) > 0 || missingPf.length > 0 || stalePf.length > 0) && rows.length > 0 && (
+        <details style={{ ...cardStyle, padding: "10px 14px", marginBottom: "10px", borderColor: "var(--warning-border)", background: "var(--warning-bg)" }}>
+          <summary style={{ cursor: "pointer", fontSize: "12px", fontWeight: 700, color: "var(--warning)" }}>
+            {[missingPf.length ? `${missingPf.length} fund(s) without a portfolio file` : "",
+              stalePf.length ? `${stalePf.length} portfolio(s) over 50 days old` : "",
+              data?.warnings?.length ? `${data.warnings.length} statement note(s)` : ""].filter(Boolean).join(" · ")}
+          </summary>
+          {missingPf.map(r => (
+            <div key={r.isin} style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "4px" }}>
+              • {r.scheme} — {amcPage(r.amc) ? <a href={amcPage(r.amc)!} target="_blank" rel="noreferrer">{r.amc} portfolios</a>
+                : `${r.amc || "the fund house"} website → statutory disclosures → monthly portfolio`}, then
+              <b style={{ cursor: "pointer", textDecoration: "underline", marginLeft: "4px" }} onClick={() => pickFor(r.isin)}>upload for this fund</b>
+            </div>
+          ))}
+          {stalePf.map(r => (
+            <div key={r.isin} style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "4px" }}>
+              • {r.scheme}: portfolio as of {fmtDate(r.portfolio!.as_of)} — a newer month is out.
+            </div>
+          ))}
+          {(data?.warnings || []).map((w, i) => <div key={i} style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "4px" }}>• {w}</div>)}
+        </details>
+      )}
+
+      {rows.length > 0 && (
+        <div style={{ ...cardStyle, padding: 0, overflowX: "auto" }}>
+          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "1200px" }}>
+            <thead>
+              <tr>
+                <th style={thStyle("left")}>SCHEME</th>
+                {many && <th style={thStyle("left")}>NAME</th>}
+                <th style={thStyle("left")} title="How gains are taxed. Equity: 12 months, 20% / 12.5% with the shared ₹1.25 lakh exemption. Debt bought from Apr 2023: your slab. Other: 12.5% after 24 months.">TAX AS</th>
+                <th style={thStyle()}>UNITS</th>
+                <th style={thStyle()}>AVG NAV</th>
+                <th style={thStyle()}>NAV</th>
+                <th style={thStyle()}>DAY</th>
+                <th style={thStyle()}>INVESTED</th>
+                <th style={thStyle()}>VALUE</th>
+                <th style={thStyle()}>P&L</th>
+                <th style={thStyle()}>P&L %</th>
+                <th style={thStyle()} title="Annualised return on this scheme's own cash flows">XIRR</th>
+                <th style={thStyle()}>LONG-TERM</th>
+                <th style={thStyle("left")}>HELD (UNITS · DAYS)</th>
+                <th style={thStyle("left")} title="The fund's month-end portfolio, used by the Exposure tab">PORTFOLIO</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(r => {
+                const age = daysSince(r.portfolio?.as_of);
+                return (
+                  <tr key={`${r.name}:${r.isin}`}>
+                    <td style={{ ...tdStyle("left"), maxWidth: "300px", whiteSpace: "normal" }} title={`${r.isin} · folio ${r.folios.join(", ")}${r.category ? ` · ${r.category}` : ""}`}>
+                      <div style={{ fontWeight: 700, color: "var(--text-primary)" }}>{r.scheme}</div>
+                      <div style={{ fontSize: "10px", color: "var(--text-faint)" }}>{r.amc}{r.category ? ` · ${r.category}` : ""}</div>
+                    </td>
+                    {many && <td style={{ ...tdStyle("left"), color: "var(--text-secondary)" }} title={r.accounts.join(", ")}>{r.name}</td>}
+                    <td style={tdStyle("left")}>
+                      <select value={r.overridden ? r.tax_class : ""} onChange={e => setClass(r.isin, e.target.value)} title={r.tax_why || ""}
+                        style={{ ...inputStyle, padding: "2px 4px", fontSize: "11px" }}>
+                        <option value="">{classLabel(r.tax_class)} (auto)</option>
+                        <option value="equity">Equity</option><option value="debt">Debt</option><option value="other">Other</option>
+                      </select>
+                    </td>
+                    <td style={tdStyle()}>{r.units.toLocaleString("en-IN", { maximumFractionDigits: 3 })}</td>
+                    <td style={tdStyle()}>{r.avg_nav ? inr(r.avg_nav, 4) : "—"}</td>
+                    <td style={tdStyle()} title={`${fmtDate(r.nav_date)} · ${r.nav_source === "statement" ? "from the statement" : "AMFI"}`}>
+                      {r.nav ? inr(r.nav, 4) : "—"}
+                      <div style={{ fontSize: "10px", color: r.nav_source === "statement" ? "var(--warning)" : "var(--text-faint)" }}>{r.nav_date ? fmtDate(r.nav_date) : ""}</div>
+                    </td>
+                    <td style={{ ...tdStyle(), color: col(r.day_change_pct) }}>{pct(r.day_change_pct)}</td>
+                    <td style={tdStyle()}>{inr(r.invested)}</td>
+                    <td style={{ ...tdStyle(), fontWeight: 700 }}>{inr(r.value)}</td>
+                    <td style={{ ...tdStyle(), color: col(r.pnl), fontWeight: 700 }}>{signed(r.pnl)}</td>
+                    <td style={{ ...tdStyle(), color: col(r.pnl_pct) }}>{pct(r.pnl_pct)}</td>
+                    <td style={{ ...tdStyle(), color: col(r.xirr) }}>{r.xirr == null ? "—" : `${r.xirr.toFixed(2)}%`}</td>
+                    <td style={{ ...tdStyle(), color: "var(--text-secondary)" }}
+                        title={r.next_long_term ? `More become long-term on ${r.next_long_term}` : r.tax_class === "debt" ? "Debt funds bought from Apr 2023 are taxed at slab however long they are held" : ""}>
+                      {r.long_term_units >= r.units - 0.001 ? "all" : r.long_term_units > 0 ? `${qtyTxt(r.long_term_units)} of ${qtyTxt(r.units)}`
+                        : r.next_long_term ? `from ${r.next_long_term}` : r.undated_units > 0 ? "older — date unknown" : "never (slab)"}
+                    </td>
+                    <td style={{ ...tdStyle("left"), color: "var(--text-secondary)", fontSize: "11px" }}
+                        title={r.lots.map(l => `${l.qty} units bought ${l.date ?? "before the statement"} for ${inr(l.cost)}`).join("\n")}>
+                      {r.lots.slice(0, 3).map(l => `${l.qty.toLocaleString("en-IN", { maximumFractionDigits: 1 })} · ${l.days == null ? "older" : `${l.days}d`}`).join(", ")}
+                      {r.lots.length > 3 ? ` +${r.lots.length - 3}` : ""}
+                    </td>
+                    <td style={tdStyle("left")}>
+                      {r.portfolio ? (
+                        <span style={{ fontSize: "11px", color: (age ?? 0) > 50 ? "var(--warning)" : "var(--text-secondary)", cursor: "pointer" }}
+                              title={`${r.portfolio.filename || ""} — click to replace`} onClick={() => pickFor(r.isin)}>
+                          {fmtDate(r.portfolio.as_of)} · {r.portfolio.n} · {r.portfolio.equity_pct ?? "—"}% shares
+                        </span>
+                      ) : (
+                        <button onClick={() => pickFor(r.isin)} style={{ ...btnStyle(), padding: "2px 8px", fontSize: "11px" }}
+                          title={amcPage(r.amc) ? `Download from ${amcPage(r.amc)}` : "From the fund house's website: statutory disclosures → monthly portfolio"}>Upload</button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {showTx && (
+        <div style={{ ...cardStyle, padding: 0, overflowX: "auto", marginTop: "12px" }}>
+          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "900px" }}>
+            <thead><tr>{["DATE", "SCHEME", "NAME", "TYPE", "AMOUNT", "UNITS", "NAV", "BALANCE"].map((h, i) => <th key={h} style={thStyle(i < 4 ? "left" : "right")}>{h}</th>)}</tr></thead>
+            <tbody>
+              {txns.map(x => (
+                <tr key={x.id}>
+                  <td style={tdStyle("left")}>{x.date}</td>
+                  <td style={{ ...tdStyle("left"), maxWidth: "320px", overflow: "hidden", textOverflow: "ellipsis" }} title={`${x.scheme} · folio ${x.folio}`}>{x.scheme}</td>
+                  <td style={{ ...tdStyle("left"), color: "var(--text-secondary)" }}>{x.name}</td>
+                  <td style={{ ...tdStyle("left"), fontWeight: 600, color: x.kind === "buy" ? "var(--positive)" : x.kind === "sell" ? "var(--negative)" : "var(--text-muted)" }}
+                      title={x.description || ""}>{x.description || x.kind}</td>
+                  <td style={tdStyle()}>{x.amount == null ? "—" : inr(Math.abs(x.amount), 2)}</td>
+                  <td style={tdStyle()}>{x.units == null ? "" : x.units.toLocaleString("en-IN", { maximumFractionDigits: 3 })}</td>
+                  <td style={tdStyle()}>{x.nav == null ? "" : x.nav.toFixed(4)}</td>
+                  <td style={tdStyle()}>{x.balance == null ? "" : x.balance.toLocaleString("en-IN", { maximumFractionDigits: 3 })}</td>
+                </tr>
+              ))}
+              {txns.length === 0 && <tr><td colSpan={8} style={{ ...tdStyle("left"), color: "var(--text-faint)", fontStyle: "italic" }}>No transactions.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Exposure: shares held directly plus each fund's slice ───────────────────
+
+function ExposureTab({ data, loading, onRefresh, onFunds }: {
+  data: ExposureResp | null; loading: boolean; onRefresh: () => void; onFunds: () => void;
+}) {
+  const [view, setView] = useState<"stock" | "industry">("stock");
+  const [filter, setFilter] = useState("");
+  const [open, setOpen] = useState<string | null>(null);
+  if (!data) return <div style={{ ...cardStyle, fontSize: "13px", color: "var(--text-muted)" }}>{loading ? "Working out your exposure…" : "No data yet."}</div>;
+  const f = filter.trim().toLowerCase();
+  const rows = (Array.isArray(data.rows) ? data.rows : []).filter(r => !f || [r.symbol, r.company, r.industry].some(x => (x || "").toLowerCase().includes(f)));
+  const inds = (Array.isArray(data.industries) ? data.industries : []).filter(g => !f || g.industry.toLowerCase().includes(f)
+    || g.stocks.some(s => [s.symbol, s.company].some(x => (x || "").toLowerCase().includes(f))));
+  const maxPct = Math.max(1, ...rows.map(r => r.pct || 0));
+  const maxInd = Math.max(1, ...inds.map(g => g.pct || 0));
+  const bar = (p: number | null, max: number) => (
+    <div style={{ display: "flex", alignItems: "center", gap: "6px", justifyContent: "flex-end" }}>
+      <div style={{ width: "70px", height: "6px", background: "rgba(var(--ink-rgb),0.08)", borderRadius: "3px", overflow: "hidden" }}>
+        <div style={{ width: `${Math.min(100, (p || 0) / max * 100)}%`, height: "100%", background: "var(--accent)" }} />
+      </div>
+      <span style={{ minWidth: "48px" }}>{p == null ? "—" : `${p.toFixed(2)}%`}</span>
+    </div>
+  );
+  const stale = (data.funds || []).filter(x => x.stale);
+  return (
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: "10px", marginBottom: "12px" }}>
+        <Tile label="Total portfolio" value={inr(data.total)} sub="shares + mutual funds, today's value" />
+        <Tile label="Shares held directly" value={inr(data.direct_total)} sub={data.total ? `${(data.direct_total / data.total * 100).toFixed(1)}%` : undefined} />
+        <Tile label="Mutual funds" value={inr(data.fund_total)}
+              sub={data.fund_total ? `${inr(data.broken_down_total)} broken down into holdings` : undefined} />
+        <Tile label="Debt, cash & others in funds" value={inr(data.rest?.value)} sub={data.total ? `${((data.rest?.value || 0) / data.total * 100).toFixed(1)}% of the total` : undefined} />
+      </div>
+
+      {(data.not_broken_down.length > 0 || stale.length > 0) && (
+        <div style={{ marginBottom: "10px", padding: "8px 12px", borderRadius: "8px", fontSize: "12px", background: "var(--warning-bg)", color: "var(--warning)" }}>
+          {data.not_broken_down.length > 0 && <>{data.not_broken_down.length} fund(s) worth {inr(data.not_broken_down.reduce((a, x) => a + (x.value ?? x.amount ?? 0), 0))} have
+            no portfolio file yet, so their stocks are missing below: {data.not_broken_down.map(x => x.scheme.split(" - ")[0]).join(", ")}. </>}
+          {stale.length > 0 && <>{stale.length} portfolio file(s) are over 50 days old. </>}
+          <b style={{ cursor: "pointer", textDecoration: "underline" }} onClick={onFunds}>Upload in Mutual funds</b>
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: "6px", alignItems: "center", marginBottom: "10px", flexWrap: "wrap" }}>
+        <button onClick={() => { setView("stock"); setOpen(null); }} style={btnStyle(view === "stock")}>By stock ({data.rows.length})</button>
+        <button onClick={() => { setView("industry"); setOpen(null); }} style={btnStyle(view === "industry")}>By industry ({data.industries.length})</button>
+        <input value={filter} onChange={e => setFilter(e.target.value)} placeholder="Filter stock or industry" style={{ ...inputStyle, width: "200px" }} />
+        <button onClick={onRefresh} disabled={loading} style={{ ...btnStyle(), marginLeft: "auto" }}>{loading ? "Refreshing…" : "Refresh"}</button>
+      </div>
+
+      {view === "stock" && (
+        <div style={{ ...cardStyle, padding: 0, overflowX: "auto" }}>
+          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "900px" }}>
+            <thead>
+              <tr>
+                <th style={thStyle("left")}>STOCK</th>
+                <th style={thStyle("left")}>INDUSTRY</th>
+                <th style={thStyle()}>DIRECT</th>
+                <th style={thStyle()}>VIA FUNDS</th>
+                <th style={thStyle()}>TOTAL</th>
+                <th style={thStyle()}>% OF PORTFOLIO</th>
+                <th style={thStyle()} title="Your cost: shares at what you paid, funds at your cost in the fund times the stock's weight (approximate)">INVESTED ≈</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(r => (
+                <Fragment key={r.key}>
+                  <tr onClick={() => setOpen(open === r.key ? null : r.key)} style={{ cursor: "pointer" }}>
+                    <td style={{ ...tdStyle("left"), maxWidth: "280px", overflow: "hidden", textOverflow: "ellipsis" }} title={r.isin || ""}>
+                      <span style={{ color: "var(--text-faint)", marginRight: "4px" }}>{open === r.key ? "▾" : "▸"}</span>
+                      <b style={{ color: "var(--text-primary)" }}>{r.symbol || r.company}</b>
+                      {r.symbol && <span style={{ fontSize: "10px", color: "var(--text-faint)", marginLeft: "6px" }}>{r.company}</span>}
+                    </td>
+                    <td style={{ ...tdStyle("left"), color: "var(--text-secondary)", maxWidth: "200px", overflow: "hidden", textOverflow: "ellipsis" }}>{r.industry}</td>
+                    <td style={tdStyle()}>{r.direct_value ? inr(r.direct_value) : "—"}</td>
+                    <td style={tdStyle()}>{r.fund_value ? inr(r.fund_value) : "—"}</td>
+                    <td style={{ ...tdStyle(), fontWeight: 700 }}>{inr(r.total)}</td>
+                    <td style={tdStyle()}>{bar(r.pct, maxPct)}</td>
+                    <td style={{ ...tdStyle(), color: "var(--text-muted)" }}>{inr(r.invested)}</td>
+                  </tr>
+                  {open === r.key && (
+                    <tr>
+                      <td colSpan={7} style={{ padding: "4px 10px 10px 30px", background: "var(--surface-2)", borderBottom: "1px solid var(--border-subtle)" }}>
+                        {r.direct_value > 0 && (
+                          <div style={{ fontSize: "12px", color: "var(--text-secondary)", padding: "3px 0" }}>
+                            Held directly: <b>{inr(r.direct_value)}</b> (cost {inr(r.direct_invested)}) {r.holders.length > 1 ? `· ${r.holders.join(", ")}` : ""}
+                          </div>
+                        )}
+                        {r.funds.map((fu, i) => (
+                          <div key={i} style={{ fontSize: "12px", color: "var(--text-secondary)", padding: "3px 0" }}>
+                            {fu.scheme} — {fu.pct_of_fund.toFixed(2)}% of the fund = <b>{inr(fu.amount)}</b>
+                            <span style={{ color: "var(--text-faint)" }}> · portfolio {fmtDate(fu.as_of)}{fu.name ? ` · ${fu.name}` : ""}</span>
+                          </div>
+                        ))}
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))}
+              {rows.length === 0 && (
+                <tr><td colSpan={7} style={{ ...tdStyle("left"), color: "var(--text-faint)", fontStyle: "italic" }}>Nothing to show.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {view === "industry" && (
+        <div style={{ ...cardStyle, padding: 0, overflowX: "auto" }}>
+          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "820px" }}>
+            <thead>
+              <tr>
+                <th style={thStyle("left")}>INDUSTRY</th>
+                <th style={thStyle()}>DIRECT</th>
+                <th style={thStyle()}>VIA FUNDS</th>
+                <th style={thStyle()}>TOTAL</th>
+                <th style={thStyle()}>% OF PORTFOLIO</th>
+                <th style={thStyle("left")}>LARGEST</th>
+              </tr>
+            </thead>
+            <tbody>
+              {inds.map(g => (
+                <Fragment key={g.industry}>
+                  <tr onClick={() => setOpen(open === g.industry ? null : g.industry)} style={{ cursor: "pointer" }}>
+                    <td style={{ ...tdStyle("left"), fontWeight: 700, color: g.unknown ? "var(--warning)" : g.rest ? "var(--text-muted)" : "var(--text-primary)" }}>
+                      <span style={{ color: "var(--text-faint)", marginRight: "4px", fontWeight: 400 }}>{open === g.industry ? "▾" : "▸"}</span>{g.industry}
+                    </td>
+                    <td style={tdStyle()}>{g.direct_value ? inr(g.direct_value) : "—"}</td>
+                    <td style={tdStyle()}>{g.fund_value ? inr(g.fund_value) : "—"}</td>
+                    <td style={{ ...tdStyle(), fontWeight: 700 }}>{inr(g.total)}</td>
+                    <td style={tdStyle()}>{bar(g.pct, maxInd)}</td>
+                    <td style={{ ...tdStyle("left"), fontSize: "11px", color: "var(--text-secondary)" }}>
+                      {g.stocks.length ? [...g.stocks].sort((a, b) => b.total - a.total).slice(0, 3).map(s => s.symbol || s.company).join(", ")
+                        + (g.stocks.length > 3 ? ` +${g.stocks.length - 3}` : "") : `${(g.funds || []).length} fund(s)`}
+                    </td>
+                  </tr>
+                  {open === g.industry && (
+                    <tr>
+                      <td colSpan={6} style={{ padding: "4px 10px 10px 30px", background: "var(--surface-2)", borderBottom: "1px solid var(--border-subtle)" }}>
+                        {[...g.stocks].sort((a, b) => b.total - a.total).map(s => (
+                          <div key={s.key} style={{ fontSize: "12px", color: "var(--text-secondary)", padding: "2px 0" }}>
+                            <b>{s.symbol || s.company}</b> {inr(s.total)}
+                            <span style={{ color: "var(--text-faint)" }}>{s.direct_value ? ` · direct ${inr(s.direct_value)}` : ""}{s.fund_value ? ` · via funds ${inr(s.fund_value)}` : ""}</span>
+                          </div>
+                        ))}
+                        {(g.funds || []).map((fu, i) => (
+                          <div key={i} style={{ fontSize: "12px", color: "var(--text-secondary)", padding: "2px 0" }}>
+                            {fu.scheme}: <b>{inr(fu.amount ?? fu.value)}</b>{g.rest ? ` (${fu.pct_of_fund}% of the fund)` : ""}
+                          </div>
+                        ))}
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div style={{ marginTop: "8px" }}>
+        {(data.notes || []).map((n, i) => <div key={i} style={{ fontSize: "11px", color: "var(--text-faint)", lineHeight: 1.6 }}>{n}</div>)}
+      </div>
     </div>
   );
 }

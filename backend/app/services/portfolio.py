@@ -941,6 +941,16 @@ def tax_summary(db, fy: str, broker: Optional[str] = None, name: Optional[str] =
     acct_of = acct_resolver(db)
     c = compute(_by_name(_all_trades(db, broker), amap, acct_of, name), acct_of)
     rows = [x for x in c["realised"] if fy_of(_d(x["sell_date"])) == fy]
+    # Equity mutual funds are taxed with shares (same rates, one ₹1.25 lakh
+    # exemption); other funds are listed apart (services/mutual_funds.py).
+    mf_other: List[dict] = []
+    if broker in (None, "mf"):
+        try:
+            from app.services import mutual_funds as MF
+            for x in MF.realised_rows(db, fy, name):
+                (rows if x["tax_class"] == "equity" else mf_other).append(x)
+        except Exception as e:
+            logger.warning(f"[PORTFOLIO] mutual-fund gains unavailable: {e}")
     st = [x for x in rows if x["term"] == "STCG"]
     lt = [x for x in rows if x["term"] == "LTCG"]
     it = [x for x in rows if x["term"] == "INTRADAY"]
@@ -970,8 +980,8 @@ def tax_summary(db, fy: str, broker: Optional[str] = None, name: Optional[str] =
     est = max(0.0, st_net) * st_rate + lt_taxable * lt_rate
     turnover = sum(x["qty"] * x["sell_price"] for x in rows)
     names = c["names"]
-    detail = sorted(({**x, "symbol": names.get(x["key"], {}).get("symbol"),
-                      "isin": names.get(x["key"], {}).get("isin"),
+    detail = sorted(({**x, "symbol": x.get("symbol") or names.get(x["key"], {}).get("symbol"),
+                      "isin": x.get("isin") or names.get(x["key"], {}).get("isin"),
                       "sale_value": x["qty"] * x["sell_price"], "cost": x["qty"] * x["buy_price"],
                       "charges": x["buy_charges"] + x["sell_charges"],
                       "name": name_of(amap, x.get("account") or "")}
@@ -981,9 +991,17 @@ def tax_summary(db, fy: str, broker: Optional[str] = None, name: Optional[str] =
     if not name and len(names_in) > 1:
         warnings = [f"These figures add up {len(names_in)} people ({', '.join(names_in)}). Tax is per person — "
                     f"pick a name to see each one's own exemption and set-off."] + warnings
+    other_rows = sorted(({**x, "sale_value": x["qty"] * x["sell_price"], "cost": x["qty"] * x["buy_price"],
+                          "charges": 0.0, "name": name_of(amap, x.get("account") or "")} for x in mf_other),
+                        key=lambda x: (x["sell_date"], x["symbol"] or ""))
+    lt_other = sum(x["gain"] for x in mf_other if x["term"] == "LTCG_OTHER")
     return {
         "fy": fy,
         "name": name,
+        "mf_other": {"rows": other_rows,
+                     "slab_gain": sum(x["gain"] for x in mf_other if x["term"] == "SLAB"),
+                     "ltcg_gain": lt_other,
+                     "ltcg_tax": max(0.0, lt_other) * 0.125},
         "stcg": {"gain": st_gain, "loss": st_loss, "net": st_gain + st_loss, "rate": st_rate},
         "ltcg": {"gain": lt_gain, "loss": lt_loss, "net": lt_gain + lt_loss, "rate": lt_rate,
                  "exemption": exemption, "exemption_used": min(exemption, max(0.0, lt_net)),
@@ -1008,6 +1026,9 @@ def tax_summary(db, fy: str, broker: Optional[str] = None, name: Optional[str] =
             "Rates by sale date: STCG 15% / LTCG 10% before 23 Jul 2024, 20% / 12.5% from then.",
             f"LTCG exemption ₹{exemption:,.0f} for FY {fy}.",
             "Intraday (same-day buy and sell) is speculative business income, taxed at your slab — not included.",
+            "Equity mutual funds (broker MF) are included with shares: same rates, one exemption. Debt funds bought "
+            "from 1 Apr 2023 are taxed at your slab whatever the holding period; other funds (international, FoF, "
+            "gold, multi-asset) at 12.5% after 24 months, else at slab — both listed separately, not in the estimate.",
             "Check with your CA before filing.",
         ],
     }
@@ -1022,7 +1043,7 @@ def realised_csv(db, fy: str, broker: Optional[str] = None, name: Optional[str] 
                 "Buy price", "Sell price", "Purchase value", "Buy charges (est.)",
                 "Cost of acquisition", "Sale value", "Sale charges (est.)", "STT (est., not deductible)",
                 "Gain/Loss before charges", "Gain/Loss after charges", "Bought before 1 Feb 2018"])
-    for x in s["rows"]:
+    for x in s["rows"] + s["mf_other"]["rows"]:
         w.writerow([x["term"], x["name"], x["broker"], x["symbol"], x["isin"] or "", x["buy_date"], x["sell_date"],
                     round(x["qty"], 4), round(x["buy_price"], 4), round(x["sell_price"], 4),
                     round(x["cost"], 2), round(x["buy_charges"], 2), round(x["cost"] + x["buy_charges"], 2),
@@ -1035,7 +1056,12 @@ def realised_csv(db, fy: str, broker: Optional[str] = None, name: Optional[str] 
 def financial_years(db) -> List[str]:
     from app.database import PortfolioTrade
     days = [d for (d,) in db.query(PortfolioTrade.trade_date).distinct().all() if d]
-    fys = sorted({fy_of(_d(d)) for d in days} | {fy_of(_today())}, reverse=True)
+    try:
+        from app.services import mutual_funds as MF
+        mf = set(MF.financial_years(db))
+    except Exception:
+        mf = set()
+    fys = sorted({fy_of(_d(d)) for d in days} | mf | {fy_of(_today())}, reverse=True)
     return fys
 
 

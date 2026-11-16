@@ -448,6 +448,99 @@ class PortfolioAccount(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+# ─── Mutual funds (services/mutual_funds.py) ────────────────────────────────
+
+class MfTransaction(Base):
+    """
+    One line of a CAMS/KFintech Consolidated Account Statement: a purchase,
+    redemption, switch, reinvestment, or a stamp duty / STT / TDS line.
+    `account_id` is the PAN, which PortfolioAccount maps to a tracking name
+    (broker "mf"). `uid` is built from the folio, ISIN, date, kind, amount,
+    units and running balance, so overlapping statements add nothing twice.
+    """
+    __tablename__ = "mf_transactions"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    uid = Column(String(64), unique=True, index=True, nullable=False)
+    account_id = Column(String(30), index=True, nullable=False)       # PAN
+    folio = Column(String(40), index=True, nullable=False)
+    amc = Column(String(120), nullable=True)
+    scheme = Column(String(250), nullable=False)
+    isin = Column(String(20), index=True, nullable=False)
+    txn_date = Column(String(10), index=True, nullable=False)         # YYYY-MM-DD
+    seq = Column(Integer, default=0)                                  # order within the statement
+    kind = Column(String(16), nullable=False)    # buy | sell | reversal | stamp_duty | stt | tds | other
+    description = Column(String(200), nullable=True)
+    amount = Column(Float, nullable=True)
+    units = Column(Float, nullable=True)
+    nav = Column(Float, nullable=True)
+    balance = Column(Float, nullable=True)
+    source = Column(String(20), default="cas")
+    imported_at = Column(DateTime, default=datetime.utcnow)
+
+
+class MfSnapshot(Base):
+    """A statement's closing line per folio and scheme: units, cost and value as the registrar states them."""
+    __tablename__ = "mf_snapshots"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_id = Column(String(30), index=True, nullable=False)
+    folio = Column(String(40), nullable=False)
+    isin = Column(String(20), index=True, nullable=False)
+    scheme = Column(String(250), nullable=True)
+    amc = Column(String(120), nullable=True)
+    period_from = Column(String(10), nullable=True)
+    period_to = Column(String(10), nullable=True)
+    opening_units = Column(Float, nullable=True)
+    units = Column(Float, nullable=True)
+    nav = Column(Float, nullable=True)
+    nav_date = Column(String(10), nullable=True)
+    cost_value = Column(Float, nullable=True)
+    market_value = Column(Float, nullable=True)
+    imported_at = Column(DateTime, default=datetime.utcnow)
+    __table_args__ = (Index("ix_mf_snapshot_key", "account_id", "folio", "isin", unique=True),)
+
+
+class MfNav(Base):
+    """AMFI's latest NAV and category for each scheme held (NAVAll.txt), with the one before it for the day's change."""
+    __tablename__ = "mf_navs"
+    isin = Column(String(20), primary_key=True)
+    scheme_code = Column(String(20), nullable=True)
+    name = Column(String(250), nullable=True)
+    amc = Column(String(120), nullable=True)
+    category = Column(String(150), nullable=True)
+    nav = Column(Float, nullable=True)
+    nav_date = Column(String(10), nullable=True)
+    prev_nav = Column(Float, nullable=True)
+    prev_nav_date = Column(String(10), nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+
+class MfPortfolio(Base):
+    """
+    A scheme's monthly portfolio disclosure as read from the AMC's file: one
+    row per scheme (the latest uploaded), holdings kept as JSON —
+    [{isin, name, industry, pct, kind}] with kind equity | foreign.
+    Everything that is not a share is the remainder: debt, cash and others.
+    """
+    __tablename__ = "mf_portfolios"
+    scheme_isin = Column(String(20), primary_key=True)
+    as_of = Column(String(10), nullable=True)
+    filename = Column(String(250), nullable=True)
+    sheet = Column(String(120), nullable=True)
+    title = Column(String(300), nullable=True)
+    equity_pct = Column(Float, nullable=True)
+    holdings_json = Column(Text, nullable=True)
+    uploaded_at = Column(DateTime, default=datetime.utcnow)
+
+
+class StockIndustry(Base):
+    """Industry per ISIN: from fund portfolio files (AMFI's classification) first, BSE's scrip list for the rest."""
+    __tablename__ = "stock_industries"
+    isin = Column(String(20), primary_key=True)
+    industry = Column(String(120), nullable=True)
+    source = Column(String(10), nullable=True)      # amc | bse
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+
 # ─── Trading Automation Engine Tables ────────────────────────────────────────
 
 class TradeConfig(Base):

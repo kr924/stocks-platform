@@ -14,8 +14,9 @@ from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.database import get_db, PortfolioTrade, PortfolioAccount, SystemSetting
+from app.database import get_db, PortfolioTrade, PortfolioAccount, SystemSetting, MfTransaction, MfPortfolio
 from app.services import portfolio as P
+from app.services import mutual_funds as MF
 
 logger = logging.getLogger("app.portfolio_router")
 router = APIRouter(prefix="/api/portfolio", tags=["portfolio"])
@@ -36,6 +37,8 @@ def _accounts(db) -> list:
     """Every known client ID with its tracking name and trade count, plus untagged trades per broker."""
     counts = {a: n for a, n in db.query(PortfolioTrade.account_id, func.count(PortfolioTrade.id))
               .group_by(PortfolioTrade.account_id).all()}
+    for a, n in db.query(MfTransaction.account_id, func.count(MfTransaction.id)).group_by(MfTransaction.account_id).all():
+        counts[a] = counts.get(a, 0) + n
     return [{"client_id": a.client_id, "broker": a.broker, "name": a.name, "trades": counts.get(a.client_id, 0)}
             for a in db.query(PortfolioAccount).order_by(PortfolioAccount.name, PortfolioAccount.client_id).all()]
 
@@ -150,7 +153,7 @@ def save_account(body: AccountBody, db: Session = Depends(get_db)):
     """Add a client ID or rename it. Several IDs can share a tracking name."""
     cid = (body.client_id or "").strip().upper()
     name = (body.name or "").strip()[:60]
-    broker = _broker(body.broker)
+    broker = _broker(body.broker) or ("mf" if (body.broker or "").strip().lower() == "mf" else None)
     if not cid or not name or not broker:
         raise HTTPException(400, "client ID, broker and tracking name are needed")
     a = db.query(PortfolioAccount).filter(PortfolioAccount.client_id == cid).first()
@@ -165,7 +168,8 @@ def save_account(body: AccountBody, db: Session = Depends(get_db)):
 @router.delete("/accounts/{client_id}")
 def delete_account(client_id: str, db: Session = Depends(get_db)):
     cid = client_id.strip().upper()
-    n = db.query(PortfolioTrade.id).filter(PortfolioTrade.account_id == cid).count()
+    n = (db.query(PortfolioTrade.id).filter(PortfolioTrade.account_id == cid).count()
+         + db.query(MfTransaction.id).filter(MfTransaction.account_id == cid).count())
     if n:
         raise HTTPException(400, f"{cid} has {n} trades on file — rename it instead, or delete its trades first")
     db.query(PortfolioAccount).filter(PortfolioAccount.client_id == cid).delete()
@@ -397,3 +401,97 @@ def sell_holding(body: SellBody, db: Session = Depends(get_db)):
         threading.Thread(target=_later, daemon=True, name=f"post-sell-{sym}").start()
     return {"success": result.success, "status": result.status, "message": result.message,
             "order_id": result.broker_order_id, "closed_configs": closed}
+
+
+# ─── Mutual funds (services/mutual_funds.py) ────────────────────────────────
+
+MAX_FILE_B64 = 60_000_000      # ~45 MB file
+
+
+class CasBody(BaseModel):
+    filename: Optional[str] = None
+    content_b64: str
+    password: Optional[str] = None       # opens the PDF; never stored
+    name: Optional[str] = None           # tracking name for a PAN seen for the first time
+
+
+@router.post("/mf/import")
+def mf_import(body: CasBody, db: Session = Depends(get_db)):
+    """A CAMS / KFintech Consolidated Account Statement PDF, sent base64."""
+    if len(body.content_b64 or "") > MAX_FILE_B64:
+        raise HTTPException(413, "File too large")
+    try:
+        res = MF.import_cas(db, body.content_b64, (body.password or "").strip() or None, _name(body.name))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        logger.exception("[MF] CAS import failed")
+        raise HTTPException(500, f"Could not read the statement: {e}")
+    logger.info(f"[MF] CAS {body.filename}: {res['added']} lines added, {res['duplicates']} on file, "
+                f"{res['schemes']} schemes, {res['period_from']}→{res['period_to']}")
+    return res
+
+
+@router.get("/mf/holdings")
+def mf_holdings(name: Optional[str] = None, db: Session = Depends(get_db)):
+    return MF.holdings(db, name=_name(name))
+
+
+@router.post("/mf/navs/refresh")
+def mf_refresh_navs(db: Session = Depends(get_db)):
+    res = MF.refresh_navs(db)
+    if not res.get("ok"):
+        raise HTTPException(502, res.get("error") or "AMFI unavailable")
+    return res
+
+
+@router.get("/mf/transactions")
+def mf_transactions(name: Optional[str] = None, isin: Optional[str] = None, limit: int = 2000,
+                    db: Session = Depends(get_db)):
+    return MF.transactions(db, _name(name), (isin or "").strip().upper() or None, min(max(limit, 1), 5000))
+
+
+class TaxClassBody(BaseModel):
+    isin: str
+    tax_class: Optional[str] = None      # equity | debt | other; null = from AMFI's category
+
+
+@router.post("/mf/tax-class")
+def mf_tax_class(body: TaxClassBody, db: Session = Depends(get_db)):
+    if body.tax_class not in (None, "", *MF.TAX_CLASSES):
+        raise HTTPException(400, "tax_class is equity, debt or other")
+    return {"overrides": MF.set_tax_class(db, body.isin.strip().upper(), body.tax_class or None)}
+
+
+class PortfolioFileBody(BaseModel):
+    filename: str
+    content_b64: str
+    scheme_isin: Optional[str] = None    # match the file to this scheme; else every scheme on file
+
+
+@router.post("/mf/portfolio-file")
+def mf_portfolio_file(body: PortfolioFileBody, db: Session = Depends(get_db)):
+    """An AMC's monthly portfolio disclosure (xlsx / xls / pdf / zip), sent base64."""
+    if len(body.content_b64 or "") > MAX_FILE_B64:
+        raise HTTPException(413, "File too large")
+    try:
+        return MF.store_portfolio_file(db, body.filename, body.content_b64,
+                                       (body.scheme_isin or "").strip().upper() or None)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        logger.exception("[MF] portfolio file failed")
+        raise HTTPException(500, f"Could not read {body.filename}: {e}")
+
+
+@router.delete("/mf/portfolio-file/{isin}")
+def mf_portfolio_delete(isin: str, db: Session = Depends(get_db)):
+    n = db.query(MfPortfolio).filter(MfPortfolio.scheme_isin == isin.strip().upper()).delete()
+    db.commit()
+    return {"deleted": n}
+
+
+@router.get("/exposure")
+def exposure(name: Optional[str] = None, db: Session = Depends(get_db)):
+    """Shares held directly plus each fund's slice of every stock, by stock and by industry."""
+    return MF.exposure(db, _name(name))

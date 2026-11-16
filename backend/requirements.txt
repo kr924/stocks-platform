@@ -21,6 +21,9 @@ reportlab==4.2.2
 # boxes, which is what recovers the column grid — Indian P&L tables are
 # right-aligned, so numbers cluster by right edge. Wheels exist for aarch64.
 pymupdf==1.28.2
+# Mutual-fund portfolio disclosures arrive as Excel: .xlsx and the older .xls
+openpyxl==3.1.5
+xlrd==2.0.1
 # OCR fallback for filings whose text layer is a stale OCR pass or absent
 # entirely (39% of filings carry one). rapidocr is pure ONNX Runtime — no
 # PaddlePaddle — which is what makes it viable on the ARM VM.

@@ -479,6 +479,71 @@ a capital-gains summary per financial year, derived from trades alone.
   account, charges, set-off per name and the Upstox reconciliation against
   the live code.
 
+## Mutual funds and exposure (16 Nov 2026)
+
+`services/mutual_funds.py`, `/api/portfolio/mf/*` and `/api/portfolio/exposure`,
+tables `mf_transactions`, `mf_snapshots`, `mf_navs`, `mf_portfolios`,
+`stock_industries`; the **Mutual funds** and **Exposure** tabs of 💼 Portfolio.
+
+- **Ledger = the CAS.** The CAMS / KFintech Consolidated Account Statement PDF
+  (detailed, from the first investment) is read as visual rows from PyMuPDF
+  word boxes, not text order: AMC line → `Folio No … PAN` → scheme lines up to
+  `ISIN:` (names wrap; the line with the `CODE-` prefix starts it) →
+  transactions `dd-Mon-yyyy desc amount units nav balance` (parentheses are
+  negative) → `Closing Unit Balance … Total Cost Value … Market Value`. The page
+  header repeats the period ("01-Jan-2020 To 16-Nov-2026"), which looks like a
+  transaction line and is skipped. Uploaded base64 (no python-multipart);
+  the password only opens the PDF and is never stored.
+- **Idempotent.** `uid` = PAN, folio, ISIN, date, kind, amount, units, running
+  balance and an occurrence index — overlapping statements add nothing. The
+  description is not in it: CAMS and KFintech word the same line differently.
+- **PAN is the client ID** (`PortfolioAccount`, broker `mf`). A new PAN joins
+  the only tracking name if there is one, else the holder's name; rename it
+  under Accounts.
+- **FIFO per PAN, folio and scheme.** Stamp duty is added to the cost of the
+  purchase it was charged on. A purchase *reversal* removes that purchase
+  rather than selling. The statement's closing line is kept per folio
+  (`mf_snapshots`, the later valuation wins); when the ledger holds fewer units
+  than the registrar (a statement starting after the first purchase), the rest
+  is an undated lot at the registrar's remaining cost.
+- **Tax class** (`classify`): AMFI's category first (equity schemes, ELSS,
+  aggressive/arbitrage/equity-savings/balanced-advantage hybrids → equity;
+  debt schemes, conservative hybrids → debt; FoFs → other, or debt by name),
+  else the scheme's name; overridable per scheme (`mf_tax_class_overrides`).
+  Equity: 12 months, 20% / 12.5%, rows go into `portfolio.tax_summary` with
+  shares (one ₹1.25 lakh exemption). Debt bought from 1 Apr 2023: slab
+  always. Other: 24 months then 12.5%; slab before, and slab for units bought
+  from Apr 2023 and sold before Apr 2025 (the old specified-fund rule). Debt
+  and other are listed apart (`mf_other`), not in the estimate.
+- **NAVs** from AMFI's `NAVAll.txt` (portal.amfiindia.com; its columns gained
+  Plan and Option, so they are found by header name), only for ISINs on file,
+  with the previous NAV for the day's change (shown only when the two are ≤4
+  days apart). 07:00 daily (`daily_job:mf_nav_date`), after each import, and
+  lazily every 3 h when the tab is open. Without AMFI the statement's NAV is
+  used and labelled.
+- **What the funds hold.** Each AMC's month-end portfolio file (xlsx / xls /
+  pdf / zip) is read generically: the header row is the one with an ISIN
+  column and a "%"/"net assets" column (a second header line is merged in);
+  fractions (0.0512) are scaled when the column sums to ≤1.6. Only shares are
+  kept (`INE…01…`/`IN9…01…` Indian equity, non-IN ISINs as overseas); the rest
+  is the remainder: debt, cash, REITs, futures margin. A sheet is matched to a
+  held scheme by name tokens minus the fund-house name (core coverage ≥ 0.8),
+  and only to schemes of a fund house the file names — "Banking and Financial
+  Services" exists at several. Per-scheme upload skips both tests. PDFs are
+  split into sections by the scheme title at the top of each page.
+- **Exposure** = shares held directly (`portfolio.holdings`, today's price, at
+  cost without a quote) + each fund's value × each stock's weight. Invested
+  via funds is approximate (cost in the fund × weight). Industry: the fund
+  files' AMFI classification first, BSE's scrip list (`INDUSTRY`, fetched at
+  most daily, only when a direct holding has none) for the rest — the two use
+  different names, so a direct-only stock may sit in a BSE-named group.
+  Funds without a file appear as "Funds not broken down yet".
+- Auto-download of AMC files was not built: their pages are JS-rendered and
+  none could be reached from the build sandbox. The page links HDFC, Motilal
+  and Tata's disclosure pages.
+- `ops/check_mutual_funds.py` checks the rules; given files it prints what the
+  CAS and portfolio parsers read (`docker cp` the file in first).
+
 ## Like-for-like: a quarter against the same quarter last year
 
 `services/result_compare.py`. Every results prompt, the panel's table and the

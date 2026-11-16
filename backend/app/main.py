@@ -273,6 +273,12 @@ async def _intelligence_scheduler():
                         and _daily_due(last_run, "portfolio_sync_date", today_str)):
                     asyncio.create_task(asyncio.to_thread(_run_portfolio_sync))
 
+                # 07:00 — yesterday's mutual-fund NAVs from AMFI (published
+                # late evening), so the day's change compares two closes.
+                if (now_ist.hour, now_ist.minute) >= (7, 0) and _daily_due(last_run, "mf_nav_date", today_str):
+                    from app.services import mutual_funds as _mf
+                    _mf.refresh_navs_async(force=True)
+
                 # 08:00 — publish the digest page and send the single alert
                 if now_ist.hour >= 8 and _daily_due(last_run, "morning_digest_date", today_str):
                     asyncio.create_task(asyncio.to_thread(_run_morning_digest))
