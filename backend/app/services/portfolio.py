@@ -1068,7 +1068,7 @@ def tax_summary(db, fy: str, broker: Optional[str] = None, name: Optional[str] =
         r = FNO.report(db, fy, name, broker if broker in BROKERS else None, with_prices=False)
         if r["trade_count"]:
             fno = {k: r[k] for k in ("gross", "net", "charges", "turnover", "closed", "futures", "options",
-                                     "by_underlying", "warnings")}
+                                     "by_underlying", "warnings", "periods")}
     except Exception as e:
         logger.warning(f"[PORTFOLIO] F&O summary unavailable: {e}")
     res = {
@@ -1113,6 +1113,11 @@ def tax_summary(db, fy: str, broker: Optional[str] = None, name: Optional[str] =
     }
     if not name and db is not None:
         _per_person(db, fy, broker, res)
+    try:
+        from app.services import itr as ITR
+        res["itr"] = ITR.build(res, fy)
+    except Exception as e:
+        logger.warning(f"[PORTFOLIO] ITR view unavailable: {e}")
     return res
 
 

@@ -1809,7 +1809,24 @@ def overview(db, name: Optional[str] = None, broker: Optional[str] = None) -> di
     except Exception as e:
         logger.warning(f"[MF] F&O positions unavailable for the overview: {e}")
     total_value = sum((r["value"] if r["value"] is not None else r["invested"]) for r in rows)
+    today = _today()
     for r in rows:
+        # Days held: since the oldest purchase still held, and the average age
+        # of the units held (by quantity), from the dated lots.
+        dated = [l for l in (r.get("lots") or []) if l.get("date")]
+        if r["type"] == "fno" and r.get("fno", {}).get("opened"):
+            r["first_bought"] = r["fno"]["opened"]
+            r["days_held"] = (today - _d(r["fno"]["opened"])).days
+            r["avg_days"] = None
+        elif dated:
+            first = min(l["date"] for l in dated)
+            q = sum(l["qty"] for l in dated)
+            r["first_bought"] = first
+            r["days_held"] = (today - _d(first)).days
+            r["avg_days"] = round(sum(l["qty"] * (today - _d(l["date"])).days for l in dated) / q) if q else None
+            r["undated"] = any(not l.get("date") for l in (r.get("lots") or []))
+        else:
+            r["first_bought"], r["days_held"], r["avg_days"] = None, None, None
         r["at"] = sorted(r["at"])
         if r["type"] == "fno":
             r["avg"] = r["fno"]["avg"]

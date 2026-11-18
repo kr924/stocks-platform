@@ -426,7 +426,15 @@ def fy_summary(realised: List[dict], charges: List[dict], fy: str) -> dict:
         by_u[r["underlying"] or r["symbol"]]["trades"] += 1
     for c in cs:
         by_u[c["underlying"] or c["symbol"]]["charges"] += c["total"]
-    return {"fy": fy, "gross": gross, "charges": ch, "net": gross - ch["total"],
+    from app.services.itr import period_of
+    periods = [{"gross": 0.0, "charges": 0.0} for _ in range(5)]
+    for r in rs:
+        periods[period_of(_d(r["closed"]))]["gross"] += r["pnl"]
+    for c in cs:
+        periods[period_of(_d(c["date"]))]["charges"] += c["total"]
+    for p in periods:
+        p["net"] = p["gross"] - p["charges"]
+    return {"fy": fy, "gross": gross, "charges": ch, "net": gross - ch["total"], "periods": periods,
             "turnover": sum(abs(r["pnl"]) for r in rs), "closed": len(rs),
             "futures": sum(r["pnl"] for r in rs if r["instrument"] == "FUT"),
             "options": sum(r["pnl"] for r in rs if r["instrument"] in ("CE", "PE")),

@@ -32,8 +32,22 @@ interface TaxResp {
   flows?: Record<"stock" | "etf" | "mf" | "fno", { bought: number; sold: number; count: number }>;
   per_name?: { name: string; stcg: number; ltcg: number; exemption: number; exemption_used: number; taxable_ltcg: number;
                estimated_tax: number; intraday: number; other_funds: number; fno: number | null; fno_turnover: number | null }[];
+  itr?: ItrView;
   fno?: { gross: number; net: number; turnover: number; closed: number; futures: number; options: number;
           charges: { total: number; stt: number }; by_underlying: { underlying: string; net: number }[]; warnings: string[] } | null;
+}
+interface ItrCat {
+  key: string; head: string; label: string; section: string; act: string; rate: string; where: string;
+  periods: number[]; net: number; sale_value: number; cost: number; expenses: number; stt: number; turnover: number;
+  count: number; gains: number; losses: number; gross?: number; rate_split?: { before: number; after: number };
+}
+interface ItrView {
+  fy: string; act: string; assessment_year: string | null; form: string; checklist: string[];
+  periods: { key: string; label: string; pay_by: string; cum_pct: number }[];
+  categories: ItrCat[];
+  schedule_112a: { isin: string | null; name: string; acquired: string; units: number; sale_value: number; cost: number;
+                   expenses: number; gain: number; kind: string }[];
+  advance_tax: { label: string; pay_by: string; special_rate_tax: number; cumulative: number; slab_income: number }[];
 }
 interface FnoTxn {
   id: number; broker: string; symbol: string; underlying: string | null; instrument: string | null; expiry: string | null;
@@ -84,6 +98,7 @@ interface OvRow {
   folios?: string[]; tax_class?: string | null; tax_why?: string | null; overridden?: boolean; nav_source?: string | null;
   portfolio?: { as_of: string | null; equity_pct: number | null; n: number } | null;
   fno?: OvFno;
+  first_bought?: string | null; days_held?: number | null; avg_days?: number | null; undated?: boolean;
 }
 interface OvTotals { count: number; invested: number; value: number; pnl: number | null; priced_invested: number;
                      day_pnl: number | null; unpriced: number; pct: number | null }
@@ -395,7 +410,8 @@ export function PortfolioDashboard() {
                  style={{ ...btn(), textDecoration: "none", marginLeft: "auto" }}>Download capital-gains CSV</a>
             )}
           </div>
-          {tax && <TaxView tax={tax} onFno={() => setTab("fno")} />}
+          {tax && <TaxView tax={tax} onFno={() => setTab("fno")}
+            csvHref={`${API_BASE}/api/portfolio/itr.csv?fy=${fy}${broker ? `&broker=${broker}` : ""}${taxName ? `&name=${encodeURIComponent(taxName)}` : ""}`} />}
         </div>
       )}
 
@@ -834,7 +850,7 @@ function OverviewTab({ data, many, who, broker, onPick, onTab, onReload, setMsg 
     <th style={{ ...thStyle(align), cursor: "pointer", color: sort === k ? "var(--accent)" : undefined }} title={title} onClick={() => setSort(k)}>{label}</th>
   );
   const fundsMissing = all.filter(r => (r.type === "mf" || r.type === "etf") && !r.portfolio && r.tax_class === "equity");
-  const COLS = many ? 15 : 14;
+  const COLS = many ? 16 : 15;
   const lotLine = (l: OvLot) => `${l.qty.toLocaleString("en-IN", { maximumFractionDigits: 3 })} bought ${l.date ? fmtDate(l.date) : "before the history on file"}`
     + `${l.days != null ? ` · ${l.days} days` : ""}${l.long_term ? " · long-term" : ""}${l.broker ? ` · ${atLabel(l.broker)}` : ""}${l.cost != null ? ` · cost ${inr(l.cost)}` : ""}`;
 
@@ -961,6 +977,7 @@ function OverviewTab({ data, many, who, broker, onPick, onTab, onReload, setMsg 
               {sortTh("pnl", "P&L")}
               {sortTh("pnl_pct", "P&L %")}
               <th style={thStyle()} title="Share of everything you hold">WEIGHT</th>
+              <th style={thStyle()} title="Days since the oldest purchase still held (average age of the units held, by quantity, underneath)">HELD</th>
               <th style={thStyle()} title="Units past the long-term holding period (12 months for shares and equity funds)">LONG-TERM</th>
               <th style={thStyle("left")}>SECTOR / CATEGORY</th>
             </tr>
@@ -995,6 +1012,11 @@ function OverviewTab({ data, many, who, broker, onPick, onTab, onReload, setMsg 
                     <td style={{ ...tdStyle(), color: col(r.pnl), fontWeight: 700 }}>{signed(r.pnl)}</td>
                     <td style={{ ...tdStyle(), color: col(r.pnl_pct) }}>{pct(r.pnl_pct)}</td>
                     <td style={tdStyle()}>{r.weight == null ? "—" : `${r.weight.toFixed(1)}%`}</td>
+                    <td style={tdStyle()} title={r.first_bought ? `First bought ${fmtDate(r.first_bought)}${r.avg_days != null ? ` · units held ${r.avg_days} days on average` : ""}${r.undated ? " · some units are older than the history on file" : ""}` : "No dated purchase on file"}>
+                      {r.days_held != null ? `${r.days_held.toLocaleString("en-IN")} d${r.undated ? "+" : ""}` : "—"}
+                      {r.first_bought && <div style={{ fontSize: "10px", color: "var(--text-faint)" }}>
+                        {fmtDate(r.first_bought)}{r.avg_days != null && r.avg_days !== r.days_held ? ` · avg ${r.avg_days} d` : ""}</div>}
+                    </td>
                     <td style={{ ...tdStyle(), color: "var(--text-secondary)", fontSize: "11px" }}
                         title={r.next_long_term ? `More become long-term on ${r.next_long_term}` : ""}>
                       {r.type === "fno" ? (r.fno?.expiry ? `expires ${fmtDate(r.fno.expiry)}${r.fno.expiry_estimated ? " ≈" : ""}` : "—")
@@ -1358,7 +1380,7 @@ function AnalyticsTab({ data, loading, onRefresh, setMsg }: {
 
 // ─── Capital gains & tax: shares, ETFs, funds and F&O for one FY ─────────────
 
-function TaxView({ tax, onFno }: { tax: TaxResp; onFno: () => void }) {
+function TaxView({ tax, onFno, csvHref }: { tax: TaxResp; onFno: () => void; csvHref: string }) {
   const card = cardStyle, th = thStyle, td = tdStyle;
   const fl = tax.flows;
   const assetOf = (r: TaxRow) => r.asset || (r.broker === "mf" ? "mf" : (r.isin || "").startsWith("INF") ? "etf" : "stock");
@@ -1414,6 +1436,7 @@ function TaxView({ tax, onFno }: { tax: TaxResp; onFno: () => void }) {
         <Tile label="F&O (business income)" value={fno ? signed(fno.net) : "—"} color={col(fno?.net)}
               sub={fno ? `after ${inr(fno.charges.total)} charges · turnover ${inr(fno.turnover)} · at your slab` : "no F&O trades this year"} />
       </div>
+      {tax.itr && <ItrSection itr={tax.itr} everyone={(tax.per_name?.length ?? 0) > 1} csvHref={csvHref} />}
       {tax.charges && (
         <div style={{ fontSize: "12px", color: "var(--text-secondary)", marginBottom: "8px" }}>
           Estimated charges on these sales: {inr(tax.charges.deductible)} brokerage, exchange, SEBI, stamp, GST and DP
@@ -1834,6 +1857,126 @@ function FundMonths({ setMsg }: { setMsg: (m: { text: string; tone: "ok" | "err"
       <div style={{ fontSize: "11px", color: "var(--text-faint)", marginTop: "6px", lineHeight: 1.6 }}>
         Weights are % of the fund's net assets in each month's file. A month with no upload stays empty, and changes are measured
         against the latest earlier month that has one. Upload older months to fill the history; the newest file stays the one Analytics uses.
+      </div>
+    </div>
+  );
+}
+
+// ─── Filing view: each kind of income by Schedule CG's accrual windows ───────
+
+function ItrSection({ itr, everyone, csvHref }: { itr: ItrView; everyone: boolean; csvHref: string }) {
+  const th = thStyle, td = tdStyle;
+  const [open, setOpen] = useState<string | null>(null);
+  const cats = Array.isArray(itr.categories) ? itr.categories : [];
+  const money = (v: number) => v ? signed(v) : <span style={{ color: "var(--text-faint)" }}>—</span>;
+  return (
+    <div style={{ ...cardStyle, padding: 0, marginBottom: "10px", overflowX: "auto" }}>
+      <div style={{ padding: "12px 14px 6px", display: "flex", gap: "10px", alignItems: "baseline", flexWrap: "wrap" }}>
+        <b style={{ fontSize: "13px", color: "var(--text-primary)" }}>Income-tax filing view — FY {itr.fy}</b>
+        <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
+          {itr.act}{itr.assessment_year ? ` · AY ${itr.assessment_year}` : " · tax year " + itr.fy} · {itr.form}
+        </span>
+        <a href={csvHref} style={{ ...btnStyle(), textDecoration: "none", marginLeft: "auto" }}>Download filing sheet (CSV)</a>
+      </div>
+      {everyone && (
+        <div style={{ margin: "0 14px 8px", padding: "6px 10px", borderRadius: "6px", fontSize: "12px", background: "var(--warning-bg)", color: "var(--warning)" }}>
+          A return is filed per person: these add up everyone. Pick a name above for that person's own figures to file.
+        </div>
+      )}
+      <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "1060px" }}>
+        <thead>
+          <tr>
+            <th style={th("left")}>INCOME</th>
+            <th style={th("left")}>SECTION · RATE</th>
+            {itr.periods.map(p => <th key={p.key} style={th()} title={`Advance-tax instalment by ${p.pay_by}`}>{p.label.toUpperCase()}</th>)}
+            <th style={th()}>TOTAL</th>
+          </tr>
+        </thead>
+        <tbody>
+          {cats.map(c => (
+            <Fragment key={c.key}>
+              <tr onClick={() => setOpen(open === c.key ? null : c.key)} style={{ cursor: "pointer" }}>
+                <td style={{ ...td("left"), whiteSpace: "normal", maxWidth: "260px" }}>
+                  <span style={{ color: "var(--text-faint)", marginRight: "5px" }}>{open === c.key ? "▾" : "▸"}</span>
+                  <b style={{ color: "var(--text-primary)" }}>{c.label}</b>
+                  <div style={{ fontSize: "10px", color: "var(--text-faint)", marginLeft: "15px" }}>{c.head}</div>
+                </td>
+                <td style={{ ...td("left"), whiteSpace: "normal", maxWidth: "240px", fontSize: "11px", color: "var(--text-secondary)" }}>
+                  <b>{c.section.split(" — ")[0].split(";")[0]}</b><div>{c.rate}</div>
+                </td>
+                {c.periods.map((v, i) => <td key={i} style={{ ...td(), color: col(v) }}>{money(v)}</td>)}
+                <td style={{ ...td(), color: col(c.net), fontWeight: 800 }}>{signed(c.net)}</td>
+              </tr>
+              {open === c.key && (
+                <tr><td colSpan={8} style={{ padding: "8px 14px 12px 34px", background: "var(--surface-2)", borderBottom: "1px solid var(--border-subtle)", fontSize: "12px", color: "var(--text-secondary)", lineHeight: 1.7 }}>
+                  <div><b>Section:</b> {c.section} ({c.act})</div>
+                  <div><b>Where in the return:</b> {c.where}</div>
+                  {c.key.startsWith("stcg") || c.key.startsWith("ltcg") ? (
+                    <div><b>Figures:</b> full value of consideration {inr(c.sale_value)} · cost of acquisition {inr(c.cost)} · expenditure on transfer {inr(c.expenses)}
+                      {c.stt ? ` · STT ${inr(c.stt)} (not deductible)` : ""} · gain {signed(c.net)} (gains {signed(c.gains)}, losses {signed(c.losses)}) · {c.count} sale(s)</div>
+                  ) : (
+                    <div><b>Figures:</b> turnover {inr(c.turnover)}{c.gross != null ? ` · gross profit ${signed(c.gross)}` : ""} · expenses {inr(c.expenses)}
+                      {c.stt ? ` (STT ${inr(c.stt)}, deductible)` : ""} · net {signed(c.net)} · {c.count} closed trade(s)</div>
+                  )}
+                  {c.rate_split && <div><b>Rate split (FY 2024-25):</b> sold before 23 Jul 2024 {signed(c.rate_split.before)} · on or after {signed(c.rate_split.after)} — the return asks for them separately.</div>}
+                </td></tr>
+              )}
+            </Fragment>
+          ))}
+          {cats.length === 0 && <tr><td colSpan={8} style={{ ...td("left"), color: "var(--text-faint)", fontStyle: "italic" }}>No gains or trading income this year.</td></tr>}
+          {cats.length > 0 && (
+            <>
+              <tr>
+                <td style={{ ...td("left"), fontWeight: 700 }} colSpan={2} title="Tax at the special rates (111A/112A/112 or 196/198/197) on gains accrued in each window, after the exemption and loss set-off; due in the instalment by the date shown">
+                  Special-rate tax accrued (estimate) → pay by
+                </td>
+                {itr.advance_tax.map((a, i) => (
+                  <td key={i} style={{ ...td(), fontWeight: 700, color: a.special_rate_tax ? "var(--warning)" : "var(--text-faint)" }}>
+                    {a.special_rate_tax ? inr(a.special_rate_tax) : "—"}<div style={{ fontSize: "10px", fontWeight: 400, color: "var(--text-faint)" }}>by {a.pay_by}</div>
+                  </td>
+                ))}
+                <td style={{ ...td(), fontWeight: 800, color: "var(--warning)" }}>{inr(itr.advance_tax.length ? itr.advance_tax[itr.advance_tax.length - 1].cumulative : 0)}</td>
+              </tr>
+              <tr>
+                <td style={{ ...td("left"), color: "var(--text-secondary)" }} colSpan={2}>Slab-rate income in the window (add at your rate)</td>
+                {itr.advance_tax.map((a, i) => <td key={i} style={{ ...td(), color: col(a.slab_income) }}>{money(a.slab_income)}</td>)}
+                <td style={td()} />
+              </tr>
+            </>
+          )}
+        </tbody>
+      </table>
+
+      {itr.schedule_112a.length > 0 && (
+        <div style={{ padding: "10px 0 0" }}>
+          <div style={{ padding: "0 14px 4px", fontSize: "12px", fontWeight: 700, color: "var(--text-primary)" }}>
+            Schedule 112A — long-term equity sales, scrip by scrip
+          </div>
+          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "1060px" }}>
+            <thead><tr>{["ACQUIRED", "ISIN", "NAME", "UNITS", "SALE PRICE / UNIT", "FULL VALUE OF CONSIDERATION", "COST OF ACQUISITION", "FMV 31 JAN 2018", "EXPENDITURE ON TRANSFER", "BALANCE"].map((h, i) => <th key={h} style={th(i < 3 ? "left" : "right")}>{h}</th>)}</tr></thead>
+            <tbody>
+              {itr.schedule_112a.map((x, i) => (
+                <tr key={i}>
+                  <td style={td("left")}>{x.acquired}</td>
+                  <td style={td("left")}>{x.isin || "—"}</td>
+                  <td style={{ ...td("left"), fontWeight: 600 }}><TypeChip t={x.kind} /> {x.name}</td>
+                  <td style={td()}>{qtyTxt(Math.round(x.units * 1000) / 1000)}</td>
+                  <td style={td()}>{x.units ? inr(x.sale_value / x.units, 2) : "—"}</td>
+                  <td style={td()}>{inr(x.sale_value, 2)}</td>
+                  <td style={td()}>{inr(x.cost, 2)}</td>
+                  <td style={{ ...td(), color: x.acquired.startsWith("on or before") ? "var(--warning)" : "var(--text-faint)" }}>{x.acquired.startsWith("on or before") ? "fill in" : "n/a"}</td>
+                  <td style={td()}>{inr(x.expenses, 2)}</td>
+                  <td style={{ ...td(), color: col(x.gain), fontWeight: 700 }}>{signed(x.gain, 2)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div style={{ padding: "10px 14px 12px" }}>
+        <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--text-muted)", marginBottom: "4px", letterSpacing: "0.3px" }}>WHAT TO FILL, AND WHERE</div>
+        {itr.checklist.map((c, i) => <div key={i} style={{ fontSize: "12px", color: "var(--text-secondary)", lineHeight: 1.6 }}>• {c}</div>)}
       </div>
     </div>
   );

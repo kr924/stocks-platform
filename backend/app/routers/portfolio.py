@@ -94,6 +94,18 @@ def realised_csv(fy: str, broker: Optional[str] = None, name: Optional[str] = No
                     headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
+@router.get("/itr.csv")
+def itr_csv(fy: str, broker: Optional[str] = None, name: Optional[str] = None, db: Session = Depends(get_db)):
+    """The FY's gains by kind and accrual window, Schedule 112A rows and the filing checklist, as CSV."""
+    import re
+    from app.services import itr as ITR
+    s = P.tax_summary(db, fy, _broker(broker), _name(name))
+    body = ITR.to_csv(s.get("itr") or ITR.build(s, fy))
+    who = re.sub(r"[^A-Za-z0-9]+", "_", _name(name) or "everyone")
+    return Response(content=body, media_type="text/csv",
+                    headers={"Content-Disposition": f'attachment; filename="itr_FY{fy}_{who}.csv"'})
+
+
 class ImportBody(BaseModel):
     broker: str
     filename: Optional[str] = None

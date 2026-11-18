@@ -636,6 +636,26 @@ transactions moved to Trades beside shares and F&O.
   raised, cut) are measured against the latest earlier month that has a file.
   Portfolios stored before the history existed seed it (`_seed_history`).
 
+## Filing view and days held (18 Nov 2026)
+
+- **Days held** on every All holdings row: days since the oldest purchase
+  still held, and the quantity-weighted average age of the units (`+` when
+  some units predate the history on file); F&O since the position opened.
+- **Income-tax filing view** (`services/itr.py`, `tax_summary(...)["itr"]`,
+  `GET /api/portfolio/itr.csv`), on Capital gains & tax: each kind — STCG
+  equity (111A / 196), LTCG equity (112A / 198), short-term other funds at
+  slab (50AA), long-term other funds (112 / 197), intraday (speculative),
+  F&O (non-speculative) — by Schedule CG's accrual windows (1 Apr–15 Jun,
+  16 Jun–15 Sep, 16 Sep–15 Dec, 16 Dec–15 Mar, 16 Mar–31 Mar), with the
+  figures each schedule asks for, the FY 2024-25 rate split at 23 Jul 2024,
+  Schedule 112A rows per scrip (FMV on 31 Jan 2018 left to fill in), the
+  special-rate tax accrued per window with its instalment date, the suggested
+  ITR form and a checklist. Sections follow the 1961 Act to FY 2025-26 and
+  the 2025 Act from FY 2026-27 where the new numbers are confirmed (196, 197,
+  198; set-off 108/109, carry-forward 111/112/113, audit 63). It regroups the
+  tax summary's own rows, so the two never disagree. F&O windows come from
+  `fno.fy_summary`'s `periods` (P&L by close date, charges by trade date).
+
 ## Like-for-like: a quarter against the same quarter last year
 
 `services/result_compare.py`. Every results prompt, the panel's table and the

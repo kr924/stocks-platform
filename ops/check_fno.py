@@ -62,5 +62,18 @@ check("STT options from Apr 2026", F._stt(True, date(2026, 4, 1)), 0.0015)
 check("STT futures Oct 2024 – Mar 2026", F._stt(False, date(2025, 6, 1)), 0.0002)
 check("F&O segment from Zerodha", F.is_fno_segment("FO", "NFO"), True)
 check("equity is not F&O", F.is_fno_segment("EQ", "NSE"), False)
+from app.services import itr as I  # noqa: E402
+check("ITR window: 15 Jun", I.period_of(date(2026, 6, 15)), 0)
+check("ITR window: 16 Jun", I.period_of(date(2026, 6, 16)), 1)
+check("ITR window: 15 Dec", I.period_of(date(2026, 12, 15)), 2)
+check("ITR window: 2 Jan", I.period_of(date(2027, 1, 2)), 3)
+check("ITR window: 15 Mar", I.period_of(date(2027, 3, 15)), 3)
+check("ITR window: 16 Mar", I.period_of(date(2027, 3, 16)), 4)
+check("new Act sections from FY 2026-27", [c["section"] for c in I.categories("2026-27")[:2]], ["Section 196", "Section 198"])
+check("old Act sections for FY 2025-26", [c["section"] for c in I.categories("2025-26")[:2]], ["Section 111A", "Section 112A"])
+x = I.build({"rows": [{"term": "LTCG", "sell_date": "2026-07-01", "tax_gain": 200000.0, "sale_value": 500000.0,
+                       "cost": 300000.0, "isin": "INE1", "symbol": "A", "qty": 10}],
+             "ltcg": {"exemption": 125000.0}}, "2026-27")
+check("112A tax after the exemption, in its window", [a["special_rate_tax"] for a in x["advance_tax"]], [0.0, 9375.0, 0.0, 0.0, 0.0])
 print(f"\n{fails} failure(s)")
 sys.exit(1 if fails else 0)
