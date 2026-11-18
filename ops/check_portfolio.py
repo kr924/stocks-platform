@@ -53,7 +53,8 @@ def main():
 
     r = P.parse_csv(CSV, "zerodha", "QY8357")
     check(all(x["account_id"] == "QY8357" for x in r["rows"]), "every imported row carries the client ID")
-    check(len(r["rows"]) == 5 and r["skipped"] == 1, "CSV: 5 equity rows read, the F&O row skipped")
+    check(len(r["rows"]) == 5 and r["skipped"] == 0 and len(r.get("fno_rows") or []) == 1,
+          "CSV: 5 equity rows read, the F&O row kept apart for services/fno.py")
     check([x["uid"] for x in r["rows"]] == [x["uid"] for x in P.parse_csv(CSV, "zerodha")["rows"]],
           "CSV: the same file gives the same uids (re-import adds nothing)")
     trades = [NS(**x) for x in r["rows"]]

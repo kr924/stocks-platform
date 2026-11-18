@@ -180,6 +180,9 @@ _HEADER_ALIASES = {
     "exchange": ("exchange", "exch"),
     "segment": ("segment",),
     "series": ("series",),
+    "expiry": ("expiry_date", "expiry", "expiry_dt"),
+    "strike": ("strike", "strike_price"),
+    "option_type": ("option_type", "instrument_type", "opt_type"),
 }
 EQUITY_SEGMENTS = {"", "EQ", "EQUITY", "CASH", "NSE_EQ", "BSE_EQ", "CM"}
 
@@ -234,9 +237,10 @@ def parse_csv(text: str, broker: str, account_id: Optional[str] = None) -> dict:
             break
     if head_i is None:
         raise ValueError("No header row with symbol, trade date, buy/sell, quantity and price was found. "
-                         "Zerodha: Console → Reports → Tradebook → Equity → download CSV.")
-    rows, skipped, errors = [], 0, []
+                         "Zerodha: Console → Reports → Tradebook → Equity (or Futures & Options) → download CSV.")
+    rows, fno_rows, skipped, errors = [], [], 0, []
     src = f"{broker}_csv"
+    from app.services import fno as FNO
     for n, line in enumerate(lines[head_i + 1:], start=head_i + 2):
         if not any((c or "").strip() for c in line):
             continue
@@ -246,8 +250,9 @@ def parse_csv(text: str, broker: str, account_id: Optional[str] = None) -> dict:
             return line[j].strip() if j is not None and j < len(line) else ""
 
         seg = g("segment").upper()
-        if seg not in EQUITY_SEGMENTS:
-            skipped += 1
+        is_fno = FNO.is_fno_segment(seg, g("exchange"))
+        if seg not in EQUITY_SEGMENTS and not is_fno:
+            skipped += 1      # commodity, currency
             continue
         series = g("series").upper()
         side_raw = g("side").upper()
@@ -264,6 +269,14 @@ def parse_csv(text: str, broker: str, account_id: Optional[str] = None) -> dict:
             tm = t2[1]
         exchange = g("exchange").upper() or None
         trade_id = g("trade_id") or None
+        if is_fno:
+            exp = parse_date(g("expiry")) if g("expiry") else None
+            fno_rows.append(FNO.row_from(
+                broker, account_id, symbol, exchange, day, tm, side, qty, price, trade_id, g("order_id") or None,
+                src, f"{account_id or ''}:{day}:{symbol}:{side}:{qty}:{price}:{n}",
+                expiry=exp[0] if exp else None, strike=_num(g("strike")) if g("strike") else None,
+                kind=(g("option_type").upper() if g("option_type").upper() in ("CE", "PE", "FUT") else None)))
+            continue
         rows.append({
             "uid": _uid(broker, exchange, trade_id, side,
                         f"{account_id or ''}:{day}:{symbol}:{side}:{qty}:{price}:{n}"),
@@ -274,7 +287,7 @@ def parse_csv(text: str, broker: str, account_id: Optional[str] = None) -> dict:
             "trade_id": trade_id, "order_id": g("order_id") or None,
             "source": src, "note": f"series {series}" if series and series != "EQ" else None,
         })
-    return {"rows": rows, "skipped": skipped, "errors": errors[:20],
+    return {"rows": rows, "fno_rows": fno_rows, "skipped": skipped, "errors": errors[:20],
             "columns": sorted(cols)}
 
 
@@ -309,24 +322,42 @@ def fetch_upstox(feed, years: int = 3, account_id: Optional[str] = None) -> dict
     Equity trades from Upstox: every financial year the API keeps (three),
     then today's trades, which the history endpoint has not caught up with.
     """
-    rows, errors = [], []
+    from app.services import fno as FNO
+    rows, fno_rows, errors = [], [], []
     today = _today()
     this_fy = int(fy_of(today)[:4])
-    for y in range(this_fy - years + 1, this_fy + 1):
+    for y, seg in [(y, seg) for y in range(this_fy - years + 1, this_fy + 1) for seg in ("EQ", "FO")]:
         start, end = date(y, 4, 1), min(date(y + 1, 3, 31), today)
         page = 1
         while True:
             try:
                 data = _upstox_get(feed, "/v2/charges/historical-trades", {
-                    "segment": "EQ", "start_date": start.isoformat(), "end_date": end.isoformat(),
+                    "segment": seg, "start_date": start.isoformat(), "end_date": end.isoformat(),
                     "page_number": page, "page_size": 500})
             except Exception as e:
-                errors.append(f"FY {y}-{str(y + 1)[-2:]}: {e}")
+                errors.append(f"FY {y}-{str(y + 1)[-2:]} {seg}: {e}")
                 break
             items = data.get("data") or []
             for t in items:
                 side = (t.get("transaction_type") or "").upper()
-                if side not in ("BUY", "SELL") or (t.get("segment") or "EQ").upper() != "EQ":
+                tseg = (t.get("segment") or seg).upper()
+                if side not in ("BUY", "SELL"):
+                    continue
+                if tseg == "FO":
+                    qty, price = _num(t.get("quantity")), _num(t.get("price"))
+                    day = (t.get("trade_date") or "")[:10]
+                    if not (qty and price is not None and day):
+                        continue
+                    exp = parse_date(str(t.get("expiry") or "")) if t.get("expiry") else None
+                    sym = (t.get("symbol") or t.get("scrip_name") or "").upper()
+                    fno_rows.append(FNO.row_from(
+                        "upstox", account_id, sym, t.get("exchange"), day, None, side, qty, price,
+                        t.get("trade_id"), None, "upstox_api", f"{day}:{sym}:{side}:{qty}:{price}",
+                        expiry=exp[0] if exp else None, strike=_num(t.get("strike_price")) or None,
+                        kind=((t.get("option_type") or "").upper() or None),
+                        instrument_key=t.get("instrument_token") or None))
+                    continue
+                if tseg != "EQ":
                     continue
                 qty, price = _num(t.get("quantity")), _num(t.get("price"))
                 day = (t.get("trade_date") or "")[:10]
@@ -355,6 +386,19 @@ def fetch_upstox(feed, years: int = 3, account_id: Optional[str] = None) -> dict
         data = _upstox_get(feed, "/v2/order/trades/get-trades-for-day", {})
         for t in data.get("data") or []:
             key = t.get("instrument_token") or ""
+            if "_FO|" in key:
+                side = (t.get("transaction_type") or "").upper()
+                qty, price = _num(t.get("quantity")), _num(t.get("average_price"))
+                if side not in ("BUY", "SELL") or not qty or price is None:
+                    continue
+                parsed = parse_date(t.get("exchange_timestamp") or t.get("order_timestamp") or "")
+                day, tm = parsed if parsed else (today.isoformat(), None)
+                sym = (t.get("trading_symbol") or t.get("tradingsymbol") or "").upper()
+                fno_rows.append(FNO.row_from(
+                    "upstox", account_id, sym, t.get("exchange"), day, tm, side, qty, price, t.get("trade_id"),
+                    t.get("order_id"), "upstox_api", f"{day}:{sym}:{side}:{qty}:{price}:{t.get('order_id')}",
+                    instrument_key=key))
+                continue
             if "_EQ|" not in key:
                 continue
             side = (t.get("transaction_type") or "").upper()
@@ -376,7 +420,7 @@ def fetch_upstox(feed, years: int = 3, account_id: Optional[str] = None) -> dict
             })
     except Exception as e:
         errors.append(f"today's trades: {e}")
-    return {"rows": rows, "errors": errors}
+    return {"rows": rows, "fno_rows": fno_rows, "errors": errors}
 
 
 def sync_upstox(db, years: int = 3) -> dict:
@@ -388,7 +432,10 @@ def sync_upstox(db, years: int = 3) -> dict:
     acct = upstox_account(db, feed)
     got = fetch_upstox(feed, years=years, account_id=acct)
     res = store(db, got["rows"])
+    from app.services import fno as FNO
+    fr = FNO.store(db, got.get("fno_rows") or [])
     res.update({"fetched": len(got["rows"]), "errors": got["errors"],
+                "fno_added": fr["added"], "fno_fetched": len(got.get("fno_rows") or []),
                 "at": datetime.utcnow().isoformat() + "Z"})
     try:
         row = db.query(SystemSetting).filter(SystemSetting.key == "portfolio_upstox_sync").first()
@@ -943,11 +990,35 @@ def tax_summary(db, fy: str, broker: Optional[str] = None, name: Optional[str] =
     rows = [x for x in c["realised"] if fy_of(_d(x["sell_date"])) == fy]
     # Equity mutual funds are taxed with shares (same rates, one ₹1.25 lakh
     # exemption); other funds are listed apart (services/mutual_funds.py).
+    # An ETF sold on the exchange is a fund too: a gold, debt or overseas ETF
+    # is not equity-taxed, so it moves to the other list.
     mf_other: List[dict] = []
+    from app.services import mutual_funds as MF
+    try:
+        info = MF._scheme_info(db)
+    except Exception:
+        info = {}
+    kept = []
+    for x in rows:
+        isin = (x.get("isin") or c["names"].get(x["key"], {}).get("isin") or x["key"] or "").upper()
+        if MF.is_fund_isin(isin):
+            x = {**x, "asset": "etf", "isin": isin,
+                 "symbol": x.get("symbol") or c["names"].get(x["key"], {}).get("symbol")}
+            cls = (info.get(isin) or {}).get("tax_class") or "equity"
+            if cls != "equity" and x["term"] != "INTRADAY":
+                x["tax_class"] = cls
+                x["term"] = MF._term(cls, _d(x["buy_date"]) if x.get("buy_date") else None, _d(x["sell_date"]), listed=True)
+                x["gain"] = x["tax_gain"]
+                mf_other.append(x)
+                continue
+        else:
+            x = {**x, "asset": "stock"}
+        kept.append(x)
+    rows = kept
     if broker in (None, "mf"):
         try:
-            from app.services import mutual_funds as MF
             for x in MF.realised_rows(db, fy, name):
+                x = {**x, "asset": "mf"}
                 (rows if x["tax_class"] == "equity" else mf_other).append(x)
         except Exception as e:
             logger.warning(f"[PORTFOLIO] mutual-fund gains unavailable: {e}")
@@ -995,9 +1066,20 @@ def tax_summary(db, fy: str, broker: Optional[str] = None, name: Optional[str] =
                           "charges": 0.0, "name": name_of(amap, x.get("account") or "")} for x in mf_other),
                         key=lambda x: (x["sell_date"], x["symbol"] or ""))
     lt_other = sum(x["gain"] for x in mf_other if x["term"] == "LTCG_OTHER")
+    fno = None
+    try:
+        from app.services import fno as FNO
+        r = FNO.report(db, fy, name, broker if broker in BROKERS else None, with_prices=False)
+        if r["trade_count"]:
+            fno = {k: r[k] for k in ("gross", "net", "charges", "turnover", "closed", "futures", "options",
+                                     "by_underlying", "warnings")}
+    except Exception as e:
+        logger.warning(f"[PORTFOLIO] F&O summary unavailable: {e}")
     return {
         "fy": fy,
         "name": name,
+        "fno": fno,
+        "flows": _safe(lambda: _fy_flows(db, fy, broker, name)),
         "mf_other": {"rows": other_rows,
                      "slab_gain": sum(x["gain"] for x in mf_other if x["term"] == "SLAB"),
                      "ltcg_gain": lt_other,
@@ -1028,10 +1110,54 @@ def tax_summary(db, fy: str, broker: Optional[str] = None, name: Optional[str] =
             "Intraday (same-day buy and sell) is speculative business income, taxed at your slab — not included.",
             "Equity mutual funds (broker MF) are included with shares: same rates, one exemption. Debt funds bought "
             "from 1 Apr 2023 are taxed at your slab whatever the holding period; other funds (international, FoF, "
-            "gold, multi-asset) at 12.5% after 24 months, else at slab — both listed separately, not in the estimate.",
+            "gold, multi-asset) at 12.5% after 24 months — 12 months for an ETF's listed units — else at slab; "
+            "both listed separately, not in the estimate. Equity ETFs are taxed like shares.",
             "Check with your CA before filing.",
         ],
     }
+
+
+def _safe(fn):
+    try:
+        return fn()
+    except Exception as e:
+        logger.warning(f"[PORTFOLIO] {e}")
+        return None
+
+
+def _fy_flows(db, fy: str, broker: Optional[str], name: Optional[str]) -> dict:
+    """Money put in and taken out during the FY, by kind: shares, ETFs, funds; and F&O trades."""
+    from app.database import PortfolioTrade, MfTransaction, FnoTrade
+    lo, hi = fy_bounds(fy)
+    lo_s, hi_s = lo.isoformat(), hi.isoformat()
+    amap = accounts_map(db)
+    acct_of = acct_resolver(db)
+    out = {k: {"bought": 0.0, "sold": 0.0, "count": 0} for k in ("stock", "etf", "mf", "fno")}
+    q = db.query(PortfolioTrade).filter(PortfolioTrade.trade_date >= lo_s, PortfolioTrade.trade_date <= hi_s)
+    if broker in BROKERS:
+        q = q.filter(PortfolioTrade.broker == broker)
+    for t in q.all():
+        if name and name_of(amap, acct_of(t)) != name:
+            continue
+        k = "etf" if (t.isin or "").upper().startswith("INF") else "stock"
+        out[k]["bought" if t.side == "BUY" else "sold"] += t.quantity * t.price
+        out[k]["count"] += 1
+    if broker in (None, "mf"):
+        for t in db.query(MfTransaction).filter(MfTransaction.txn_date >= lo_s, MfTransaction.txn_date <= hi_s,
+                                                MfTransaction.kind.in_(("buy", "sell"))).all():
+            if name and name_of(amap, t.account_id) != name:
+                continue
+            out["mf"]["bought" if t.kind == "buy" else "sold"] += abs(t.amount or 0.0)
+            out["mf"]["count"] += 1
+    q = db.query(FnoTrade).filter(FnoTrade.trade_date >= lo_s, FnoTrade.trade_date <= hi_s)
+    if broker in BROKERS:
+        q = q.filter(FnoTrade.broker == broker)
+    for t in q.all():
+        if name and name_of(amap, t.account_id or "") != name:
+            continue
+        out["fno"]["bought" if t.side == "BUY" else "sold"] += t.quantity * t.price
+        out["fno"]["count"] += 1
+    return out
 
 
 def realised_csv(db, fy: str, broker: Optional[str] = None, name: Optional[str] = None) -> str:
@@ -1061,6 +1187,11 @@ def financial_years(db) -> List[str]:
         mf = set(MF.financial_years(db))
     except Exception:
         mf = set()
+    try:
+        from app.database import FnoTrade
+        mf |= {fy_of(_d(d)) for (d,) in db.query(FnoTrade.trade_date).distinct().all() if d}
+    except Exception:
+        pass
     fys = sorted({fy_of(_d(d)) for d in days} | mf | {fy_of(_today())}, reverse=True)
     return fys
 

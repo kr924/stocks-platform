@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db, PortfolioTrade, PortfolioAccount, SystemSetting, MfTransaction, MfPortfolio
 from app.services import portfolio as P
 from app.services import mutual_funds as MF
+from app.services import fno as FNO
 
 logger = logging.getLogger("app.portfolio_router")
 router = APIRouter(prefix="/api/portfolio", tags=["portfolio"])
@@ -37,8 +38,10 @@ def _accounts(db) -> list:
     """Every known client ID with its tracking name and trade count, plus untagged trades per broker."""
     counts = {a: n for a, n in db.query(PortfolioTrade.account_id, func.count(PortfolioTrade.id))
               .group_by(PortfolioTrade.account_id).all()}
-    for a, n in db.query(MfTransaction.account_id, func.count(MfTransaction.id)).group_by(MfTransaction.account_id).all():
-        counts[a] = counts.get(a, 0) + n
+    from app.database import FnoTrade
+    for model in (MfTransaction, FnoTrade):
+        for a, n in db.query(model.account_id, func.count(model.id)).group_by(model.account_id).all():
+            counts[a] = counts.get(a, 0) + n
     return [{"client_id": a.client_id, "broker": a.broker, "name": a.name, "trades": counts.get(a.client_id, 0)}
             for a in db.query(PortfolioAccount).order_by(PortfolioAccount.name, PortfolioAccount.client_id).all()]
 
@@ -123,6 +126,7 @@ def import_csv(body: ImportBody, db: Session = Depends(get_db)):
     except ValueError as e:
         raise HTTPException(400, str(e))
     res = P.store(db, parsed["rows"])
+    fr = FNO.store(db, parsed.get("fno_rows") or [])
     synced = {}
     if res["added"]:
         try:
@@ -132,6 +136,7 @@ def import_csv(body: ImportBody, db: Session = Depends(get_db)):
     logger.info(f"[PORTFOLIO] import {body.broker} {body.filename}: {res['added']} added, "
                 f"{res['duplicates']} already on file, {parsed['skipped']} non-equity skipped")
     return {**res, "read": len(parsed["rows"]), "skipped_non_equity": parsed["skipped"],
+            "fno_added": fr["added"], "fno_duplicates": fr["duplicates"], "fno_read": len(parsed.get("fno_rows") or []),
             "errors": parsed["errors"], "watchlist": synced, "account_id": acct}
 
 
@@ -168,8 +173,10 @@ def save_account(body: AccountBody, db: Session = Depends(get_db)):
 @router.delete("/accounts/{client_id}")
 def delete_account(client_id: str, db: Session = Depends(get_db)):
     cid = client_id.strip().upper()
+    from app.database import FnoTrade
     n = (db.query(PortfolioTrade.id).filter(PortfolioTrade.account_id == cid).count()
-         + db.query(MfTransaction.id).filter(MfTransaction.account_id == cid).count())
+         + db.query(MfTransaction.id).filter(MfTransaction.account_id == cid).count()
+         + db.query(FnoTrade.id).filter(FnoTrade.account_id == cid).count())
     if n:
         raise HTTPException(400, f"{cid} has {n} trades on file — rename it instead, or delete its trades first")
     db.query(PortfolioAccount).filter(PortfolioAccount.client_id == cid).delete()
@@ -492,12 +499,48 @@ def mf_portfolio_delete(isin: str, db: Session = Depends(get_db)):
 
 
 @router.get("/overview")
-def overview(name: Optional[str] = None, db: Session = Depends(get_db)):
+def overview(name: Optional[str] = None, broker: Optional[str] = None, db: Session = Depends(get_db)):
     """Shares, ETFs and mutual funds in one list, with totals by type and by name."""
-    return MF.overview(db, _name(name))
+    return MF.overview(db, _name(name), _broker(broker))
 
 
 @router.get("/exposure")
 def exposure(name: Optional[str] = None, db: Session = Depends(get_db)):
     """Shares held directly plus each fund's slice of every stock, by stock and by industry."""
     return MF.exposure(db, _name(name))
+
+
+# ─── Futures & options (services/fno.py) ────────────────────────────────────
+
+@router.get("/fno")
+def fno_report(fy: Optional[str] = None, name: Optional[str] = None, broker: Optional[str] = None,
+               db: Session = Depends(get_db)):
+    """Open positions, the FY's closed trades, gross and net P&L, estimated charges and turnover."""
+    return FNO.report(db, fy, _name(name), _broker(broker))
+
+
+@router.get("/fno/trades")
+def fno_trades(name: Optional[str] = None, broker: Optional[str] = None, symbol: Optional[str] = None,
+               limit: int = 2000, db: Session = Depends(get_db)):
+    return FNO.trades_list(db, _name(name), _broker(broker), (symbol or "").strip() or None, min(max(limit, 1), 5000))
+
+
+class SettleBody(BaseModel):
+    symbol: str
+    price: Optional[float] = None        # null removes the entered price
+
+
+@router.post("/fno/settle")
+def fno_settle(body: SettleBody, db: Session = Depends(get_db)):
+    """The settlement price of a contract still open at expiry."""
+    if body.price is not None and body.price < 0:
+        raise HTTPException(400, "price cannot be negative")
+    return {"settlements": FNO.set_settlement(db, body.symbol, body.price)}
+
+
+@router.delete("/fno/trades/{trade_id}")
+def fno_delete(trade_id: int, db: Session = Depends(get_db)):
+    from app.database import FnoTrade
+    n = db.query(FnoTrade).filter(FnoTrade.id == trade_id).delete()
+    db.commit()
+    return {"deleted": n}

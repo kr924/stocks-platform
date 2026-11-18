@@ -588,8 +588,8 @@ def set_tax_class(db, isin: str, cls: Optional[str]) -> Dict[str, str]:
     return ov
 
 
-def _term(cls: str, buy: Optional[date], sell: date) -> str:
-    """LTCG / STCG (equity rates) or SLAB / LTCG_OTHER for the rest."""
+def _term(cls: str, buy: Optional[date], sell: date, listed: bool = False) -> str:
+    """LTCG / STCG (equity rates) or SLAB / LTCG_OTHER for the rest. `listed`: an ETF's units (12 months from 23 Jul 2024)."""
     from app.services.portfolio import is_long_term
     if buy is None:
         return "UNKNOWN"
@@ -599,7 +599,7 @@ def _term(cls: str, buy: Optional[date], sell: date) -> str:
         return "SLAB"
     if cls == "other" and buy >= DEBT_SLAB_FROM and sell < SPECIFIED_RULE_END:
         return "SLAB"
-    months = 24 if sell >= RATE_CHANGE else 36
+    months = (12 if listed else 24) if sell >= RATE_CHANGE else 36
     try:
         threshold = buy.replace(year=buy.year + months // 12)
     except ValueError:
@@ -1608,12 +1608,19 @@ def exposure(db, name: Optional[str] = None) -> dict:
 
 # ─── One list: shares, ETFs and funds ───────────────────────────────────────
 
-def overview(db, name: Optional[str] = None) -> dict:
-    """Every holding in one table, shares and ETFs merged across brokers, funds from the statements."""
+def overview(db, name: Optional[str] = None, broker: Optional[str] = None) -> dict:
+    """
+    Every holding in one table, shares and ETFs merged across brokers, funds
+    from the statements. Each row carries its detail (per-broker parts, lots
+    and their age, long-term dates; for funds folios, tax class, XIRR and the
+    portfolio file) for the row to open in place. `broker` keeps one broker's
+    shares and ETFs and leaves funds out.
+    """
     from app.database import StockIndustry
     from app.services import portfolio as P
-    direct = P.holdings(db, name=name)
-    funds = holdings(db, name=name, refresh=True)
+    direct = P.holdings(db, broker=broker, name=name)
+    funds = holdings(db, name=name, refresh=True) if broker not in P.BROKERS else {
+        "rows": [], "totals": {}, "warnings": [], "nav": nav_status()}
     info = _scheme_info(db)
     inds = {r.isin: r.industry for r in db.query(StockIndustry).all()}
     merged: Dict[tuple, dict] = {}
@@ -1630,8 +1637,19 @@ def overview(db, name: Optional[str] = None) -> dict:
                              "day_pnl": None, "price": r["ltp"], "price_date": None,
                              "day_change_pct": r["day_change_pct"], "xirr": None,
                              "industry": ind, "sector": None if etf else sector_of(ind) if ind else None,
-                             "category": (info.get(isin) or {}).get("category") if etf else None}
+                             "category": (info.get(isin) or {}).get("category") if etf else None,
+                             "parts": [], "lots": [], "long_term_qty": 0.0, "next_long_term": None,
+                             "portfolio": (info.get(isin) or {}).get("portfolio") if etf else None,
+                             "tax_class": (info.get(isin) or {}).get("tax_class") if etf else None}
         m["at"].add(r["broker"])
+        m["parts"].append({"broker": r["broker"], "account": r.get("account"), "name": r["name"], "qty": r["qty"],
+                           "avg": r["avg_cost"], "invested": r["invested"], "value": r["value"],
+                           "long_term_qty": r["long_term_qty"], "next_long_term": r["next_long_term"],
+                           "undated_qty": r.get("undated_qty"), "source": r.get("source")})
+        m["lots"].extend({**l, "broker": r["broker"]} for l in (r.get("lots") or []))
+        m["long_term_qty"] += r["long_term_qty"] or 0
+        if r["next_long_term"] and (not m["next_long_term"] or r["next_long_term"] < m["next_long_term"]):
+            m["next_long_term"] = r["next_long_term"]
         m["qty"] += r["qty"]
         m["invested"] += r["invested"]
         if r["value"] is not None:
@@ -1646,7 +1664,11 @@ def overview(db, name: Optional[str] = None) -> dict:
                      "name": h["name"], "at": {"mf"}, "qty": h["units"], "invested": h["invested"],
                      "value": h["value"], "day_pnl": h["day_pnl"], "price": h["nav"], "price_date": h["nav_date"],
                      "day_change_pct": h["day_change_pct"], "xirr": h["xirr"], "industry": None, "sector": None,
-                     "category": h["category"], "amc": h["amc"]})
+                     "category": h["category"], "amc": h["amc"], "lots": h["lots"],
+                     "long_term_qty": h["long_term_units"], "next_long_term": h["next_long_term"],
+                     "undated_qty": h["undated_units"], "folios": h["folios"], "accounts": h["accounts"],
+                     "tax_class": h["tax_class"], "tax_why": h["tax_why"], "overridden": h["overridden"],
+                     "nav_source": h["nav_source"], "portfolio": h["portfolio"]})
     total_value = sum((r["value"] if r["value"] is not None else r["invested"]) for r in rows)
     for r in rows:
         r["at"] = sorted(r["at"])
@@ -1678,4 +1700,6 @@ def overview(db, name: Optional[str] = None) -> dict:
             "realised_fy": direct["totals"].get("realised_fy"),
             "realised_fy_shares": direct["totals"].get("realised_fy_capital"),
             "realised_fy_funds": funds["totals"].get("realised_fy_gain"),
-            "nav": funds.get("nav"), "warnings": direct.get("warnings", []) + funds.get("warnings", [])}
+            "nav": funds.get("nav"), "warnings": direct.get("warnings", []) + funds.get("warnings", []),
+            "statements": funds.get("statements") or [],
+            "portfolios": {k: v["portfolio"] for k, v in info.items() if v.get("etf") and v.get("portfolio")}}

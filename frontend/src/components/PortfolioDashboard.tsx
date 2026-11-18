@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 
 const API_BASE = import.meta.env.VITE_API_BASE || (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" ? "http://localhost:8000" : "");
@@ -12,29 +12,11 @@ const API_BASE = import.meta.env.VITE_API_BASE || (window.location.hostname === 
 
 type BrokerFilter = "" | "upstox" | "zerodha";
 
-interface Holding {
-  key: string; symbol: string | null; isin: string | null; broker: string; account?: string; name?: string;
-  qty: number; avg_cost: number; invested: number; first_buy: string | null; last_buy: string | null;
-  lots?: { date: string | null; qty: number; days: number | null; long_term: boolean | null }[];
-  undated_qty?: number; source?: string;
-  long_term_qty: number; next_long_term: string | null;
-  ltp: number | null; value: number | null; pnl: number | null; pnl_pct: number | null; day_change_pct: number | null;
-}
-interface HoldingsResp {
-  rows: Holding[];
-  totals: Totals;
-  by_name?: (Totals & { name: string })[];
-  warnings: string[];
-}
-interface Totals {
-  invested: number; value: number | null; pnl: number | null; day_pnl?: number | null; priced_invested: number; unpriced: number;
-  realised_fy: string; realised_fy_capital: number; realised_fy_intraday: number;
-}
 interface Account { client_id: string; broker: string; name: string; trades: number }
 interface TaxRow {
   broker: string; symbol: string | null; isin: string | null; buy_date: string; sell_date: string; qty: number;
   buy_price: number; sell_price: number; gain: number; term: string; grandfathered?: boolean; cost: number; sale_value: number;
-  charges?: number; stt?: number; tax_gain?: number;
+  charges?: number; stt?: number; tax_gain?: number; asset?: string; name?: string;
 }
 interface TaxResp {
   fy: string;
@@ -47,6 +29,14 @@ interface TaxResp {
   estimated_tax: number; sale_value: number; rows: TaxRow[]; warnings: string[]; notes: string[];
   charges?: { deductible: number; stt: number; gross_gain: number };
   mf_other?: { rows: TaxRow[]; slab_gain: number; ltcg_gain: number; ltcg_tax: number };
+  flows?: Record<"stock" | "etf" | "mf" | "fno", { bought: number; sold: number; count: number }>;
+  fno?: { gross: number; net: number; turnover: number; closed: number; futures: number; options: number;
+          charges: { total: number; stt: number }; by_underlying: { underlying: string; net: number }[]; warnings: string[] } | null;
+}
+interface FnoTxn {
+  id: number; broker: string; symbol: string; underlying: string | null; instrument: string | null; expiry: string | null;
+  strike: number | null; exchange: string | null; trade_date: string; trade_time: string | null; side: string;
+  quantity: number; price: number; source: string; account: string | null; name: string;
 }
 interface Trade {
   id: number; broker: string; symbol: string; isin: string | null; exchange: string | null; trade_date: string;
@@ -60,24 +50,6 @@ interface Summary {
   accounts?: Account[]; names?: string[]; upstox_account?: string | null; unassigned?: Record<string, number>;
 }
 
-interface MfLot { date: string | null; qty: number; days: number | null; long_term: boolean | null; cost: number }
-interface MfRow {
-  name: string; accounts: string[]; folios: string[]; isin: string; scheme: string; amc: string | null; category: string | null;
-  tax_class: "equity" | "debt" | "other"; tax_why: string | null; overridden: boolean;
-  units: number; invested: number; avg_nav: number | null; nav: number | null; nav_date: string | null; nav_source: string | null;
-  value: number | null; pnl: number | null; pnl_pct: number | null; day_change_pct: number | null; day_pnl: number | null;
-  xirr: number | null; lots: MfLot[]; long_term_units: number; next_long_term: string | null; undated_units: number;
-  portfolio: { as_of: string | null; equity_pct: number | null; filename: string | null; n: number } | null;
-}
-interface MfTotals {
-  invested: number; value: number | null; pnl: number | null; priced_invested: number; day_pnl: number | null;
-  unpriced: number; xirr: number | null; realised_fy: string; realised_fy_gain: number;
-}
-interface MfResp {
-  rows: MfRow[]; totals: MfTotals; by_name: (MfTotals & { name: string })[]; warnings: string[];
-  nav: { last_ok: string | null; error: string | null; running: boolean };
-  statements: { account: string; from: string | null; to: string | null }[];
-}
 interface ExpSource { type: "direct" | "etf" | "mf"; label: string; isin?: string; name: string; amount: number; pct_of_fund: number | null; as_of?: string; qty?: number }
 interface ExpStock {
   key: string; isin: string | null; symbol: string | null; company: string; industry: string; sector?: string; kind?: string;
@@ -97,11 +69,16 @@ interface ExposureResp {
   concentration: { top10_pct: number | null; top10_pct_of_equity: number | null; stocks: number; in_several: number };
   funds: ExpFundStatus[]; names: string[]; notes: string[];
 }
+interface OvLot { date: string | null; qty: number; days: number | null; long_term: boolean | null; cost?: number; broker?: string }
+interface OvPart { broker: string; account: string | null; name: string; qty: number; avg: number; invested: number; value: number | null }
 interface OvRow {
   type: "stock" | "etf" | "mf"; key: string; isin: string | null; symbol: string | null; label: string | null; name: string;
   at: string[]; qty: number; avg: number | null; invested: number; value: number | null; pnl: number | null; pnl_pct: number | null;
   day_pnl: number | null; day_change_pct: number | null; price: number | null; price_date: string | null; xirr: number | null;
   weight: number | null; industry: string | null; sector: string | null; category: string | null; amc?: string | null;
+  lots?: OvLot[]; parts?: OvPart[]; long_term_qty?: number; next_long_term?: string | null; undated_qty?: number | null;
+  folios?: string[]; tax_class?: string | null; tax_why?: string | null; overridden?: boolean; nav_source?: string | null;
+  portfolio?: { as_of: string | null; equity_pct: number | null; n: number } | null;
 }
 interface OvTotals { count: number; invested: number; value: number; pnl: number | null; priced_invested: number;
                      day_pnl: number | null; unpriced: number; pct: number | null }
@@ -129,24 +106,24 @@ async function getJSON<T>(path: string): Promise<T> {
 
 export function PortfolioDashboard() {
   const [broker, setBroker] = useState<BrokerFilter>("");
-  const [tab, setTab] = useState<"overview" | "holdings" | "funds" | "exposure" | "tax" | "trades">("overview");
+  const [tab, setTab] = useState<"overview" | "exposure" | "fno" | "tax" | "trades">("overview");
   const [ov, setOv] = useState<OverviewResp | null>(null);
-  const [mf, setMf] = useState<MfResp | null>(null);
   const [exp, setExp] = useState<ExposureResp | null>(null);
   const [expLoading, setExpLoading] = useState(false);
   const [summary, setSummary] = useState<Summary | null>(null);
-  const [hold, setHold] = useState<HoldingsResp | null>(null);
   const [fy, setFy] = useState<string>("");
   const [tax, setTax] = useState<TaxResp | null>(null);
   const [trades, setTrades] = useState<Trade[]>([]);
+  const [mfTxns, setMfTxns] = useState<MfTxn[]>([]);
+  const [fnoTxns, setFnoTxns] = useState<FnoTxn[]>([]);
+  const [tradeKind, setTradeKind] = useState<"shares" | "mf" | "fno">("shares");
   const [tradeFilter, setTradeFilter] = useState("");
   const [busy, setBusy] = useState<string>("");
   const [msg, setMsg] = useState<{ text: string; tone: "ok" | "err" } | null>(null);
   const [importBroker, setImportBroker] = useState<"zerodha" | "upstox">("zerodha");
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [showAdd, setShowAdd] = useState(false);
-  const [confirmDel, setConfirmDel] = useState<number | null>(null);
-  const [sortKey, setSortKey] = useState<"value" | "pnl" | "pnl_pct" | "symbol" | "day">("value");
+  const [confirmDel, setConfirmDel] = useState<string | null>(null);
   // Tracking name (several client IDs can share one). "" = everyone.
   const [who, setWho] = useState<string>("");
   // Tax is per person, so the tax tab always shows one name.
@@ -166,9 +143,6 @@ export function PortfolioDashboard() {
       setFy(f => f || s.current_fy);
     } catch (e: any) { setMsg({ text: `Could not load the portfolio: ${e.message}`, tone: "err" }); }
   };
-  const loadHoldings = async () => {
-    try { setHold(await getJSON<HoldingsResp>(`/api/portfolio/holdings?${q}`)); } catch { /* shown via summary */ }
-  };
   const loadTax = async () => {
     if (!fy) return;
     try {
@@ -176,39 +150,32 @@ export function PortfolioDashboard() {
     } catch { /* ignore */ }
   };
   const loadTrades = async () => {
+    const sym = tradeFilter.trim() ? `&symbol=${encodeURIComponent(tradeFilter.trim())}` : "";
     try {
-      setTrades(await getJSON<Trade[]>(`/api/portfolio/trades?limit=1000&${q}${tradeFilter.trim() ? `&symbol=${encodeURIComponent(tradeFilter.trim())}` : ""}`));
+      if (tradeKind === "shares") setTrades(await getJSON<Trade[]>(`/api/portfolio/trades?limit=1000&${q}${sym}`));
+      else if (tradeKind === "fno") setFnoTxns(await getJSON<FnoTxn[]>(`/api/portfolio/fno/trades?limit=2000&${q}${sym}`));
+      else setMfTxns(await getJSON<MfTxn[]>(`/api/portfolio/mf/transactions${who ? `?name=${encodeURIComponent(who)}` : ""}`));
     } catch { /* ignore */ }
-  };
-  const loadMf = async () => {
-    try { setMf(await getJSON<MfResp>(`/api/portfolio/mf/holdings${who ? `?name=${encodeURIComponent(who)}` : ""}`)); } catch { /* ignore */ }
   };
   const loadExp = async () => {
     setExpLoading(true);
     try { setExp(await getJSON<ExposureResp>(`/api/portfolio/exposure${who ? `?name=${encodeURIComponent(who)}` : ""}`)); }
-    catch (e: any) { setMsg({ text: `Could not build the exposure view: ${e.message}`, tone: "err" }); }
+    catch (e: any) { setMsg({ text: `Could not build the analytics: ${e.message}`, tone: "err" }); }
     finally { setExpLoading(false); }
   };
   const loadOv = async () => {
-    try { setOv(await getJSON<OverviewResp>(`/api/portfolio/overview${who ? `?name=${encodeURIComponent(who)}` : ""}`)); } catch { /* ignore */ }
+    try { setOv(await getJSON<OverviewResp>(`/api/portfolio/overview?${q}`)); } catch { /* ignore */ }
   };
   const reloadAll = () => {
-    loadSummary(); loadHoldings(); loadTax(); loadMf();
+    loadSummary(); loadTax();
     if (tab === "overview") loadOv();
     if (tab === "trades") loadTrades();
     if (tab === "exposure") loadExp();
   };
 
   useEffect(() => { loadSummary(); }, []);
-  useEffect(() => { loadHoldings(); }, [broker, who]);
-  // Prices move: refresh holdings every 30 s while this view is open.
-  useEffect(() => {
-    const t = setInterval(loadHoldings, 30000);
-    return () => clearInterval(t);
-  }, [broker, who]);
   useEffect(() => { loadTax(); }, [fy, broker, taxName]);
-  useEffect(() => { if (tab === "trades") loadTrades(); }, [tab, broker, who]);
-  useEffect(() => { loadMf(); }, [who]);
+  useEffect(() => { if (tab === "trades") loadTrades(); }, [tab, broker, who, tradeKind]);
   useEffect(() => { if (tab === "exposure") loadExp(); }, [tab, who]);
   // Share and ETF prices move during the session; funds' NAV once a day.
   useEffect(() => {
@@ -216,7 +183,7 @@ export function PortfolioDashboard() {
     loadOv();
     const t = setInterval(loadOv, 30000);
     return () => clearInterval(t);
-  }, [tab, who]);
+  }, [tab, who, broker]);
 
   const syncUpstox = async () => {
     setBusy("sync"); setMsg(null);
@@ -224,7 +191,9 @@ export function PortfolioDashboard() {
       const res = await fetch(`${API_BASE}/api/portfolio/sync/upstox`, { method: "POST" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || res.status);
-      setMsg({ text: `Upstox: ${data.added} new trade(s) of ${data.fetched} read${data.errors?.length ? ` — ${data.errors.join("; ")}` : ""}.`,
+      setMsg({ text: `Upstox: ${data.added} new share/ETF trade(s) of ${data.fetched} read`
+                 + (data.fno_fetched ? `, ${data.fno_added} new F&O trade(s) of ${data.fno_fetched}` : "")
+                 + `${data.errors?.length ? ` — ${data.errors.join("; ")}` : ""}.`,
                tone: data.errors?.length ? "err" : "ok" });
       reloadAll();
     } catch (e: any) {
@@ -233,70 +202,71 @@ export function PortfolioDashboard() {
   };
 
   const onFile = async (e: ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
+    const files = Array.from(e.target.files || []);
     e.target.value = "";
-    if (!f) return;
+    if (!files.length) return;
     setBusy("import"); setMsg(null);
-    try {
-      const content = await f.text();
-      const res = await fetch(`${API_BASE}/api/portfolio/import`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ broker: importBroker, filename: f.name, content, account_id: importAccount || null }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || res.status);
-      setMsg({
-        text: `${f.name} (${data.account_id}): ${data.added} trade(s) added, ${data.duplicates} already on file`
-          + (data.skipped_non_equity ? `, ${data.skipped_non_equity} F&O/other skipped` : "")
-          + (data.errors?.length ? `. ${data.errors.length} line(s) unreadable: ${data.errors.slice(0, 2).join("; ")}` : "."),
-        tone: data.errors?.length ? "err" : "ok",
-      });
-      reloadAll();
-    } catch (err: any) {
-      setMsg({ text: `Import failed: ${err.message}`, tone: "err" });
-    } finally { setBusy(""); }
+    const out: string[] = [];
+    let bad = false;
+    for (const f of files) {
+      try {
+        const content = await f.text();
+        const res = await fetch(`${API_BASE}/api/portfolio/import`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ broker: importBroker, filename: f.name, content, account_id: importAccount || null }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || res.status);
+        if (data.errors?.length) bad = true;
+        out.push(`${f.name} (${data.account_id}): `
+          + (data.read ? `${data.added} share/ETF trade(s) added, ${data.duplicates} already on file` : "")
+          + (data.fno_read ? `${data.read ? "; " : ""}${data.fno_added} F&O trade(s) added, ${data.fno_duplicates} already on file` : "")
+          + (!data.read && !data.fno_read ? "no trades read" : "")
+          + (data.skipped_non_equity ? `, ${data.skipped_non_equity} commodity/currency skipped` : "")
+          + (data.errors?.length ? `. ${data.errors.length} line(s) unreadable: ${data.errors.slice(0, 2).join("; ")}` : ""));
+      } catch (err: any) {
+        bad = true;
+        out.push(`${f.name}: ${err.message}`);
+      }
+    }
+    setMsg({ text: out.join(" · "), tone: bad ? "err" : "ok" });
+    setBusy("");
+    reloadAll();
   };
 
-  const delTrade = async (id: number) => {
-    if (confirmDel !== id) { setConfirmDel(id); setTimeout(() => setConfirmDel(c => c === id ? null : c), 3000); return; }
+  const delTrade = async (kind: "shares" | "fno", id: number) => {
+    const k = `${kind}:${id}`;
+    if (confirmDel !== k) { setConfirmDel(k); setTimeout(() => setConfirmDel(c => c === k ? null : c), 3000); return; }
     setConfirmDel(null);
-    await fetch(`${API_BASE}/api/portfolio/trades/${id}`, { method: "DELETE" });
+    await fetch(`${API_BASE}/api/portfolio/${kind === "fno" ? "fno/trades" : "trades"}/${id}`, { method: "DELETE" });
     reloadAll(); loadTrades();
   };
 
-  const rows = useMemo(() => {
-    const r = Array.isArray(hold?.rows) ? [...hold!.rows] : [];
-    const v = (h: Holding) => sortKey === "pnl" ? (h.pnl ?? -Infinity) : sortKey === "pnl_pct" ? (h.pnl_pct ?? -Infinity)
-      : sortKey === "day" ? (h.day_change_pct ?? -Infinity) : (h.value ?? h.invested);
-    if (sortKey === "symbol") r.sort((a, b) => (a.symbol || "").localeCompare(b.symbol || ""));
-    else r.sort((a, b) => v(b) - v(a));
-    return r;
-  }, [hold, sortKey]);
-
-  const t = hold?.totals;
-  const empty = summary && Object.keys(summary.counts || {}).length === 0 && !(mf?.rows?.length);
+  const empty = summary && Object.keys(summary.counts || {}).length === 0 && !(ov?.rows?.length);
   const lastSync = summary?.upstox_sync?.at ? new Date(summary.upstox_sync.at) : null;
 
-  const card = { background: "var(--surface-1)", border: "1px solid var(--border-default)", borderRadius: "12px", padding: "16px" };
-  const btn = (on = false) => ({
-    padding: "6px 12px", fontSize: "12px", fontWeight: 700 as const, borderRadius: "7px", cursor: "pointer",
-    border: `1px solid ${on ? "rgba(var(--accent-rgb),0.45)" : "var(--border-default)"}`,
-    background: on ? "var(--accent-bg)" : "transparent", color: on ? "var(--accent)" : "var(--text-secondary)",
-  });
-  const th = (align: "left" | "right" = "right") => ({
-    textAlign: align, padding: "6px 10px", fontSize: "10px", fontWeight: 600 as const, color: "var(--text-muted)",
-    borderBottom: "1px solid var(--border-subtle)", whiteSpace: "nowrap" as const, letterSpacing: "0.3px",
-  });
-  const td = (align: "left" | "right" = "right") => ({
-    textAlign: align, padding: "7px 10px", fontSize: "12px", borderBottom: "1px solid var(--border-subtle)", whiteSpace: "nowrap" as const,
-  });
+  const card = cardStyle;
+  const btn = btnStyle;
+  const th = thStyle;
+  const td = tdStyle;
+  const delBtn = (kind: "shares" | "fno", id: number) => {
+    const on = confirmDel === `${kind}:${id}`;
+    return (
+      <button onClick={() => delTrade(kind, id)}
+        style={{ fontSize: "10px", padding: "2px 6px", borderRadius: "5px", cursor: "pointer",
+                 border: `1px solid ${on ? "var(--negative)" : "var(--border-default)"}`,
+                 background: on ? "var(--negative-bg)" : "transparent", color: on ? "var(--negative)" : "var(--text-muted)" }}>
+        {on ? "Delete?" : "✕"}
+      </button>
+    );
+  };
 
   return (
     <div style={{ padding: "20px", maxWidth: "1400px", margin: "0 auto" }}>
       {/* Header: filter, sync and import */}
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "10px", marginBottom: "14px" }}>
         <h2 style={{ margin: 0, fontSize: "18px", fontWeight: 800, color: "var(--text-primary)" }}>Portfolio</h2>
-        <div style={{ display: "inline-flex", gap: "4px" }}>
+        <div style={{ display: "inline-flex", gap: "4px" }} title="Broker: shares, ETFs and F&O. Mutual funds show under All.">
           {([["", "All"], ["upstox", "Upstox"], ["zerodha", "Zerodha"]] as [BrokerFilter, string][]).map(([b, label]) => (
             <button key={b || "all"} onClick={() => setBroker(b)} style={btn(broker === b)}>{label}</button>
           ))}
@@ -311,27 +281,25 @@ export function PortfolioDashboard() {
         )}
         <div style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center" }}>
           <button onClick={syncUpstox} disabled={busy === "sync"} style={btn()}
-            title="Trades from Upstox's trade-history API (last three financial years) and today's trades. Also runs at 16:10 on weekdays.">
+            title="Share, ETF and F&O trades from Upstox's trade history (last three financial years) and today's trades. Also runs at 16:10 on weekdays.">
             {busy === "sync" ? "Syncing Upstox…" : "Sync Upstox"}
           </button>
-          <select value={importBroker} onChange={e => setImportBroker(e.target.value as any)}
-            style={{ fontSize: "12px", padding: "5px 6px", background: "var(--surface-1)", color: "var(--text-primary)", border: "1px solid var(--border-default)", borderRadius: "7px" }}>
+          <select value={importBroker} onChange={e => setImportBroker(e.target.value as any)} style={inputStyle}>
             <option value="zerodha">Zerodha CSV</option>
             <option value="upstox">Upstox CSV</option>
           </select>
           <select value={importAccount} onChange={e => setImportAccount(e.target.value)}
-            title="Zerodha's file name carries the client ID (tradebook-QY8357-EQ.csv); pick one only when it does not."
-            style={{ fontSize: "12px", padding: "5px 6px", background: "var(--surface-1)", color: "var(--text-primary)", border: "1px solid var(--border-default)", borderRadius: "7px" }}>
+            title="Zerodha's file name carries the client ID (tradebook-QY8357-EQ.csv); pick one only when it does not." style={inputStyle}>
             <option value="">ID from file name</option>
             {accounts.filter(a => a.broker === importBroker).map(a => (
               <option key={a.client_id} value={a.client_id}>{a.client_id} · {a.name}</option>
             ))}
           </select>
           <button onClick={() => fileRef.current?.click()} disabled={busy === "import"} style={btn()}
-            title="Zerodha: Console → Reports → Tradebook → Equity, pick the dates, download CSV. Importing the same file again adds nothing.">
+            title="Zerodha: Console → Reports → Tradebook → Equity, and again for Futures & Options; download each as CSV. Several files at once are fine; importing a file again adds nothing.">
             {busy === "import" ? "Importing…" : "Import tradebook"}
           </button>
-          <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={onFile} style={{ display: "none" }} />
+          <input ref={fileRef} type="file" multiple accept=".csv,text/csv" onChange={onFile} style={{ display: "none" }} />
           <button onClick={() => setShowAdd(v => !v)} style={btn(showAdd)}
             title="IPO allotments, bonus shares (price 0), or trades older than your files">Add trade</button>
           <button onClick={() => setShowAccounts(v => !v)} style={btn(showAccounts)}
@@ -361,63 +329,23 @@ export function PortfolioDashboard() {
 
       {empty && (
         <div style={{ ...card, marginBottom: "14px", fontSize: "13px", color: "var(--text-secondary)", lineHeight: 1.7 }}>
-          <b style={{ color: "var(--text-primary)" }}>No trades on file yet.</b><br />
-          1. <b>Sync Upstox</b> pulls your Upstox equity trades for the last three financial years (log in to Upstox first).<br />
-          2. For Zerodha, open Console → Reports → Tradebook → Equity, choose a date range (repeat per year if needed),
+          <b style={{ color: "var(--text-primary)" }}>Nothing on file yet.</b><br />
+          1. <b>Sync Upstox</b> pulls your Upstox share, ETF and F&O trades for the last three financial years (log in to Upstox first).<br />
+          2. For Zerodha, open Console → Reports → Tradebook, choose Equity (and again Futures &amp; Options) and a date range,
           download <b>CSV</b>, then <b>Import tradebook</b>.<br />
-          3. Shares from an IPO, a bonus, or older than the files go in with <b>Add trade</b>.<br />
-          4. Mutual funds: open <b>Mutual funds</b> and import your CAMS / KFintech consolidated statement (PDF).
-        </div>
-      )}
-
-      {/* Tiles (shares; the fund and exposure tabs carry their own) */}
-      {(tab === "holdings" || tab === "tax" || tab === "trades") && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: "10px", marginBottom: "14px" }}>
-        <Tile label="Invested" value={inr(t?.invested)} />
-        <Tile label="Current value" value={inr(t?.value)} sub={t?.unpriced ? `${t.unpriced} without a live price` : undefined} />
-        <Tile label="Unrealised P&L" value={signed(t?.pnl)} color={col(t?.pnl)}
-              sub={t?.pnl != null && t.priced_invested ? pct(t.pnl / t.priced_invested * 100) : undefined} />
-        <Tile label={`Realised FY ${t?.realised_fy || ""}`} value={signed(t?.realised_fy_capital)} color={col(t?.realised_fy_capital)}
-              sub="delivery (capital gains)" />
-        <Tile label={`Intraday FY ${t?.realised_fy || ""}`} value={signed(t?.realised_fy_intraday)} color={col(t?.realised_fy_intraday)}
-              sub="speculative income" />
-      </div>}
-
-      {(tab === "holdings" || tab === "tax" || tab === "trades") && !who && (hold?.by_name?.length ?? 0) > 1 && (
-        <div style={{ ...card, padding: 0, overflowX: "auto", marginBottom: "14px" }}>
-          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "760px" }}>
-            <thead>
-              <tr>
-                {["BY NAME", "INVESTED", "VALUE", "UNREALISED P&L", "DAY'S P&L", `REALISED FY ${t?.realised_fy || ""}`, "INTRADAY FY"].map((h, i) => (
-                  <th key={h} style={th(i === 0 ? "left" : "right")}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {hold!.by_name!.map(b => (
-                <tr key={b.name} onClick={() => { setWho(b.name); setTaxWho(b.name); }} style={{ cursor: "pointer" }} title={`Show only ${b.name}`}>
-                  <td style={{ ...td("left"), fontWeight: 700, color: "var(--text-primary)" }}>{b.name}</td>
-                  <td style={td()}>{inr(b.invested)}</td>
-                  <td style={td()}>{inr(b.value)}</td>
-                  <td style={{ ...td(), color: col(b.pnl), fontWeight: 700 }}>
-                    {signed(b.pnl)} <span style={{ fontSize: "11px", fontWeight: 600 }}>{b.pnl != null && b.priced_invested ? pct(b.pnl / b.priced_invested * 100) : ""}</span>
-                  </td>
-                  <td style={{ ...td(), color: col(b.day_pnl) }}>{signed(b.day_pnl)}</td>
-                  <td style={{ ...td(), color: col(b.realised_fy_capital) }}>{signed(b.realised_fy_capital)}</td>
-                  <td style={{ ...td(), color: col(b.realised_fy_intraday) }}>{signed(b.realised_fy_intraday)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          3. Mutual funds: <b>Import CAS (PDF)</b> below, your CAMS / KFintech consolidated statement.<br />
+          4. Shares from an IPO, a bonus, or older than the files go in with <b>Add trade</b>.
         </div>
       )}
 
       <div style={{ display: "flex", gap: "6px", marginBottom: "10px", alignItems: "center", flexWrap: "wrap" }}>
-        {(["overview", "exposure", "holdings", "funds", "tax", "trades"] as const).map(k => (
+        {(["overview", "exposure", "fno", "tax", "trades"] as const).map(k => (
           <button key={k} onClick={() => setTab(k)} style={btn(tab === k)}
             title={k === "exposure" ? "Sectors → industries → stocks, counting shares held directly and the stocks inside your ETFs and funds"
-              : k === "overview" ? "Shares, ETFs and mutual funds in one list" : undefined}>
-            {k === "overview" ? "All holdings" : k === "holdings" ? `Shares & ETFs (${rows.length})` : k === "funds" ? `Mutual funds (${mf?.rows?.length ?? 0})`
-              : k === "exposure" ? "Analytics" : k === "tax" ? "Capital gains & tax" : "Trades"}
+              : k === "overview" ? "Shares, ETFs and mutual funds in one list — open a row for its lots, tax dates and detail"
+              : k === "fno" ? "Futures and options: open positions, closed trades, profit, charges and turnover" : undefined}>
+            {k === "overview" ? `All holdings${ov ? ` (${ov.rows.length})` : ""}` : k === "exposure" ? "Analytics" : k === "fno" ? "F&O"
+              : k === "tax" ? "Capital gains & tax" : "Trades"}
           </button>
         ))}
         <span style={{ marginLeft: "auto", fontSize: "11px", color: "var(--text-faint)" }}>
@@ -428,96 +356,30 @@ export function PortfolioDashboard() {
         </span>
       </div>
 
-      {tab === "holdings" && (hold?.warnings?.length ?? 0) > 0 && (
-        <details style={{ ...card, padding: "10px 14px", marginBottom: "10px", borderColor: "var(--warning-border)", background: "var(--warning-bg)" }}>
-          <summary style={{ cursor: "pointer", fontSize: "12px", fontWeight: 700, color: "var(--warning)" }}>
-            {hold!.warnings.length} thing(s) to check — the figures for these stocks are incomplete
-          </summary>
-          {hold!.warnings.map((w, i) => <div key={i} style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "4px" }}>• {w}</div>)}
-        </details>
-      )}
-
-      {tab === "holdings" && (
-        <div style={{ ...card, padding: 0, overflowX: "auto" }}>
-          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "980px" }}>
-            <thead>
-              <tr>
-                <th style={{ ...th("left"), cursor: "pointer" }} onClick={() => setSortKey("symbol")}>SYMBOL</th>
-                <th style={th("left")}>AT</th>
-                {names.length > 1 && <th style={th("left")}>NAME</th>}
-                <th style={th()}>QTY</th>
-                <th style={th()}>AVG COST</th>
-                <th style={th()}>LTP</th>
-                <th style={{ ...th(), cursor: "pointer" }} onClick={() => setSortKey("day")}>DAY</th>
-                <th style={th()}>INVESTED</th>
-                <th style={{ ...th(), cursor: "pointer" }} onClick={() => setSortKey("value")}>VALUE</th>
-                <th style={{ ...th(), cursor: "pointer" }} onClick={() => setSortKey("pnl")}>P&L</th>
-                <th style={{ ...th(), cursor: "pointer" }} onClick={() => setSortKey("pnl_pct")}>P&L %</th>
-                <th style={th()} title="Shares held more than 12 months: a sale is long-term (12.5% above ₹1.25 lakh a year) rather than short-term (20%)">LONG-TERM</th>
-                <th style={th("left")} title="Quantity · days held, per purchase">HELD (QTY · DAYS)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map(h => (
-                <tr key={`${h.broker}:${h.account || ""}:${h.key}`}>
-                  <td style={{ ...td("left"), fontWeight: 700, color: "var(--text-primary)" }} title={h.isin || ""}>{h.symbol || h.key}</td>
-                  <td style={td("left")}><span className="wl-chip wl-b on" style={{ cursor: "default" }}>{brokerChip(h.broker)}</span></td>
-                  {names.length > 1 && <td style={{ ...td("left"), color: "var(--text-secondary)" }} title={h.account || ""}>{h.name}</td>}
-                  <td style={td()}>{qtyTxt(h.qty)}</td>
-                  <td style={td()}>{inr(h.avg_cost, 2)}</td>
-                  <td style={td()}>{h.ltp ? inr(h.ltp, 2) : "—"}</td>
-                  <td style={{ ...td(), color: col(h.day_change_pct) }}>{pct(h.day_change_pct)}</td>
-                  <td style={td()}>{inr(h.invested)}</td>
-                  <td style={{ ...td(), fontWeight: 700 }}>{inr(h.value)}</td>
-                  <td style={{ ...td(), color: col(h.pnl), fontWeight: 700 }}>{signed(h.pnl)}</td>
-                  <td style={{ ...td(), color: col(h.pnl_pct) }}>{pct(h.pnl_pct)}</td>
-                  <td style={{ ...td(), color: "var(--text-secondary)" }}
-                      title={h.next_long_term ? `More become long-term on ${h.next_long_term}` : "All long-term"}>
-                    {h.long_term_qty >= h.qty ? "all" : h.long_term_qty > 0 ? `${qtyTxt(h.long_term_qty)} of ${qtyTxt(h.qty)}`
-                      : h.next_long_term ? `from ${h.next_long_term}` : "older lots — date unknown"}
-                  </td>
-                  <td style={{ ...td("left"), color: "var(--text-secondary)", fontSize: "11px" }}
-                      title={(h.lots || []).map(l => `${qtyTxt(l.qty)} bought ${l.date ?? "before the trade history"}`).join("\n")}>
-                    {(h.lots || []).slice(0, 3).map(l => `${qtyTxt(l.qty)} · ${l.days == null ? "older" : `${l.days}d`}`).join(", ")}
-                    {(h.lots || []).length > 3 ? ` +${(h.lots || []).length - 3}` : ""}
-                  </td>
-                </tr>
-              ))}
-              {rows.length === 0 && (
-                <tr><td colSpan={names.length > 1 ? 13 : 12} style={{ ...td("left"), color: "var(--text-faint)", fontStyle: "italic" }}>No open positions on file.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
-
       {tab === "overview" && (
-        <OverviewTab data={ov} many={names.length > 1} who={who} onPick={n => { setWho(n); setTaxWho(n); }}
-                     onTab={k => setTab(k)} />
-      )}
-
-      {tab === "funds" && (
-        <FundsTab data={mf} names={names} who={who} onReload={reloadAll} setMsg={setMsg} />
+        <OverviewTab data={ov} many={names.length > 1} who={who} broker={broker}
+                     onPick={n => { setWho(n); setTaxWho(n); }} onTab={k => setTab(k)}
+                     onReload={() => { loadOv(); loadSummary(); }} setMsg={setMsg} />
       )}
 
       {tab === "exposure" && (
         <AnalyticsTab data={exp} loading={expLoading} onRefresh={loadExp} setMsg={setMsg} />
       )}
 
+      {tab === "fno" && <FnoTab broker={broker} who={who} many={names.length > 1} setMsg={setMsg} />}
+
       {tab === "tax" && (
         <div>
           <div style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: "10px", flexWrap: "wrap" }}>
             <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>Financial year</span>
-            <select value={fy} onChange={e => setFy(e.target.value)}
-              style={{ fontSize: "12px", padding: "5px 6px", background: "var(--surface-1)", color: "var(--text-primary)", border: "1px solid var(--border-default)", borderRadius: "7px" }}>
+            <select value={fy} onChange={e => setFy(e.target.value)} style={inputStyle}>
               {(summary?.financial_years || [fy]).map(f => <option key={f} value={f}>FY {f}</option>)}
             </select>
             {names.length > 0 && (
               <>
                 <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>for</span>
                 <select value={taxName} onChange={e => setTaxWho(e.target.value)}
-                  title="Tax is per person: each name has its own ₹1.25 lakh LTCG exemption and loss set-off"
-                  style={{ fontSize: "12px", padding: "5px 6px", background: "var(--surface-1)", color: "var(--text-primary)", border: "1px solid var(--border-default)", borderRadius: "7px" }}>
+                  title="Tax is per person: each name has its own ₹1.25 lakh LTCG exemption and loss set-off" style={inputStyle}>
                   {names.map(n => <option key={n} value={n}>{n}</option>)}
                 </select>
               </>
@@ -527,153 +389,105 @@ export function PortfolioDashboard() {
                  style={{ ...btn(), textDecoration: "none", marginLeft: "auto" }}>Download capital-gains CSV</a>
             )}
           </div>
-          {tax && (
-            <>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "10px", marginBottom: "10px" }}>
-                <Tile label={`Short-term (STCG ${(tax.stcg.rate * 100).toFixed(1).replace(".0", "")}%)`} value={signed(tax.stcg.net)} color={col(tax.stcg.net)}
-                      sub={`gains ${inr(tax.stcg.gain)} · losses ${inr(-tax.stcg.loss)}`} />
-                <Tile label={`Long-term (LTCG ${(tax.ltcg.rate * 100).toFixed(1).replace(".0", "")}%)`} value={signed(tax.ltcg.net)} color={col(tax.ltcg.net)}
-                      sub={`gains ${inr(tax.ltcg.gain)} · losses ${inr(-tax.ltcg.loss)}`} />
-                <Tile label="LTCG exemption used" value={`${inr(tax.ltcg.exemption_used)} of ${inr(tax.ltcg.exemption)}`}
-                      sub={`taxable LTCG ${inr(tax.ltcg.taxable)}`} />
-                <Tile label="Estimated tax on capital gains" value={inr(tax.estimated_tax)} color="var(--warning)"
-                      sub={tax.short_term_loss_set_off_against_long_term ? `after ${inr(tax.short_term_loss_set_off_against_long_term)} short-term loss set off` : "before cess and surcharge"} />
-                <Tile label="Intraday (speculative)" value={signed(tax.intraday.pnl)} color={col(tax.intraday.pnl)}
-                      sub={`${tax.intraday.trades} round trip(s) · taxed at your slab`} />
-              </div>
-              {tax.charges && (
-                <div style={{ fontSize: "12px", color: "var(--text-secondary)", marginBottom: "8px" }}>
-                  Estimated charges on these sales: {inr(tax.charges.deductible)} brokerage, exchange, SEBI, stamp, GST and DP
-                  (deducted from the gains above) + {inr(tax.charges.stt)} STT (not deductible from capital gains).
-                  Gains before charges: {signed(tax.charges.gross_gain)}.
-                </div>
-              )}
-              {(tax.long_term_loss_carried_forward > 0 || tax.short_term_loss_carried_forward > 0) && (
-                <div style={{ fontSize: "12px", color: "var(--text-secondary)", marginBottom: "8px" }}>
-                  Loss to carry forward (file the return on time to keep it):
-                  {tax.short_term_loss_carried_forward > 0 && ` short-term ${inr(tax.short_term_loss_carried_forward)}`}
-                  {tax.long_term_loss_carried_forward > 0 && ` long-term ${inr(tax.long_term_loss_carried_forward)}`}
-                </div>
-              )}
-              <div style={{ ...card, padding: 0, overflowX: "auto", marginBottom: "8px" }}>
-                <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "900px" }}>
-                  <thead>
-                    <tr>
-                      {["TYPE", "SYMBOL", "AT", "BOUGHT", "SOLD", "QTY", "BUY", "SELL", "COST", "SALE VALUE", "CHARGES", "STT", "GAIN"].map((h, i) => (
-                        <th key={h} style={th(i < 3 ? "left" : "right")}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {tax.rows.map((r, i) => (
-                      <tr key={i}>
-                        <td style={{ ...td("left"), fontWeight: 700, color: r.term === "LTCG" ? "var(--positive-strong)" : r.term === "STCG" ? "var(--accent)" : "var(--ai)" }}
-                            title={r.grandfathered ? "Bought before 1 Feb 2018: the 31 Jan 2018 value rule may lower this gain" : ""}>
-                          {r.term}{r.grandfathered ? " *" : ""}
-                        </td>
-                        <td style={{ ...td("left"), fontWeight: 600 }}>{r.symbol}</td>
-                        <td style={td("left")}>{brokerChip(r.broker)}</td>
-                        <td style={td()}>{r.buy_date}</td>
-                        <td style={td()}>{r.sell_date}</td>
-                        <td style={td()}>{qtyTxt(r.qty)}</td>
-                        <td style={td()}>{inr(r.buy_price, 2)}</td>
-                        <td style={td()}>{inr(r.sell_price, 2)}</td>
-                        <td style={td()}>{inr(r.cost)}</td>
-                        <td style={td()}>{inr(r.sale_value)}</td>
-                        <td style={{ ...td(), color: "var(--text-muted)" }}>{inr(r.charges, 2)}</td>
-                        <td style={{ ...td(), color: "var(--text-muted)" }}>{inr(r.stt, 2)}</td>
-                        <td style={{ ...td(), color: col(r.tax_gain ?? r.gain), fontWeight: 700 }}
-                            title={`Before charges ${signed(r.gain)}`}>{signed(r.tax_gain ?? r.gain)}</td>
-                      </tr>
-                    ))}
-                    {tax.rows.length === 0 && (
-                      <tr><td colSpan={13} style={{ ...td("left"), color: "var(--text-faint)", fontStyle: "italic" }}>No sales in FY {tax.fy}.</td></tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-              {(tax.mf_other?.rows?.length ?? 0) > 0 && (
-                <div style={{ ...card, padding: 0, overflowX: "auto", marginBottom: "8px" }}>
-                  <div style={{ padding: "10px 12px 4px", fontSize: "12px", fontWeight: 700, color: "var(--text-primary)" }}>
-                    Mutual funds not taxed as equity
-                    <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>
-                      {" "}— at your slab {signed(tax.mf_other!.slab_gain)}; long-term at 12.5% {signed(tax.mf_other!.ltcg_gain)}
-                      {tax.mf_other!.ltcg_tax > 0 ? ` (≈ ${inr(tax.mf_other!.ltcg_tax)} tax)` : ""}. Not in the estimate above.
-                    </span>
-                  </div>
-                  <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "760px" }}>
-                    <thead>
-                      <tr>{["TYPE", "SCHEME", "BOUGHT", "SOLD", "UNITS", "COST", "SALE VALUE", "GAIN"].map((h, i) => (
-                        <th key={h} style={th(i < 2 ? "left" : "right")}>{h}</th>))}</tr>
-                    </thead>
-                    <tbody>
-                      {tax.mf_other!.rows.map((r, i) => (
-                        <tr key={i}>
-                          <td style={{ ...td("left"), fontWeight: 700, color: "var(--ai)" }}>{r.term === "SLAB" ? "AT SLAB" : "LTCG 12.5%"}</td>
-                          <td style={{ ...td("left"), maxWidth: "320px", overflow: "hidden", textOverflow: "ellipsis" }} title={r.symbol || ""}>{r.symbol}</td>
-                          <td style={td()}>{r.buy_date}</td>
-                          <td style={td()}>{r.sell_date}</td>
-                          <td style={td()}>{qtyTxt(r.qty)}</td>
-                          <td style={td()}>{inr(r.cost)}</td>
-                          <td style={td()}>{inr(r.sale_value)}</td>
-                          <td style={{ ...td(), color: col(r.gain), fontWeight: 700 }}>{signed(r.gain)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-              {tax.notes.map((n, i) => <div key={i} style={{ fontSize: "11px", color: "var(--text-faint)", lineHeight: 1.6 }}>{n}</div>)}
-            </>
-          )}
+          {tax && <TaxView tax={tax} onFno={() => setTab("fno")} />}
         </div>
       )}
 
       {tab === "trades" && (
         <div>
-          <div style={{ display: "flex", gap: "8px", marginBottom: "10px" }}>
-            <input value={tradeFilter} onChange={e => setTradeFilter(e.target.value)} placeholder="Symbol or ISIN"
-              onKeyDown={e => { if (e.key === "Enter") loadTrades(); }}
-              style={{ padding: "6px 10px", fontSize: "12px", background: "var(--surface-1)", color: "var(--text-primary)", border: "1px solid var(--border-default)", borderRadius: "7px" }} />
-            <button onClick={loadTrades} style={btn()}>Show</button>
+          <div style={{ display: "flex", gap: "8px", marginBottom: "10px", flexWrap: "wrap", alignItems: "center" }}>
+            {([["shares", "Shares & ETFs"], ["fno", "F&O"], ["mf", "Mutual funds"]] as const).map(([k, l]) => (
+              <button key={k} onClick={() => setTradeKind(k)} style={btn(tradeKind === k)}>{l}</button>
+            ))}
+            {tradeKind !== "mf" && (
+              <>
+                <input value={tradeFilter} onChange={e => setTradeFilter(e.target.value)} placeholder={tradeKind === "fno" ? "Contract or underlying" : "Symbol or ISIN"}
+                  onKeyDown={e => { if (e.key === "Enter") loadTrades(); }} style={{ ...inputStyle, width: "180px" }} />
+                <button onClick={loadTrades} style={btn()}>Show</button>
+              </>
+            )}
           </div>
           <div style={{ ...card, padding: 0, overflowX: "auto" }}>
-            <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "820px" }}>
-              <thead>
-                <tr>
-                  {["DATE", "SYMBOL", "AT", "NAME", "SIDE", "QTY", "PRICE", "VALUE", "SOURCE", ""].map((h, i) => (
-                    <th key={i} style={th(i < 5 ? "left" : "right")}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {trades.map(tr => (
-                  <tr key={tr.id}>
-                    <td style={td("left")}>{tr.trade_date}{tr.trade_time ? ` ${tr.trade_time.slice(0, 5)}` : ""}</td>
-                    <td style={{ ...td("left"), fontWeight: 600 }} title={tr.isin || ""}>{tr.symbol}</td>
-                    <td style={td("left")}>{brokerChip(tr.broker)}</td>
-                    <td style={{ ...td("left"), color: "var(--text-secondary)" }} title={tr.account || "no client ID"}>{tr.name || "—"}</td>
-                    <td style={{ ...td("left"), fontWeight: 700, color: tr.side === "BUY" ? "var(--positive)" : "var(--negative)" }}>{tr.side}</td>
-                    <td style={td()}>{qtyTxt(tr.quantity)}</td>
-                    <td style={td()}>{inr(tr.price, 2)}</td>
-                    <td style={td()}>{inr(tr.quantity * tr.price)}</td>
-                    <td style={{ ...td(), color: "var(--text-muted)", fontSize: "11px" }} title={tr.note || ""}>{tr.source}</td>
-                    <td style={td()}>
-                      <button onClick={() => delTrade(tr.id)}
-                        style={{ fontSize: "10px", padding: "2px 6px", borderRadius: "5px", cursor: "pointer",
-                                 border: `1px solid ${confirmDel === tr.id ? "var(--negative)" : "var(--border-default)"}`,
-                                 background: confirmDel === tr.id ? "var(--negative-bg)" : "transparent",
-                                 color: confirmDel === tr.id ? "var(--negative)" : "var(--text-muted)" }}>
-                        {confirmDel === tr.id ? "Delete?" : "✕"}
-                      </button>
-                    </td>
+            {tradeKind === "shares" && (
+              <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "860px" }}>
+                <thead>
+                  <tr>
+                    {["DATE", "SYMBOL", "TYPE", "AT", "NAME", "SIDE", "QTY", "PRICE", "VALUE", "SOURCE", ""].map((h, i) => (
+                      <th key={i} style={th(i < 6 ? "left" : "right")}>{h}</th>
+                    ))}
                   </tr>
-                ))}
-                {trades.length === 0 && (
-                  <tr><td colSpan={10} style={{ ...td("left"), color: "var(--text-faint)", fontStyle: "italic" }}>No trades.</td></tr>
-                )}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {trades.map(tr => (
+                    <tr key={tr.id}>
+                      <td style={td("left")}>{tr.trade_date}{tr.trade_time ? ` ${tr.trade_time.slice(0, 5)}` : ""}</td>
+                      <td style={{ ...td("left"), fontWeight: 600 }} title={tr.isin || ""}>{tr.symbol}</td>
+                      <td style={td("left")}><TypeChip t={(tr.isin || "").startsWith("INF") ? "etf" : "stock"} /></td>
+                      <td style={td("left")}>{brokerChip(tr.broker)}</td>
+                      <td style={{ ...td("left"), color: "var(--text-secondary)" }} title={tr.account || "no client ID"}>{tr.name || "—"}</td>
+                      <td style={{ ...td("left"), fontWeight: 700, color: tr.side === "BUY" ? "var(--positive)" : "var(--negative)" }}>{tr.side}</td>
+                      <td style={td()}>{qtyTxt(tr.quantity)}</td>
+                      <td style={td()}>{inr(tr.price, 2)}</td>
+                      <td style={td()}>{inr(tr.quantity * tr.price)}</td>
+                      <td style={{ ...td(), color: "var(--text-muted)", fontSize: "11px" }} title={tr.note || ""}>{tr.source}</td>
+                      <td style={td()}>{delBtn("shares", tr.id)}</td>
+                    </tr>
+                  ))}
+                  {trades.length === 0 && <tr><td colSpan={11} style={{ ...td("left"), color: "var(--text-faint)", fontStyle: "italic" }}>No trades.</td></tr>}
+                </tbody>
+              </table>
+            )}
+            {tradeKind === "fno" && (
+              <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "960px" }}>
+                <thead>
+                  <tr>
+                    {["DATE", "CONTRACT", "TYPE", "EXPIRY", "AT", "NAME", "SIDE", "QTY", "PRICE", "VALUE", "SOURCE", ""].map((h, i) => (
+                      <th key={i} style={th(i < 7 ? "left" : "right")}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {fnoTxns.map(tr => (
+                    <tr key={tr.id}>
+                      <td style={td("left")}>{tr.trade_date}{tr.trade_time ? ` ${tr.trade_time.slice(0, 5)}` : ""}</td>
+                      <td style={{ ...td("left"), fontWeight: 600 }}>{tr.symbol}</td>
+                      <td style={td("left")}>{tr.instrument}{tr.strike ? ` ${tr.strike}` : ""}</td>
+                      <td style={td("left")}>{fmtDate(tr.expiry)}</td>
+                      <td style={td("left")}>{brokerChip(tr.broker)}</td>
+                      <td style={{ ...td("left"), color: "var(--text-secondary)" }}>{tr.name || "—"}</td>
+                      <td style={{ ...td("left"), fontWeight: 700, color: tr.side === "BUY" ? "var(--positive)" : "var(--negative)" }}>{tr.side}</td>
+                      <td style={td()}>{qtyTxt(tr.quantity)}</td>
+                      <td style={td()}>{inr(tr.price, 2)}</td>
+                      <td style={td()}>{inr(tr.quantity * tr.price)}</td>
+                      <td style={{ ...td(), color: "var(--text-muted)", fontSize: "11px" }}>{tr.source}</td>
+                      <td style={td()}>{delBtn("fno", tr.id)}</td>
+                    </tr>
+                  ))}
+                  {fnoTxns.length === 0 && <tr><td colSpan={12} style={{ ...td("left"), color: "var(--text-faint)", fontStyle: "italic" }}>No F&O trades — import Zerodha's Futures &amp; Options tradebook, or Sync Upstox.</td></tr>}
+                </tbody>
+              </table>
+            )}
+            {tradeKind === "mf" && (
+              <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "900px" }}>
+                <thead><tr>{["DATE", "SCHEME", "NAME", "TYPE", "AMOUNT", "UNITS", "NAV", "BALANCE"].map((h, i) => <th key={h} style={th(i < 4 ? "left" : "right")}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {mfTxns.map(x => (
+                    <tr key={x.id}>
+                      <td style={td("left")}>{x.date}</td>
+                      <td style={{ ...td("left"), maxWidth: "340px", overflow: "hidden", textOverflow: "ellipsis" }} title={`${x.scheme} · folio ${x.folio}`}>{x.scheme}</td>
+                      <td style={{ ...td("left"), color: "var(--text-secondary)" }}>{x.name}</td>
+                      <td style={{ ...td("left"), fontWeight: 600, color: x.kind === "buy" ? "var(--positive)" : x.kind === "sell" ? "var(--negative)" : "var(--text-muted)" }}
+                          title={x.description || ""}>{x.description || x.kind}</td>
+                      <td style={td()}>{x.amount == null ? "—" : inr(Math.abs(x.amount), 2)}</td>
+                      <td style={td()}>{x.units == null ? "" : x.units.toLocaleString("en-IN", { maximumFractionDigits: 3 })}</td>
+                      <td style={td()}>{x.nav == null ? "" : x.nav.toFixed(4)}</td>
+                      <td style={td()}>{x.balance == null ? "" : x.balance.toLocaleString("en-IN", { maximumFractionDigits: 3 })}</td>
+                    </tr>
+                  ))}
+                  {mfTxns.length === 0 && <tr><td colSpan={8} style={{ ...td("left"), color: "var(--text-faint)", fontStyle: "italic" }}>No fund transactions — import your CAS in All holdings.</td></tr>}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
       )}
@@ -864,291 +678,9 @@ const AMC_PAGES: [RegExp, string][] = [
 const amcPage = (amc: string | null) => AMC_PAGES.find(([re]) => re.test(amc || ""))?.[1] || null;
 const classLabel = (c: string) => c === "equity" ? "Equity" : c === "debt" ? "Debt" : "Other";
 const fmtDate = (d: string | null | undefined) => d ? new Date(d + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—";
-const daysSince = (d: string | null | undefined) => d ? Math.floor((Date.now() - new Date(d + "T00:00:00").getTime()) / 86400000) : null;
 
 interface MfTxn { id: number; date: string; scheme: string; isin: string; folio: string; kind: string; description: string | null;
                   amount: number | null; units: number | null; nav: number | null; balance: number | null; name: string }
-
-function FundsTab({ data, names, who, onReload, setMsg }: {
-  data: MfResp | null; names: string[]; who: string; onReload: () => void;
-  setMsg: (m: { text: string; tone: "ok" | "err" } | null) => void;
-}) {
-  const [password, setPassword] = useState("");
-  const [busy, setBusy] = useState("");
-  const [showTx, setShowTx] = useState(false);
-  const [txns, setTxns] = useState<MfTxn[]>([]);
-  const [forScheme, setForScheme] = useState<string | null>(null);
-  const casRef = useRef<HTMLInputElement | null>(null);
-  const pfRef = useRef<HTMLInputElement | null>(null);
-  const rows = Array.isArray(data?.rows) ? data!.rows : [];
-  const t = data?.totals;
-  const many = names.length > 1;
-
-  useEffect(() => {
-    if (!showTx) return;
-    getJSON<MfTxn[]>(`/api/portfolio/mf/transactions${who ? `?name=${encodeURIComponent(who)}` : ""}`).then(setTxns).catch(() => setTxns([]));
-  }, [showTx, who, data]);
-
-  const importCas = async (e: ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    e.target.value = "";
-    if (!f) return;
-    setBusy("cas"); setMsg(null);
-    try {
-      const r = await postJSON("/api/portfolio/mf/import", { filename: f.name, content_b64: await fileB64(f), password: password || null });
-      setPassword("");
-      setMsg({ tone: r.errors?.length ? "err" : "ok",
-               text: `${f.name}: ${r.schemes} scheme(s), ${r.added} transaction line(s) added, ${r.duplicates} already on file`
-                 + (r.period_from ? ` · statement ${fmtDate(r.period_from)} → ${fmtDate(r.period_to)}` : "")
-                 + (r.errors?.length ? `. Check: ${r.errors.slice(0, 2).join("; ")}` : ". NAVs are being fetched from AMFI.") });
-      onReload();
-      setTimeout(onReload, 8000);
-    } catch (err: any) {
-      setMsg({ text: `Statement import failed: ${err.message}`, tone: "err" });
-    } finally { setBusy(""); }
-  };
-
-  const uploadPortfolios = async (e: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    e.target.value = "";
-    if (!files.length) return;
-    const scheme = forScheme;
-    setForScheme(null);
-    setBusy("pf"); setMsg(null);
-    const lines: string[] = [];
-    let bad = false;
-    for (const f of files) {
-      try {
-        const r = await postJSON("/api/portfolio/mf/portfolio-file", { filename: f.name, content_b64: await fileB64(f), scheme_isin: scheme });
-        const m = (r.matched || []).map((x: any) => `${x.scheme.split(" - ")[0]} (${fmtDate(x.as_of)}${x.date_found ? "" : " — date assumed"}, ${x.stocks} stocks, ${x.equity_pct}% in shares)`);
-        const um = (r.unmatched || []).map((x: any) => `${x.scheme} — best guess "${x.best}" was not close enough`);
-        if (!m.length) bad = true;
-        lines.push(`${f.name}: ${m.length ? m.join("; ") : "no scheme you hold matched"}${um.length ? `. ${um.join("; ")}` : ""}`);
-      } catch (err: any) {
-        bad = true;
-        lines.push(`${f.name}: ${err.message}`);
-      }
-    }
-    setMsg({ text: lines.join(" · "), tone: bad ? "err" : "ok" });
-    setBusy("");
-    onReload();
-  };
-
-  const refreshNavs = async () => {
-    setBusy("nav"); setMsg(null);
-    try {
-      const r = await postJSON("/api/portfolio/mf/navs/refresh", {});
-      setMsg({ text: `NAVs: ${r.updated} scheme(s) updated from AMFI${r.missing ? `, ${r.missing} not in AMFI's file` : ""}.`, tone: "ok" });
-      onReload();
-    } catch (err: any) { setMsg({ text: `NAV refresh failed: ${err.message}`, tone: "err" }); }
-    finally { setBusy(""); }
-  };
-
-  const setClass = async (isin: string, cls: string) => {
-    try { await postJSON("/api/portfolio/mf/tax-class", { isin, tax_class: cls || null }); onReload(); }
-    catch (err: any) { setMsg({ text: err.message, tone: "err" }); }
-  };
-
-  const pickFor = (isin: string | null) => { setForScheme(isin); setTimeout(() => pfRef.current?.click(), 0); };
-  const navNote = data?.nav?.error ? `AMFI unreachable (${data.nav.error.slice(0, 80)}) — values use the statement's NAV`
-    : data?.nav?.running ? "Fetching NAVs from AMFI…"
-    : data?.nav?.last_ok ? `NAVs from AMFI, checked ${new Date(data.nav.last_ok).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : "";
-  const missingPf = rows.filter(r => !r.portfolio);
-  const stalePf = rows.filter(r => r.portfolio && (daysSince(r.portfolio.as_of) ?? 0) > 50);
-
-  return (
-    <div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center", marginBottom: "10px" }}>
-        <input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="off"
-          placeholder="Statement password, if any" title="Only used to open the PDF; never stored" style={{ ...inputStyle, width: "190px" }} />
-        <button onClick={() => casRef.current?.click()} disabled={busy === "cas"} style={btnStyle()}
-          title="CAMS or KFintech Consolidated Account Statement (detailed, with transactions), from the first investment to today. Re-importing adds only what is new.">
-          {busy === "cas" ? "Reading statement…" : "Import CAS (PDF)"}
-        </button>
-        <input ref={casRef} type="file" accept=".pdf,application/pdf" onChange={importCas} style={{ display: "none" }} />
-        <button onClick={() => pickFor(null)} disabled={busy === "pf"} style={btnStyle()}
-          title="Each fund house's month-end portfolio file (Excel, PDF or zip). Several files at once are fine; each sheet is matched to the schemes you hold.">
-          {busy === "pf" ? "Reading portfolios…" : "Upload fund portfolios"}
-        </button>
-        <input ref={pfRef} type="file" multiple accept=".xlsx,.xls,.xlsm,.pdf,.zip" onChange={uploadPortfolios} style={{ display: "none" }} />
-        <button onClick={refreshNavs} disabled={busy === "nav"} style={btnStyle()} title="Latest NAVs from AMFI (also fetched every morning at 07:00)">
-          {busy === "nav" ? "Fetching…" : "Refresh NAVs"}
-        </button>
-        <button onClick={() => setShowTx(v => !v)} style={btnStyle(showTx)}>Transactions</button>
-        <span style={{ marginLeft: "auto", fontSize: "11px", color: data?.nav?.error ? "var(--warning)" : "var(--text-faint)" }}>{navNote}</span>
-      </div>
-
-      {rows.length === 0 && (
-        <div style={{ ...cardStyle, marginBottom: "14px", fontSize: "13px", color: "var(--text-secondary)", lineHeight: 1.7 }}>
-          <b style={{ color: "var(--text-primary)" }}>No mutual funds on file yet.</b><br />
-          1. Ask CAMS for a <b>Consolidated Account Statement</b> (camsonline.com → Investors → Statements → CAS – CAMS+KFintech):
-          statement type <b>Detailed</b>, period from your first investment to today. It arrives by email as a PDF covering every fund house.<br />
-          2. <b>Import CAS (PDF)</b> here, with the password you set on the request form. Every folio and transaction is read; importing a newer statement later adds only what is new.<br />
-          3. For the Exposure tab, add each fund's <b>month-end portfolio</b> from its fund house's website (Excel or PDF) with <b>Upload fund portfolios</b>. Once a month is enough.
-        </div>
-      )}
-
-      {rows.length > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "10px", marginBottom: "12px" }}>
-          <Tile label="Invested" value={inr(t?.invested)} sub="cost of units held, stamp duty included" />
-          <Tile label="Current value" value={inr(t?.value)} sub={t?.unpriced ? `${t.unpriced} without a NAV` : undefined} />
-          <Tile label="Unrealised P&L" value={signed(t?.pnl)} color={col(t?.pnl)}
-                sub={t?.pnl != null && t.priced_invested ? pct(t.pnl / t.priced_invested * 100) : undefined} />
-          <Tile label="Day's change" value={signed(t?.day_pnl)} color={col(t?.day_pnl)} sub="latest NAV against the one before" />
-          <Tile label="XIRR" value={t?.xirr == null ? "—" : `${t.xirr.toFixed(2)}%`} color={col(t?.xirr)} sub="every purchase and redemption, annualised" />
-          <Tile label={`Realised FY ${t?.realised_fy || ""}`} value={signed(t?.realised_fy_gain)} color={col(t?.realised_fy_gain)} sub="redemptions, before tax" />
-        </div>
-      )}
-
-      {!who && (data?.by_name?.length ?? 0) > 1 && (
-        <div style={{ ...cardStyle, padding: 0, overflowX: "auto", marginBottom: "12px" }}>
-          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "640px" }}>
-            <thead><tr>{["BY NAME", "INVESTED", "VALUE", "P&L", "DAY", "XIRR"].map((h, i) => <th key={h} style={thStyle(i ? "right" : "left")}>{h}</th>)}</tr></thead>
-            <tbody>
-              {data!.by_name.map(b => (
-                <tr key={b.name}>
-                  <td style={{ ...tdStyle("left"), fontWeight: 700 }}>{b.name}</td>
-                  <td style={tdStyle()}>{inr(b.invested)}</td>
-                  <td style={tdStyle()}>{inr(b.value)}</td>
-                  <td style={{ ...tdStyle(), color: col(b.pnl), fontWeight: 700 }}>{signed(b.pnl)}</td>
-                  <td style={{ ...tdStyle(), color: col(b.day_pnl) }}>{signed(b.day_pnl)}</td>
-                  <td style={{ ...tdStyle(), color: col(b.xirr) }}>{b.xirr == null ? "—" : `${b.xirr.toFixed(2)}%`}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {((data?.warnings?.length ?? 0) > 0 || missingPf.length > 0 || stalePf.length > 0) && rows.length > 0 && (
-        <details style={{ ...cardStyle, padding: "10px 14px", marginBottom: "10px", borderColor: "var(--warning-border)", background: "var(--warning-bg)" }}>
-          <summary style={{ cursor: "pointer", fontSize: "12px", fontWeight: 700, color: "var(--warning)" }}>
-            {[missingPf.length ? `${missingPf.length} fund(s) without a portfolio file` : "",
-              stalePf.length ? `${stalePf.length} portfolio(s) over 50 days old` : "",
-              data?.warnings?.length ? `${data.warnings.length} statement note(s)` : ""].filter(Boolean).join(" · ")}
-          </summary>
-          {missingPf.map(r => (
-            <div key={r.isin} style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "4px" }}>
-              • {r.scheme} — {amcPage(r.amc) ? <a href={amcPage(r.amc)!} target="_blank" rel="noreferrer">{r.amc} portfolios</a>
-                : `${r.amc || "the fund house"} website → statutory disclosures → monthly portfolio`}, then
-              <b style={{ cursor: "pointer", textDecoration: "underline", marginLeft: "4px" }} onClick={() => pickFor(r.isin)}>upload for this fund</b>
-            </div>
-          ))}
-          {stalePf.map(r => (
-            <div key={r.isin} style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "4px" }}>
-              • {r.scheme}: portfolio as of {fmtDate(r.portfolio!.as_of)} — a newer month is out.
-            </div>
-          ))}
-          {(data?.warnings || []).map((w, i) => <div key={i} style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "4px" }}>• {w}</div>)}
-        </details>
-      )}
-
-      {rows.length > 0 && (
-        <div style={{ ...cardStyle, padding: 0, overflowX: "auto" }}>
-          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "1200px" }}>
-            <thead>
-              <tr>
-                <th style={thStyle("left")}>SCHEME</th>
-                {many && <th style={thStyle("left")}>NAME</th>}
-                <th style={thStyle("left")} title="How gains are taxed. Equity: 12 months, 20% / 12.5% with the shared ₹1.25 lakh exemption. Debt bought from Apr 2023: your slab. Other: 12.5% after 24 months.">TAX AS</th>
-                <th style={thStyle()}>UNITS</th>
-                <th style={thStyle()}>AVG NAV</th>
-                <th style={thStyle()}>NAV</th>
-                <th style={thStyle()}>DAY</th>
-                <th style={thStyle()}>INVESTED</th>
-                <th style={thStyle()}>VALUE</th>
-                <th style={thStyle()}>P&L</th>
-                <th style={thStyle()}>P&L %</th>
-                <th style={thStyle()} title="Annualised return on this scheme's own cash flows">XIRR</th>
-                <th style={thStyle()}>LONG-TERM</th>
-                <th style={thStyle("left")}>HELD (UNITS · DAYS)</th>
-                <th style={thStyle("left")} title="The fund's month-end portfolio, used by the Exposure tab">PORTFOLIO</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map(r => {
-                const age = daysSince(r.portfolio?.as_of);
-                return (
-                  <tr key={`${r.name}:${r.isin}`}>
-                    <td style={{ ...tdStyle("left"), maxWidth: "300px", whiteSpace: "normal" }} title={`${r.isin} · folio ${r.folios.join(", ")}${r.category ? ` · ${r.category}` : ""}`}>
-                      <div style={{ fontWeight: 700, color: "var(--text-primary)" }}>{r.scheme}</div>
-                      <div style={{ fontSize: "10px", color: "var(--text-faint)" }}>{r.amc}{r.category ? ` · ${r.category}` : ""}</div>
-                    </td>
-                    {many && <td style={{ ...tdStyle("left"), color: "var(--text-secondary)" }} title={r.accounts.join(", ")}>{r.name}</td>}
-                    <td style={tdStyle("left")}>
-                      <select value={r.overridden ? r.tax_class : ""} onChange={e => setClass(r.isin, e.target.value)} title={r.tax_why || ""}
-                        style={{ ...inputStyle, padding: "2px 4px", fontSize: "11px" }}>
-                        <option value="">{classLabel(r.tax_class)} (auto)</option>
-                        <option value="equity">Equity</option><option value="debt">Debt</option><option value="other">Other</option>
-                      </select>
-                    </td>
-                    <td style={tdStyle()}>{r.units.toLocaleString("en-IN", { maximumFractionDigits: 3 })}</td>
-                    <td style={tdStyle()}>{r.avg_nav ? inr(r.avg_nav, 4) : "—"}</td>
-                    <td style={tdStyle()} title={`${fmtDate(r.nav_date)} · ${r.nav_source === "statement" ? "from the statement" : "AMFI"}`}>
-                      {r.nav ? inr(r.nav, 4) : "—"}
-                      <div style={{ fontSize: "10px", color: r.nav_source === "statement" ? "var(--warning)" : "var(--text-faint)" }}>{r.nav_date ? fmtDate(r.nav_date) : ""}</div>
-                    </td>
-                    <td style={{ ...tdStyle(), color: col(r.day_change_pct) }}>{pct(r.day_change_pct)}</td>
-                    <td style={tdStyle()}>{inr(r.invested)}</td>
-                    <td style={{ ...tdStyle(), fontWeight: 700 }}>{inr(r.value)}</td>
-                    <td style={{ ...tdStyle(), color: col(r.pnl), fontWeight: 700 }}>{signed(r.pnl)}</td>
-                    <td style={{ ...tdStyle(), color: col(r.pnl_pct) }}>{pct(r.pnl_pct)}</td>
-                    <td style={{ ...tdStyle(), color: col(r.xirr) }}>{r.xirr == null ? "—" : `${r.xirr.toFixed(2)}%`}</td>
-                    <td style={{ ...tdStyle(), color: "var(--text-secondary)" }}
-                        title={r.next_long_term ? `More become long-term on ${r.next_long_term}` : r.tax_class === "debt" ? "Debt funds bought from Apr 2023 are taxed at slab however long they are held" : ""}>
-                      {r.long_term_units >= r.units - 0.001 ? "all" : r.long_term_units > 0 ? `${qtyTxt(r.long_term_units)} of ${qtyTxt(r.units)}`
-                        : r.next_long_term ? `from ${r.next_long_term}` : r.undated_units > 0 ? "older — date unknown" : "never (slab)"}
-                    </td>
-                    <td style={{ ...tdStyle("left"), color: "var(--text-secondary)", fontSize: "11px" }}
-                        title={r.lots.map(l => `${l.qty} units bought ${l.date ?? "before the statement"} for ${inr(l.cost)}`).join("\n")}>
-                      {r.lots.slice(0, 3).map(l => `${l.qty.toLocaleString("en-IN", { maximumFractionDigits: 1 })} · ${l.days == null ? "older" : `${l.days}d`}`).join(", ")}
-                      {r.lots.length > 3 ? ` +${r.lots.length - 3}` : ""}
-                    </td>
-                    <td style={tdStyle("left")}>
-                      {r.portfolio ? (
-                        <span style={{ fontSize: "11px", color: (age ?? 0) > 50 ? "var(--warning)" : "var(--text-secondary)", cursor: "pointer" }}
-                              title={`${r.portfolio.filename || ""} — click to replace`} onClick={() => pickFor(r.isin)}>
-                          {fmtDate(r.portfolio.as_of)} · {r.portfolio.n} · {r.portfolio.equity_pct ?? "—"}% shares
-                        </span>
-                      ) : (
-                        <button onClick={() => pickFor(r.isin)} style={{ ...btnStyle(), padding: "2px 8px", fontSize: "11px" }}
-                          title={amcPage(r.amc) ? `Download from ${amcPage(r.amc)}` : "From the fund house's website: statutory disclosures → monthly portfolio"}>Upload</button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {showTx && (
-        <div style={{ ...cardStyle, padding: 0, overflowX: "auto", marginTop: "12px" }}>
-          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "900px" }}>
-            <thead><tr>{["DATE", "SCHEME", "NAME", "TYPE", "AMOUNT", "UNITS", "NAV", "BALANCE"].map((h, i) => <th key={h} style={thStyle(i < 4 ? "left" : "right")}>{h}</th>)}</tr></thead>
-            <tbody>
-              {txns.map(x => (
-                <tr key={x.id}>
-                  <td style={tdStyle("left")}>{x.date}</td>
-                  <td style={{ ...tdStyle("left"), maxWidth: "320px", overflow: "hidden", textOverflow: "ellipsis" }} title={`${x.scheme} · folio ${x.folio}`}>{x.scheme}</td>
-                  <td style={{ ...tdStyle("left"), color: "var(--text-secondary)" }}>{x.name}</td>
-                  <td style={{ ...tdStyle("left"), fontWeight: 600, color: x.kind === "buy" ? "var(--positive)" : x.kind === "sell" ? "var(--negative)" : "var(--text-muted)" }}
-                      title={x.description || ""}>{x.description || x.kind}</td>
-                  <td style={tdStyle()}>{x.amount == null ? "—" : inr(Math.abs(x.amount), 2)}</td>
-                  <td style={tdStyle()}>{x.units == null ? "" : x.units.toLocaleString("en-IN", { maximumFractionDigits: 3 })}</td>
-                  <td style={tdStyle()}>{x.nav == null ? "" : x.nav.toFixed(4)}</td>
-                  <td style={tdStyle()}>{x.balance == null ? "" : x.balance.toLocaleString("en-IN", { maximumFractionDigits: 3 })}</td>
-                </tr>
-              ))}
-              {txns.length === 0 && <tr><td colSpan={8} style={{ ...tdStyle("left"), color: "var(--text-faint)", fontStyle: "italic" }}>No transactions.</td></tr>}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ─── All holdings: shares, ETFs and funds in one list ───────────────────────
 
@@ -1157,6 +689,7 @@ const TYPE_STYLE: Record<string, { label: string; rgb: string; color: string }> 
   direct: { label: "Direct", rgb: "--accent-rgb", color: "var(--accent)" },
   etf: { label: "ETF", rgb: "--ai-rgb", color: "var(--ai)" },
   mf: { label: "Fund", rgb: "--positive-rgb", color: "var(--positive-strong)" },
+  fno: { label: "F&O", rgb: "--warning-rgb", color: "var(--warning)" },
 };
 function TypeChip({ t }: { t: string }) {
   const st = TYPE_STYLE[t] || { label: t, rgb: "--ink-rgb", color: "var(--text-secondary)" };
@@ -1187,14 +720,98 @@ function MixBar({ parts }: { parts: { label: string; value: number; pct: number 
   );
 }
 
-function OverviewTab({ data, many, who, onPick, onTab }: {
-  data: OverviewResp | null; many: boolean; who: string; onPick: (n: string) => void;
-  onTab: (k: "holdings" | "funds" | "exposure") => void;
+function OverviewTab({ data, many, who, broker, onPick, onTab, onReload, setMsg }: {
+  data: OverviewResp | null; many: boolean; who: string; broker: string; onPick: (n: string) => void;
+  onTab: (k: "exposure" | "fno" | "tax" | "trades") => void; onReload: () => void;
+  setMsg: (m: { text: string; tone: "ok" | "err" } | null) => void;
 }) {
   const [type, setType] = useState<"" | "stock" | "etf" | "mf">("");
   const [sort, setSort] = useState<"value" | "pnl" | "pnl_pct" | "day" | "name">("value");
   const [q, setQ] = useState("");
-  if (!data) return <div style={{ ...cardStyle, fontSize: "13px", color: "var(--text-muted)" }}>Loading holdings…</div>;
+  const [open, setOpen] = useState<string | null>(null);
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState("");
+  const [forScheme, setForScheme] = useState<string | null>(null);
+  const casRef = useRef<HTMLInputElement | null>(null);
+  const pfRef = useRef<HTMLInputElement | null>(null);
+
+  const importCas = async (e: ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+    setBusy("cas"); setMsg(null);
+    try {
+      const r = await postJSON("/api/portfolio/mf/import", { filename: f.name, content_b64: await fileB64(f), password: password || null });
+      setPassword("");
+      setMsg({ tone: r.errors?.length ? "err" : "ok",
+               text: `${f.name}: ${r.schemes} scheme(s), ${r.added} transaction line(s) added, ${r.duplicates} already on file`
+                 + (r.period_from ? ` · statement ${fmtDate(r.period_from)} → ${fmtDate(r.period_to)}` : "")
+                 + (r.errors?.length ? `. Check: ${r.errors.slice(0, 2).join("; ")}` : ". NAVs are being fetched from AMFI.") });
+      onReload();
+      setTimeout(onReload, 8000);
+    } catch (err: any) {
+      setMsg({ text: `Statement import failed: ${err.message}`, tone: "err" });
+    } finally { setBusy(""); }
+  };
+  const uploadPortfolios = async (e: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";
+    if (!files.length) return;
+    const scheme = forScheme;
+    setForScheme(null);
+    setBusy("pf"); setMsg(null);
+    const lines: string[] = [];
+    let bad = false;
+    for (const f of files) {
+      try {
+        const r = await postJSON("/api/portfolio/mf/portfolio-file", { filename: f.name, content_b64: await fileB64(f), scheme_isin: scheme });
+        const m = (r.matched || []).map((x: any) => `${String(x.scheme).split(" - ")[0]} (${fmtDate(x.as_of)}${x.date_found ? "" : " — date assumed"}, ${x.stocks} stocks, ${x.equity_pct}% in shares)`);
+        const um = (r.unmatched || []).map((x: any) => `${x.scheme} — best guess "${x.best}" was not close enough`);
+        if (!m.length) bad = true;
+        lines.push(`${f.name}: ${m.length ? m.join("; ") : "no fund or ETF you hold matched"}${um.length ? `. ${um.join("; ")}` : ""}`);
+      } catch (err: any) { bad = true; lines.push(`${f.name}: ${err.message}`); }
+    }
+    setMsg({ text: lines.join(" · "), tone: bad ? "err" : "ok" });
+    setBusy("");
+    onReload();
+  };
+  const refreshNavs = async () => {
+    setBusy("nav"); setMsg(null);
+    try {
+      const r = await postJSON("/api/portfolio/mf/navs/refresh", {});
+      setMsg({ text: `NAVs: ${r.updated} scheme(s) updated from AMFI${r.missing ? `, ${r.missing} not in AMFI's file` : ""}.`, tone: "ok" });
+      onReload();
+    } catch (err: any) { setMsg({ text: `NAV refresh failed: ${err.message}`, tone: "err" }); }
+    finally { setBusy(""); }
+  };
+  const setClass = async (isin: string, cls: string) => {
+    try { await postJSON("/api/portfolio/mf/tax-class", { isin, tax_class: cls || null }); onReload(); }
+    catch (err: any) { setMsg({ text: err.message, tone: "err" }); }
+  };
+  const pickFor = (isin: string | null) => { setForScheme(isin); setTimeout(() => pfRef.current?.click(), 0); };
+
+  const tools = (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center", marginBottom: "10px" }}>
+      <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.3px" }}>MUTUAL FUNDS</span>
+      <input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="off"
+        placeholder="CAS password, if any" title="Only used to open the PDF; never stored" style={{ ...inputStyle, width: "160px" }} />
+      <button onClick={() => casRef.current?.click()} disabled={busy === "cas"} style={btnStyle()}
+        title="CAMS or KFintech Consolidated Account Statement (detailed, with transactions), from the first investment to today. Re-importing adds only what is new.">
+        {busy === "cas" ? "Reading statement…" : "Import CAS (PDF)"}
+      </button>
+      <input ref={casRef} type="file" accept=".pdf,application/pdf" onChange={importCas} style={{ display: "none" }} />
+      <button onClick={() => pickFor(null)} disabled={busy === "pf"} style={btnStyle()}
+        title="Each fund house's month-end portfolio file (Excel, PDF or zip), for funds and ETFs. Each sheet is matched to what you hold.">
+        {busy === "pf" ? "Reading portfolios…" : "Upload fund portfolios"}
+      </button>
+      <input ref={pfRef} type="file" multiple accept=".xlsx,.xls,.xlsm,.pdf,.zip" onChange={uploadPortfolios} style={{ display: "none" }} />
+      <button onClick={refreshNavs} disabled={busy === "nav"} style={btnStyle()} title="Latest NAVs from AMFI (also fetched at 07:00 and 22:30)">
+        {busy === "nav" ? "Fetching…" : "Refresh NAVs"}
+      </button>
+    </div>
+  );
+
+  if (!data) return <div>{tools}<div style={{ ...cardStyle, fontSize: "13px", color: "var(--text-muted)" }}>Loading holdings…</div></div>;
   const all = Array.isArray(data.rows) ? data.rows : [];
   const f = q.trim().toLowerCase();
   const rows = all.filter(r => (!type || r.type === type)
@@ -1210,8 +827,14 @@ function OverviewTab({ data, many, who, onPick, onTab }: {
   const sortTh = (k: typeof sort, label: string, align: "left" | "right" = "right", title?: string) => (
     <th style={{ ...thStyle(align), cursor: "pointer", color: sort === k ? "var(--accent)" : undefined }} title={title} onClick={() => setSort(k)}>{label}</th>
   );
+  const fundsMissing = all.filter(r => (r.type === "mf" || r.type === "etf") && !r.portfolio && r.tax_class === "equity");
+  const COLS = many ? 15 : 14;
+  const lotLine = (l: OvLot) => `${l.qty.toLocaleString("en-IN", { maximumFractionDigits: 3 })} bought ${l.date ? fmtDate(l.date) : "before the history on file"}`
+    + `${l.days != null ? ` · ${l.days} days` : ""}${l.long_term ? " · long-term" : ""}${l.broker ? ` · ${atLabel(l.broker)}` : ""}${l.cost != null ? ` · cost ${inr(l.cost)}` : ""}`;
+
   return (
     <div>
+      {tools}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: "10px", marginBottom: "12px" }}>
         <Tile label="Current value" value={inr(t?.value)} sub={`invested ${inr(t?.invested)}${t?.unpriced ? ` · ${t.unpriced} at cost (no price)` : ""}`} />
         <Tile label="Unrealised P&L" value={signed(t?.pnl)} color={col(t?.pnl)}
@@ -1219,7 +842,7 @@ function OverviewTab({ data, many, who, onPick, onTab }: {
         <Tile label="Day's P&L" value={signed(t?.day_pnl)} color={col(t?.day_pnl)} sub="shares & ETFs live · funds at the latest NAV" />
         <Tile label={`Realised FY ${data.realised_fy || ""}`} value={signed((data.realised_fy_shares || 0) + (data.realised_fy_funds || 0))}
               color={col((data.realised_fy_shares || 0) + (data.realised_fy_funds || 0))}
-              sub={`shares ${signed(data.realised_fy_shares)} · funds ${signed(data.realised_fy_funds)}`} />
+              sub={`shares ${signed(data.realised_fy_shares)} · funds ${signed(data.realised_fy_funds)} · F&O in its tab`} />
       </div>
 
       <div style={{ ...cardStyle, padding: "12px 14px", marginBottom: "12px" }}>
@@ -1231,6 +854,7 @@ function OverviewTab({ data, many, who, onPick, onTab }: {
         ]} />
         <div style={{ fontSize: "11px", color: "var(--text-faint)", marginTop: "6px" }}>
           What the ETFs and funds themselves hold — sectors and stocks — is in <b style={{ cursor: "pointer", textDecoration: "underline" }} onClick={() => onTab("exposure")}>Analytics</b>.
+          {broker && " Mutual funds are left out while a broker is picked."}
         </div>
       </div>
 
@@ -1256,18 +880,33 @@ function OverviewTab({ data, many, who, onPick, onTab }: {
         </div>
       )}
 
+      {((data.warnings?.length ?? 0) > 0 || fundsMissing.length > 0) && (
+        <details style={{ ...cardStyle, padding: "10px 14px", marginBottom: "10px", borderColor: "var(--warning-border)", background: "var(--warning-bg)" }}>
+          <summary style={{ cursor: "pointer", fontSize: "12px", fontWeight: 700, color: "var(--warning)" }}>
+            {[fundsMissing.length ? `${fundsMissing.length} equity fund(s)/ETF(s) without a month-end portfolio (Analytics cannot see inside them)` : "",
+              data.warnings?.length ? `${data.warnings.length} note(s) on the history` : ""].filter(Boolean).join(" · ")}
+          </summary>
+          {fundsMissing.map(r => (
+            <div key={r.key} style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "4px" }}>
+              • <TypeChip t={r.type} /> {r.label || r.symbol} — {amcPage(r.amc || null) ? <a href={amcPage(r.amc || null)!} target="_blank" rel="noreferrer">{r.amc} portfolios</a>
+                : `${r.amc || "the fund house"} website → statutory disclosures → monthly portfolio`}, then
+              <b style={{ cursor: "pointer", textDecoration: "underline", marginLeft: "4px" }} onClick={() => pickFor(r.isin)}>upload for this one</b>
+            </div>
+          ))}
+          {(data.warnings || []).map((w, i) => <div key={i} style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "4px" }}>• {w}</div>)}
+        </details>
+      )}
+
       <div style={{ display: "flex", gap: "6px", alignItems: "center", marginBottom: "10px", flexWrap: "wrap" }}>
         {([["", "All", t?.count], ["stock", "Stocks", bt?.stock?.count], ["etf", "ETFs", bt?.etf?.count], ["mf", "Mutual funds", bt?.mf?.count]] as const).map(([k, l, n]) => (
           <button key={k || "all"} onClick={() => setType(k)} style={btnStyle(type === k)}>{l} ({n ?? 0})</button>
         ))}
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Filter name, sector, category" style={{ ...inputStyle, width: "210px" }} />
-        <span style={{ marginLeft: "auto", fontSize: "11px", color: "var(--text-faint)" }}>
-          Lots, tax dates and selling are in <b style={{ cursor: "pointer" }} onClick={() => onTab("holdings")}>Shares & ETFs</b> and <b style={{ cursor: "pointer" }} onClick={() => onTab("funds")}>Mutual funds</b>
-        </span>
+        <span style={{ marginLeft: "auto", fontSize: "11px", color: "var(--text-faint)" }}>Click a row for its lots, tax dates and detail</span>
       </div>
 
       <div style={{ ...cardStyle, padding: 0, overflowX: "auto" }}>
-        <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "1150px" }}>
+        <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "1200px" }}>
           <thead>
             <tr>
               {sortTh("name", "HOLDING", "left")}
@@ -1283,43 +922,105 @@ function OverviewTab({ data, many, who, onPick, onTab }: {
               {sortTh("pnl", "P&L")}
               {sortTh("pnl_pct", "P&L %")}
               <th style={thStyle()} title="Share of everything you hold">WEIGHT</th>
+              <th style={thStyle()} title="Units past the long-term holding period (12 months for shares and equity funds)">LONG-TERM</th>
               <th style={thStyle("left")}>SECTOR / CATEGORY</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map(r => (
-              <tr key={`${r.type}:${r.name}:${r.key}`}>
-                <td style={{ ...tdStyle("left"), maxWidth: "300px", overflow: "hidden", textOverflow: "ellipsis" }} title={`${r.label || r.symbol || ""}${r.isin ? ` · ${r.isin}` : ""}`}>
-                  <b style={{ color: "var(--text-primary)" }}>{r.type === "mf" ? r.label : r.symbol}</b>
-                  {r.type === "etf" && r.label && r.label !== r.symbol && <div style={{ fontSize: "10px", color: "var(--text-faint)" }}>{r.label}</div>}
-                  {r.type === "mf" && r.amc && <div style={{ fontSize: "10px", color: "var(--text-faint)" }}>{r.amc}</div>}
-                </td>
-                <td style={tdStyle("left")}><TypeChip t={r.type} /></td>
-                {many && <td style={{ ...tdStyle("left"), color: "var(--text-secondary)" }}>{r.name}</td>}
-                <td style={{ ...tdStyle("left"), fontSize: "11px", color: "var(--text-secondary)" }}>{r.at.map(atLabel).join(" + ")}</td>
-                <td style={tdStyle()}>{r.type === "mf" ? r.qty.toLocaleString("en-IN", { maximumFractionDigits: 3 }) : qtyTxt(r.qty)}</td>
-                <td style={tdStyle()}>{r.avg ? inr(r.avg, r.type === "mf" ? 4 : 2) : "—"}</td>
-                <td style={tdStyle()} title={r.price_date ? `NAV of ${fmtDate(r.price_date)}` : ""}>
-                  {r.price ? inr(r.price, r.type === "mf" ? 4 : 2) : "—"}
-                  {r.type === "mf" && r.price_date && <div style={{ fontSize: "10px", color: "var(--text-faint)" }}>{fmtDate(r.price_date)}</div>}
-                </td>
-                <td style={{ ...tdStyle(), color: col(r.day_change_pct) }}>{pct(r.day_change_pct)}</td>
-                <td style={tdStyle()}>{inr(r.invested)}</td>
-                <td style={{ ...tdStyle(), fontWeight: 700 }}>{r.value == null ? <span title="No price yet — counted at cost">{inr(r.invested)}*</span> : inr(r.value)}</td>
-                <td style={{ ...tdStyle(), color: col(r.pnl), fontWeight: 700 }}>{signed(r.pnl)}</td>
-                <td style={{ ...tdStyle(), color: col(r.pnl_pct) }}>{pct(r.pnl_pct)}</td>
-                <td style={tdStyle()}>{r.weight == null ? "—" : `${r.weight.toFixed(1)}%`}</td>
-                <td style={{ ...tdStyle("left"), fontSize: "11px", color: "var(--text-secondary)", maxWidth: "220px", overflow: "hidden", textOverflow: "ellipsis" }}
-                    title={r.industry || r.category || ""}>{r.sector || r.category || "—"}</td>
-              </tr>
-            ))}
-            {rows.length === 0 && <tr><td colSpan={many ? 14 : 13} style={{ ...tdStyle("left"), color: "var(--text-faint)", fontStyle: "italic" }}>Nothing held.</td></tr>}
+            {rows.map(r => {
+              const k = `${r.type}:${r.name}:${r.key}`;
+              const isOpen = open === k;
+              const lt = r.long_term_qty ?? 0;
+              return (
+                <Fragment key={k}>
+                  <tr onClick={() => setOpen(isOpen ? null : k)} style={{ cursor: "pointer", background: isOpen ? "rgba(var(--accent-rgb),0.04)" : undefined }}>
+                    <td style={{ ...tdStyle("left"), maxWidth: "300px", overflow: "hidden", textOverflow: "ellipsis" }} title={`${r.label || r.symbol || ""}${r.isin ? ` · ${r.isin}` : ""}`}>
+                      <span style={{ color: "var(--text-faint)", marginRight: "5px" }}>{isOpen ? "▾" : "▸"}</span>
+                      <b style={{ color: "var(--text-primary)" }}>{r.type === "mf" ? r.label : r.symbol}</b>
+                      {r.type === "etf" && r.label && r.label !== r.symbol && <div style={{ fontSize: "10px", color: "var(--text-faint)", marginLeft: "15px" }}>{r.label}</div>}
+                      {r.type === "mf" && r.amc && <div style={{ fontSize: "10px", color: "var(--text-faint)", marginLeft: "15px" }}>{r.amc}</div>}
+                    </td>
+                    <td style={tdStyle("left")}><TypeChip t={r.type} /></td>
+                    {many && <td style={{ ...tdStyle("left"), color: "var(--text-secondary)" }}>{r.name}</td>}
+                    <td style={{ ...tdStyle("left"), fontSize: "11px", color: "var(--text-secondary)" }}>{r.at.map(atLabel).join(" + ")}</td>
+                    <td style={tdStyle()}>{r.type === "mf" ? r.qty.toLocaleString("en-IN", { maximumFractionDigits: 3 }) : qtyTxt(r.qty)}</td>
+                    <td style={tdStyle()}>{r.avg ? inr(r.avg, r.type === "mf" ? 4 : 2) : "—"}</td>
+                    <td style={tdStyle()} title={r.price_date ? `NAV of ${fmtDate(r.price_date)}` : ""}>
+                      {r.price ? inr(r.price, r.type === "mf" ? 4 : 2) : "—"}
+                      {r.type === "mf" && r.price_date && <div style={{ fontSize: "10px", color: r.nav_source === "statement" ? "var(--warning)" : "var(--text-faint)" }}>{fmtDate(r.price_date)}</div>}
+                    </td>
+                    <td style={{ ...tdStyle(), color: col(r.day_change_pct) }}>{pct(r.day_change_pct)}</td>
+                    <td style={tdStyle()}>{inr(r.invested)}</td>
+                    <td style={{ ...tdStyle(), fontWeight: 700 }}>{r.value == null ? <span title="No price yet — counted at cost">{inr(r.invested)}*</span> : inr(r.value)}</td>
+                    <td style={{ ...tdStyle(), color: col(r.pnl), fontWeight: 700 }}>{signed(r.pnl)}</td>
+                    <td style={{ ...tdStyle(), color: col(r.pnl_pct) }}>{pct(r.pnl_pct)}</td>
+                    <td style={tdStyle()}>{r.weight == null ? "—" : `${r.weight.toFixed(1)}%`}</td>
+                    <td style={{ ...tdStyle(), color: "var(--text-secondary)", fontSize: "11px" }}
+                        title={r.next_long_term ? `More become long-term on ${r.next_long_term}` : ""}>
+                      {lt >= r.qty - 0.001 ? "all" : lt > 0 ? `${qtyTxt(Math.round(lt * 1000) / 1000)} of ${qtyTxt(Math.round(r.qty * 1000) / 1000)}`
+                        : r.next_long_term ? `from ${fmtDate(r.next_long_term)}` : (r.undated_qty ?? 0) > 0 ? "older — date unknown" : r.type === "mf" ? "never (slab)" : "—"}
+                    </td>
+                    <td style={{ ...tdStyle("left"), fontSize: "11px", color: "var(--text-secondary)", maxWidth: "220px", overflow: "hidden", textOverflow: "ellipsis" }}
+                        title={r.industry || r.category || ""}>{r.sector || r.category || "—"}</td>
+                  </tr>
+                  {isOpen && (
+                    <tr>
+                      <td colSpan={COLS} style={{ padding: "8px 14px 12px 34px", background: "var(--surface-2)", borderBottom: "1px solid var(--border-subtle)", fontSize: "12px", color: "var(--text-secondary)" }}>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "24px" }}>
+                          <div style={{ minWidth: "280px" }}>
+                            <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--text-muted)", marginBottom: "4px" }}>LOTS (FIRST IN, FIRST OUT)</div>
+                            {(r.lots || []).length ? (r.lots || []).map((l, i) => <div key={i}>{lotLine(l)}</div>) : <div>—</div>}
+                            {r.next_long_term && <div style={{ marginTop: "4px" }}>Next lot turns long-term on <b>{fmtDate(r.next_long_term)}</b>.</div>}
+                          </div>
+                          {(r.parts?.length ?? 0) > 1 && (
+                            <div style={{ minWidth: "240px" }}>
+                              <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--text-muted)", marginBottom: "4px" }}>BY BROKER</div>
+                              {r.parts!.map((p, i) => (
+                                <div key={i}>{atLabel(p.broker)}{p.account ? ` (${p.account})` : ""}: {qtyTxt(p.qty)} @ {inr(p.avg, 2)} · invested {inr(p.invested)}{p.value != null ? ` · now ${inr(p.value)}` : ""}</div>
+                              ))}
+                            </div>
+                          )}
+                          {r.type === "mf" && (
+                            <div style={{ minWidth: "260px" }}>
+                              <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--text-muted)", marginBottom: "4px" }}>FUND</div>
+                              <div>{r.category || "category not known yet"}{r.folios?.length ? ` · folio ${r.folios.join(", ")}` : ""}</div>
+                              <div>XIRR {r.xirr == null ? "—" : `${r.xirr.toFixed(2)}%`} · NAV {r.nav_source === "statement" ? "from the statement" : "from AMFI"}</div>
+                            </div>
+                          )}
+                          {(r.type === "mf" || r.type === "etf") && (
+                            <div style={{ minWidth: "260px" }} onClick={e => e.stopPropagation()}>
+                              <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--text-muted)", marginBottom: "4px" }}>TAX AND PORTFOLIO</div>
+                              {r.type === "mf" ? (
+                                <div>Taxed as{" "}
+                                  <select value={r.overridden ? r.tax_class || "" : ""} onChange={e => setClass(r.isin!, e.target.value)} title={r.tax_why || ""}
+                                    style={{ ...inputStyle, padding: "2px 4px", fontSize: "11px" }}>
+                                    <option value="">{classLabel(r.tax_class || "equity")} (auto)</option>
+                                    <option value="equity">Equity</option><option value="debt">Debt</option><option value="other">Other</option>
+                                  </select>
+                                  <span style={{ color: "var(--text-faint)", marginLeft: "6px" }}>{r.tax_why}</span>
+                                </div>
+                              ) : <div>Taxed as {classLabel(r.tax_class || "equity")}{r.category ? ` (${r.category})` : ""}</div>}
+                              <div style={{ marginTop: "4px" }}>
+                                Month-end portfolio: {r.portfolio ? <>{fmtDate(r.portfolio.as_of)} · {r.portfolio.n} stocks · {r.portfolio.equity_pct ?? "—"}% in shares </> : "none yet "}
+                                <button onClick={() => pickFor(r.isin)} style={{ ...btnStyle(), padding: "1px 8px", fontSize: "11px" }}>{r.portfolio ? "Replace" : "Upload"}</button>
+                                {amcPage(r.amc || null) && <a href={amcPage(r.amc || null)!} target="_blank" rel="noreferrer" style={{ marginLeft: "8px" }}>download page</a>}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
+            {rows.length === 0 && <tr><td colSpan={COLS} style={{ ...tdStyle("left"), color: "var(--text-faint)", fontStyle: "italic" }}>Nothing held.</td></tr>}
           </tbody>
         </table>
       </div>
       <div style={{ fontSize: "11px", color: "var(--text-faint)", marginTop: "6px", lineHeight: 1.6 }}>
         Shares and ETFs are merged across Upstox and Zerodha and priced live (refreshed every 30 s here); mutual funds come from your
-        CAS and are valued at AMFI's latest NAV, published once each evening.
+        CAS and are valued at AMFI's latest NAV, published once each evening (fetched at 07:00, 22:30, every 3 h while this page is open, and on Refresh NAVs).
         {data.nav?.last_ok ? ` NAVs last checked ${new Date(data.nav.last_ok).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}.` : ""}
         {data.nav?.error ? ` AMFI could not be reached (${data.nav.error.slice(0, 80)}); funds use the statement's NAV.` : ""}
       </div>
@@ -1593,6 +1294,324 @@ function AnalyticsTab({ data, loading, onRefresh, setMsg }: {
       <div style={{ marginTop: "8px" }}>
         {(data.notes || []).map((n, i) => <div key={i} style={{ fontSize: "11px", color: "var(--text-faint)", lineHeight: 1.6 }}>{n}</div>)}
       </div>
+    </div>
+  );
+}
+
+// ─── Capital gains & tax: shares, ETFs, funds and F&O for one FY ─────────────
+
+function TaxView({ tax, onFno }: { tax: TaxResp; onFno: () => void }) {
+  const card = cardStyle, th = thStyle, td = tdStyle;
+  const fl = tax.flows;
+  const assetOf = (r: TaxRow) => r.asset || (r.broker === "mf" ? "mf" : (r.isin || "").startsWith("INF") ? "etf" : "stock");
+  const fno = tax.fno;
+  return (
+    <>
+      {fl && (
+        <div style={{ ...card, padding: "10px 14px", marginBottom: "10px", display: "flex", flexWrap: "wrap", gap: "18px", fontSize: "12px", color: "var(--text-secondary)" }}>
+          <b style={{ color: "var(--text-primary)" }}>FY {tax.fy} activity</b>
+          {([["stock", "Stocks"], ["etf", "ETFs"], ["mf", "Mutual funds"]] as const).map(([k, l]) => (
+            <span key={k}><TypeChip t={k} /> {l}: bought <b>{inr(fl[k]?.bought)}</b> · sold <b>{inr(fl[k]?.sold)}</b> <span style={{ color: "var(--text-faint)" }}>({fl[k]?.count ?? 0})</span></span>
+          ))}
+          <span><TypeChip t="fno" /> F&amp;O: <b>{fl.fno?.count ?? 0}</b> trades{fno ? <> · net <b style={{ color: col(fno.net) }}>{signed(fno.net)}</b></> : ""}</span>
+        </div>
+      )}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: "10px", marginBottom: "10px" }}>
+        <Tile label={`Short-term (STCG ${(tax.stcg.rate * 100).toFixed(1).replace(".0", "")}%)`} value={signed(tax.stcg.net)} color={col(tax.stcg.net)}
+              sub={`gains ${inr(tax.stcg.gain)} · losses ${inr(-tax.stcg.loss)}`} />
+        <Tile label={`Long-term (LTCG ${(tax.ltcg.rate * 100).toFixed(1).replace(".0", "")}%)`} value={signed(tax.ltcg.net)} color={col(tax.ltcg.net)}
+              sub={`gains ${inr(tax.ltcg.gain)} · losses ${inr(-tax.ltcg.loss)}`} />
+        <Tile label="LTCG exemption used" value={`${inr(tax.ltcg.exemption_used)} of ${inr(tax.ltcg.exemption)}`}
+              sub={`taxable LTCG ${inr(tax.ltcg.taxable)}`} />
+        <Tile label="Estimated tax on capital gains" value={inr(tax.estimated_tax)} color="var(--warning)"
+              sub={tax.short_term_loss_set_off_against_long_term ? `after ${inr(tax.short_term_loss_set_off_against_long_term)} short-term loss set off` : "shares, equity ETFs and funds · before cess"} />
+        <Tile label="Intraday (speculative)" value={signed(tax.intraday.pnl)} color={col(tax.intraday.pnl)}
+              sub={`${tax.intraday.trades} round trip(s) · taxed at your slab`} />
+        <Tile label="F&O (business income)" value={fno ? signed(fno.net) : "—"} color={col(fno?.net)}
+              sub={fno ? `after ${inr(fno.charges.total)} charges · turnover ${inr(fno.turnover)} · at your slab` : "no F&O trades this year"} />
+      </div>
+      {tax.charges && (
+        <div style={{ fontSize: "12px", color: "var(--text-secondary)", marginBottom: "8px" }}>
+          Estimated charges on these sales: {inr(tax.charges.deductible)} brokerage, exchange, SEBI, stamp, GST and DP
+          (deducted from the gains above) + {inr(tax.charges.stt)} STT (not deductible from capital gains).
+          Gains before charges: {signed(tax.charges.gross_gain)}.
+        </div>
+      )}
+      {(tax.long_term_loss_carried_forward > 0 || tax.short_term_loss_carried_forward > 0) && (
+        <div style={{ fontSize: "12px", color: "var(--text-secondary)", marginBottom: "8px" }}>
+          Loss to carry forward (file the return on time to keep it):
+          {tax.short_term_loss_carried_forward > 0 && ` short-term ${inr(tax.short_term_loss_carried_forward)}`}
+          {tax.long_term_loss_carried_forward > 0 && ` long-term ${inr(tax.long_term_loss_carried_forward)}`}
+        </div>
+      )}
+      <div style={{ ...card, padding: 0, overflowX: "auto", marginBottom: "8px" }}>
+        <div style={{ padding: "10px 12px 4px", fontSize: "12px", fontWeight: 700, color: "var(--text-primary)" }}>
+          Equity-taxed sales <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>— shares, equity ETFs and equity mutual funds</span>
+        </div>
+        <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "960px" }}>
+          <thead>
+            <tr>
+              {["TERM", "WHAT", "HOLDING", "AT", "BOUGHT", "SOLD", "QTY", "BUY", "SELL", "COST", "SALE VALUE", "CHARGES", "STT", "GAIN"].map((h, i) => (
+                <th key={h} style={th(i < 4 ? "left" : "right")}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {tax.rows.map((r, i) => (
+              <tr key={i}>
+                <td style={{ ...td("left"), fontWeight: 700, color: r.term === "LTCG" ? "var(--positive-strong)" : r.term === "STCG" ? "var(--accent)" : "var(--ai)" }}
+                    title={r.grandfathered ? "Bought before 1 Feb 2018: the 31 Jan 2018 value rule may lower this gain" : ""}>
+                  {r.term}{r.grandfathered ? " *" : ""}
+                </td>
+                <td style={td("left")}><TypeChip t={assetOf(r)} /></td>
+                <td style={{ ...td("left"), fontWeight: 600, maxWidth: "260px", overflow: "hidden", textOverflow: "ellipsis" }} title={r.symbol || ""}>{r.symbol}</td>
+                <td style={td("left")}>{brokerChip(r.broker)}</td>
+                <td style={td()}>{r.buy_date}</td>
+                <td style={td()}>{r.sell_date}</td>
+                <td style={td()}>{qtyTxt(r.qty)}</td>
+                <td style={td()}>{inr(r.buy_price, 2)}</td>
+                <td style={td()}>{inr(r.sell_price, 2)}</td>
+                <td style={td()}>{inr(r.cost)}</td>
+                <td style={td()}>{inr(r.sale_value)}</td>
+                <td style={{ ...td(), color: "var(--text-muted)" }}>{inr(r.charges, 2)}</td>
+                <td style={{ ...td(), color: "var(--text-muted)" }}>{inr(r.stt, 2)}</td>
+                <td style={{ ...td(), color: col(r.tax_gain ?? r.gain), fontWeight: 700 }} title={`Before charges ${signed(r.gain)}`}>{signed(r.tax_gain ?? r.gain)}</td>
+              </tr>
+            ))}
+            {tax.rows.length === 0 && (
+              <tr><td colSpan={14} style={{ ...td("left"), color: "var(--text-faint)", fontStyle: "italic" }}>No equity-taxed sales in FY {tax.fy}.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      {(tax.mf_other?.rows?.length ?? 0) > 0 && (
+        <div style={{ ...card, padding: 0, overflowX: "auto", marginBottom: "8px" }}>
+          <div style={{ padding: "10px 12px 4px", fontSize: "12px", fontWeight: 700, color: "var(--text-primary)" }}>
+            Funds and ETFs not taxed as equity
+            <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>
+              {" "}— debt, gold, overseas, FoF. At your slab {signed(tax.mf_other!.slab_gain)}; long-term at 12.5% {signed(tax.mf_other!.ltcg_gain)}
+              {tax.mf_other!.ltcg_tax > 0 ? ` (≈ ${inr(tax.mf_other!.ltcg_tax)} tax)` : ""}. Not in the estimate above.
+            </span>
+          </div>
+          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "820px" }}>
+            <thead>
+              <tr>{["TERM", "WHAT", "HOLDING", "BOUGHT", "SOLD", "UNITS", "COST", "SALE VALUE", "GAIN"].map((h, i) => (
+                <th key={h} style={th(i < 3 ? "left" : "right")}>{h}</th>))}</tr>
+            </thead>
+            <tbody>
+              {tax.mf_other!.rows.map((r, i) => (
+                <tr key={i}>
+                  <td style={{ ...td("left"), fontWeight: 700, color: "var(--ai)" }}>{r.term === "SLAB" ? "AT SLAB" : "LTCG 12.5%"}</td>
+                  <td style={td("left")}><TypeChip t={assetOf(r)} /></td>
+                  <td style={{ ...td("left"), maxWidth: "320px", overflow: "hidden", textOverflow: "ellipsis" }} title={r.symbol || ""}>{r.symbol}</td>
+                  <td style={td()}>{r.buy_date}</td>
+                  <td style={td()}>{r.sell_date}</td>
+                  <td style={td()}>{qtyTxt(r.qty)}</td>
+                  <td style={td()}>{inr(r.cost)}</td>
+                  <td style={td()}>{inr(r.sale_value)}</td>
+                  <td style={{ ...td(), color: col(r.gain), fontWeight: 700 }}>{signed(r.gain)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {fno && (
+        <div style={{ ...card, padding: "12px 14px", marginBottom: "8px" }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: "10px", flexWrap: "wrap", marginBottom: "6px" }}>
+            <b style={{ fontSize: "12px", color: "var(--text-primary)" }}>F&amp;O — non-speculative business income</b>
+            <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
+              gross {signed(fno.gross)} (futures {signed(fno.futures)}, options {signed(fno.options)}) − charges {inr(fno.charges.total)}
+              {" "}(STT {inr(fno.charges.stt)}) = <b style={{ color: col(fno.net) }}>{signed(fno.net)}</b> · turnover {inr(fno.turnover)} · {fno.closed} closed trade(s)
+            </span>
+            <b style={{ marginLeft: "auto", fontSize: "12px", cursor: "pointer", textDecoration: "underline", color: "var(--accent)" }} onClick={onFno}>Open F&amp;O</b>
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "14px", fontSize: "11px", color: "var(--text-secondary)" }}>
+            {fno.by_underlying.slice(0, 12).map(u => (
+              <span key={u.underlying}>{u.underlying} <b style={{ color: col(u.net) }}>{signed(u.net)}</b></span>
+            ))}
+          </div>
+          {(fno.warnings?.length ?? 0) > 0 && <div style={{ fontSize: "11px", color: "var(--warning)", marginTop: "6px" }}>{fno.warnings.join(" · ")}</div>}
+        </div>
+      )}
+      {tax.notes.map((n, i) => <div key={i} style={{ fontSize: "11px", color: "var(--text-faint)", lineHeight: 1.6 }}>{n}</div>)}
+      {fno && <div style={{ fontSize: "11px", color: "var(--text-faint)", lineHeight: 1.6 }}>F&amp;O profit is added to your other income and taxed at your slab; every charge, STT included, is an expense there. A loss can be set off against any income except salary and carried forward 8 years.</div>}
+    </>
+  );
+}
+
+
+// ─── F&O: positions, closed trades, profit, charges and turnover ─────────────
+
+interface FnoPos {
+  symbol: string; underlying: string | null; instrument: string | null; expiry: string | null; expiry_estimated: boolean;
+  strike: number | null; exchange: string | null; broker: string; account: string; name: string; qty: number; side: string;
+  avg: number | null; opened: string; expired: boolean; settlement: number | null; ltp?: number | null; mtm?: number | null;
+}
+interface FnoClosed {
+  symbol: string; underlying: string | null; instrument: string | null; expiry: string | null; strike: number | null;
+  broker: string; name: string; opened: string; closed: string; qty: number; side: string; entry: number; exit: number;
+  pnl: number; how: string;
+}
+interface FnoResp {
+  fy: string; gross: number; net: number; turnover: number; closed: number; futures: number; options: number;
+  charges: { brokerage: number; stt: number; exchange: number; sebi: number; stamp: number; gst: number; total: number; turnover: number };
+  by_underlying: { underlying: string; gross: number; charges: number; net: number; trades: number }[];
+  rows: FnoClosed[]; positions: FnoPos[]; warnings: string[]; notes: string[]; financial_years: string[];
+  trade_count: number; first: string | null; last: string | null;
+}
+
+function FnoTab({ broker, who, many, setMsg }: {
+  broker: string; who: string; many: boolean; setMsg: (m: { text: string; tone: "ok" | "err" } | null) => void;
+}) {
+  const [fy, setFy] = useState("");
+  const [data, setData] = useState<FnoResp | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [settle, setSettle] = useState<Record<string, string>>({});
+  const [showAll, setShowAll] = useState(false);
+  const load = async () => {
+    setLoading(true);
+    try {
+      const qs = [fy ? `fy=${fy}` : "", broker ? `broker=${broker}` : "", who ? `name=${encodeURIComponent(who)}` : ""].filter(Boolean).join("&");
+      const d = await getJSON<FnoResp>(`/api/portfolio/fno?${qs}`);
+      setData(d);
+      if (!fy) setFy(d.fy);
+    } catch (e: any) { setMsg({ text: `F&O: ${e.message}`, tone: "err" }); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, [fy, broker, who]);
+  useEffect(() => {
+    const t = setInterval(load, 30000);
+    return () => clearInterval(t);
+  }, [fy, broker, who]);
+  const saveSettle = async (symbol: string, value: string | null) => {
+    try {
+      await postJSON("/api/portfolio/fno/settle", { symbol, price: value == null || value === "" ? null : parseFloat(value) });
+      load();
+    } catch (e: any) { setMsg({ text: e.message, tone: "err" }); }
+  };
+  if (!data) return <div style={{ ...cardStyle, fontSize: "13px", color: "var(--text-muted)" }}>{loading ? "Loading F&O…" : "No data."}</div>;
+  const th = thStyle, td = tdStyle;
+  const open = data.positions.filter(p => !p.expired);
+  const expired = data.positions.filter(p => p.expired);
+  const mtm = open.reduce((a, p) => a + (p.mtm ?? 0), 0);
+  const priced = open.some(p => p.mtm != null);
+  const contract = (x: { underlying: string | null; instrument: string | null; strike: number | null; expiry: string | null; symbol: string }) =>
+    x.underlying ? `${x.underlying} ${x.strike ? `${x.strike} ` : ""}${x.instrument || ""} · ${fmtDate(x.expiry)}` : x.symbol;
+  const rows = showAll ? data.rows : data.rows.slice(0, 100);
+  if (!data.trade_count) {
+    return (
+      <div style={{ ...cardStyle, fontSize: "13px", color: "var(--text-secondary)", lineHeight: 1.7 }}>
+        <b style={{ color: "var(--text-primary)" }}>No F&amp;O trades on file.</b><br />
+        Zerodha: Console → Reports → Tradebook → segment <b>Futures &amp; Options</b>, pick a date range (repeat per year), download CSV, then
+        <b> Import tradebook</b> at the top. Upstox: <b>Sync Upstox</b> now brings F&amp;O trades too.
+      </div>
+    );
+  }
+  return (
+    <div>
+      <div style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: "10px", flexWrap: "wrap" }}>
+        <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>Financial year</span>
+        <select value={fy} onChange={e => setFy(e.target.value)} style={inputStyle}>
+          {data.financial_years.map(f => <option key={f} value={f}>FY {f}</option>)}
+        </select>
+        <span style={{ fontSize: "11px", color: "var(--text-faint)" }}>{data.trade_count} trades on file, {data.first} → {data.last}</span>
+        <button onClick={load} disabled={loading} style={{ ...btnStyle(), marginLeft: "auto" }}>{loading ? "Refreshing…" : "Refresh"}</button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: "10px", marginBottom: "12px" }}>
+        <Tile label={`Net P&L FY ${data.fy}`} value={signed(data.net)} color={col(data.net)} sub="after estimated charges" />
+        <Tile label="Gross P&L" value={signed(data.gross)} color={col(data.gross)} sub={`futures ${signed(data.futures)} · options ${signed(data.options)}`} />
+        <Tile label="Charges (est.)" value={inr(data.charges.total)} sub={`STT ${inr(data.charges.stt)} · brokerage ${inr(data.charges.brokerage)} · exch+GST+stamp ${inr(data.charges.exchange + data.charges.gst + data.charges.stamp + data.charges.sebi)}`} />
+        <Tile label="Turnover (tax)" value={inr(data.turnover)} sub={`${data.closed} closed trade(s) · sum of |profit or loss|`} />
+        <Tile label="Open positions" value={String(open.length)} color={priced ? col(mtm) : undefined}
+              sub={priced ? `MTM ${signed(mtm)}` : open.length ? "live price only for Upstox contracts" : "nothing open"} />
+      </div>
+
+      {(data.warnings?.length ?? 0) > 0 && (
+        <div style={{ marginBottom: "10px", padding: "8px 12px", borderRadius: "8px", fontSize: "12px", background: "var(--warning-bg)", color: "var(--warning)" }}>
+          {data.warnings.map((w, i) => <div key={i}>• {w}</div>)}
+        </div>
+      )}
+
+      {(open.length > 0 || expired.length > 0) && (
+        <div style={{ ...cardStyle, padding: 0, overflowX: "auto", marginBottom: "12px" }}>
+          <div style={{ padding: "10px 12px 4px", fontSize: "12px", fontWeight: 700, color: "var(--text-primary)" }}>Open positions</div>
+          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "960px" }}>
+            <thead><tr>{["CONTRACT", "AT", ...(many ? ["NAME"] : []), "SIDE", "QTY", "AVG", "LTP", "MTM", "OPENED", "STATUS"].map((h, i) => <th key={h} style={th(i < (many ? 4 : 3) ? "left" : "right")}>{h}</th>)}</tr></thead>
+            <tbody>
+              {[...open, ...expired].map(p => (
+                <tr key={`${p.account}:${p.symbol}`}>
+                  <td style={{ ...td("left"), fontWeight: 600 }} title={p.symbol}>{contract(p)}{p.expiry_estimated ? <span title="Expiry worked out from the month; the source did not state it" style={{ color: "var(--text-faint)" }}> ≈</span> : ""}</td>
+                  <td style={td("left")}>{brokerChip(p.broker)}</td>
+                  {many && <td style={{ ...td("left"), color: "var(--text-secondary)" }}>{p.name}</td>}
+                  <td style={{ ...td("left"), fontWeight: 700, color: p.side === "long" ? "var(--positive)" : "var(--negative)" }}>{p.side.toUpperCase()}</td>
+                  <td style={td()}>{qtyTxt(Math.abs(p.qty))}</td>
+                  <td style={td()}>{inr(p.avg, 2)}</td>
+                  <td style={td()}>{p.ltp ? inr(p.ltp, 2) : "—"}</td>
+                  <td style={{ ...td(), color: col(p.mtm), fontWeight: 700 }}>{signed(p.mtm)}</td>
+                  <td style={td()}>{p.opened}</td>
+                  <td style={td()}>
+                    {p.expired ? (
+                      <span style={{ display: "inline-flex", gap: "4px", alignItems: "center" }}>
+                        <span style={{ color: "var(--warning)" }}>expired — settlement</span>
+                        <input value={settle[p.symbol] ?? (p.settlement != null ? String(p.settlement) : "")} inputMode="decimal"
+                          onChange={e => setSettle({ ...settle, [p.symbol]: e.target.value })} placeholder="price" style={{ ...inputStyle, width: "80px", padding: "2px 6px" }} />
+                        <button onClick={() => saveSettle(p.symbol, settle[p.symbol] ?? "")} style={{ ...btnStyle(), padding: "2px 8px", fontSize: "11px" }}>Save</button>
+                      </span>
+                    ) : "open"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {data.by_underlying.length > 0 && (
+        <div style={{ ...cardStyle, padding: 0, overflowX: "auto", marginBottom: "12px" }}>
+          <div style={{ padding: "10px 12px 4px", fontSize: "12px", fontWeight: 700, color: "var(--text-primary)" }}>By underlying, FY {data.fy}</div>
+          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "560px" }}>
+            <thead><tr>{["UNDERLYING", "CLOSED TRADES", "GROSS", "CHARGES", "NET"].map((h, i) => <th key={h} style={th(i ? "right" : "left")}>{h}</th>)}</tr></thead>
+            <tbody>
+              {[...data.by_underlying].sort((a, b) => b.net - a.net).map(u => (
+                <tr key={u.underlying}>
+                  <td style={{ ...td("left"), fontWeight: 700 }}>{u.underlying}</td>
+                  <td style={td()}>{u.trades}</td>
+                  <td style={{ ...td(), color: col(u.gross) }}>{signed(u.gross)}</td>
+                  <td style={{ ...td(), color: "var(--text-muted)" }}>{inr(u.charges)}</td>
+                  <td style={{ ...td(), color: col(u.net), fontWeight: 700 }}>{signed(u.net)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div style={{ ...cardStyle, padding: 0, overflowX: "auto", marginBottom: "8px" }}>
+        <div style={{ padding: "10px 12px 4px", fontSize: "12px", fontWeight: 700, color: "var(--text-primary)" }}>Closed trades, FY {data.fy} ({data.rows.length})</div>
+        <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "960px" }}>
+          <thead><tr>{["CLOSED", "CONTRACT", "AT", ...(many ? ["NAME"] : []), "SIDE", "OPENED", "QTY", "ENTRY", "EXIT", "P&L"].map((h, i) => <th key={h} style={th(i < (many ? 5 : 4) ? "left" : "right")}>{h}</th>)}</tr></thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i}>
+                <td style={td("left")}>{r.closed}{r.how !== "trade" && <span style={{ color: "var(--warning)", fontSize: "10px" }} title={r.how === "expiry_assumed_zero" ? "Open at expiry — counted as expired worthless" : "Settled at expiry at the price entered"}> {r.how === "expiry_assumed_zero" ? "expired (0)" : "expiry"}</span>}</td>
+                <td style={{ ...td("left"), fontWeight: 600 }} title={r.symbol}>{contract(r)}</td>
+                <td style={td("left")}>{brokerChip(r.broker)}</td>
+                {many && <td style={{ ...td("left"), color: "var(--text-secondary)" }}>{r.name}</td>}
+                <td style={{ ...td("left"), color: r.side === "long" ? "var(--positive)" : "var(--negative)" }}>{r.side}</td>
+                <td style={td()}>{r.opened}</td>
+                <td style={td()}>{qtyTxt(r.qty)}</td>
+                <td style={td()}>{inr(r.entry, 2)}</td>
+                <td style={td()}>{inr(r.exit, 2)}</td>
+                <td style={{ ...td(), color: col(r.pnl), fontWeight: 700 }}>{signed(r.pnl)}</td>
+              </tr>
+            ))}
+            {data.rows.length === 0 && <tr><td colSpan={many ? 10 : 9} style={{ ...td("left"), color: "var(--text-faint)", fontStyle: "italic" }}>No trades closed in FY {data.fy}.</td></tr>}
+          </tbody>
+        </table>
+        {data.rows.length > 100 && !showAll && <div style={{ padding: "8px 12px" }}><button onClick={() => setShowAll(true)} style={btnStyle()}>Show all {data.rows.length}</button></div>}
+      </div>
+      {data.notes.map((n, i) => <div key={i} style={{ fontSize: "11px", color: "var(--text-faint)", lineHeight: 1.6 }}>{n}</div>)}
     </div>
   );
 }

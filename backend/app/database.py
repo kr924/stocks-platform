@@ -448,6 +448,37 @@ class PortfolioAccount(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class FnoTrade(Base):
+    """
+    One futures or options trade (NSE / BSE equity derivatives) at Upstox or
+    Zerodha: Zerodha's F&O tradebook CSV or Upstox's trade history (segment
+    FO). Kept apart from portfolio_trades so nothing that values or matches
+    shares ever sees a contract. services/fno.py matches them per contract.
+    """
+    __tablename__ = "fno_trades"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    uid = Column(String(200), unique=True, index=True, nullable=False)
+    broker = Column(String(20), index=True, nullable=False)
+    account_id = Column(String(30), index=True, nullable=True)
+    symbol = Column(String(80), index=True, nullable=False)          # the broker's trading symbol
+    underlying = Column(String(40), index=True, nullable=True)
+    instrument = Column(String(4), nullable=True)                    # FUT | CE | PE
+    expiry = Column(String(10), nullable=True)                       # YYYY-MM-DD
+    expiry_estimated = Column(Boolean, default=False)
+    strike = Column(Float, nullable=True)
+    exchange = Column(String(10), nullable=True)                     # NFO | BFO
+    instrument_key = Column(String(100), nullable=True)
+    trade_date = Column(String(10), index=True, nullable=False)
+    trade_time = Column(String(8), nullable=True)
+    side = Column(String(4), nullable=False)
+    quantity = Column(Float, nullable=False)                         # units, not lots
+    price = Column(Float, nullable=False)
+    trade_id = Column(String(60), nullable=True)
+    order_id = Column(String(60), nullable=True)
+    source = Column(String(30), nullable=False)
+    imported_at = Column(DateTime, default=datetime.utcnow)
+
+
 # ─── Mutual funds (services/mutual_funds.py) ────────────────────────────────
 
 class MfTransaction(Base):

@@ -411,7 +411,9 @@ a capital-gains summary per financial year, derived from trades alone.
   Zerodha: the Console tradebook **CSV**, read in the browser and posted as
   text (no `python-multipart`, no Excel reader in the image; `.xlsx` is
   refused with a pointer to the CSV). The header row is found by its
-  columns, so title lines above it are fine. Only equity is kept. By hand:
+  columns, so title lines above it are fine. Equity rows go to
+  `portfolio_trades`, F&O rows (segment FO / exchange NFO, BFO) to
+  `fno_trades` (below); commodity and currency are skipped. By hand:
   IPO allotments, bonus shares at price 0, older history.
 - **Idempotent.** `uid` = broker + exchange + exchange trade id + side, or the
   row's content and line number when there is no trade id. Re-importing a
@@ -483,7 +485,13 @@ a capital-gains summary per financial year, derived from trades alone.
 
 `services/mutual_funds.py`, `/api/portfolio/mf/*` and `/api/portfolio/exposure`,
 tables `mf_transactions`, `mf_snapshots`, `mf_navs`, `mf_portfolios`,
-`stock_industries`; the **Mutual funds** and **Exposure** tabs of 💼 Portfolio.
+`stock_industries`. Since 18 Nov 2026 the Portfolio page's tabs are **All
+holdings / Analytics / F&O / Capital gains & tax / Trades**: the separate
+"Shares & ETFs" and "Mutual funds" tabs were folded into All holdings (owner's
+call) — each row opens in place to its lots and their age, per-broker split,
+long-term date, and for funds and ETFs the tax class and portfolio file; the
+CAS import, portfolio upload and NAV refresh sit above the table; fund
+transactions moved to Trades beside shares and F&O.
 
 - **Ledger = the CAS.** The CAMS / KFintech Consolidated Account Statement PDF
   (detailed, from the first investment) is read as visual rows from PyMuPDF
@@ -566,6 +574,40 @@ tables `mf_transactions`, `mf_snapshots`, `mf_navs`, `mf_portfolios`,
   and Tata's disclosure pages.
 - `ops/check_mutual_funds.py` checks the rules; given files it prints what the
   CAS and portfolio parsers read (`docker cp` the file in first).
+
+- **Tax view per kind.** `tax_summary` tags every sale `asset` stock / etf /
+  mf. An ETF sale whose fund is not equity (gold, debt, overseas — class from
+  AMFI's category, else the name) moves to `mf_other` with the listed-unit
+  rule: long-term after 12 months from 23 Jul 2024 (`_term(..., listed=True)`).
+  `flows` gives the FY's money in and out per kind, and `fno` the F&O summary.
+
+## Futures & options (18 Nov 2026)
+
+`services/fno.py`, table `fno_trades`, `/api/portfolio/fno*`, the **F&O** tab.
+
+- **Sources.** Zerodha's F&O tradebook through the same Import tradebook
+  (several files at once; `tradebook-QY8357-FO.csv` gives the client ID), and
+  Upstox's `historical-trades` with `segment=FO` (one more request per FY) plus
+  today's `_FO|` trades, in the same Sync Upstox / 16:10 run. Kept out of
+  `portfolio_trades` so nothing that values or matches shares sees a contract.
+- **Contract from the symbol**: `NIFTY24AUGFUT`, `NIFTY24AUG24000CE` monthly,
+  `NIFTY2481524000CE` weekly (yy, month 1-9/O/N/D, day). A stated expiry wins
+  (Zerodha `expiry_date`, Upstox `expiry`); otherwise a monthly expiry is the
+  last Tuesday (NSE from Sep 2025) or Thursday (before, and BSE), marked `≈`.
+- **FIFO per account and contract, either direction** (a sell with nothing
+  long opens a short). Quantities are units. A position open after expiry
+  settles there at the price entered (`fno_settlements`), else an option at 0
+  ("expired worthless", flagged) and a future stays open until a price is
+  entered. Open positions are marked to market only where the trade carried
+  an Upstox instrument key (Zerodha rows have none).
+- **Charges estimated**, dated: STT on the sell — futures 0.0125% → 0.02%
+  (1 Oct 2024) → 0.05% (1 Apr 2026), options premium 0.0625% → 0.1% → 0.15%;
+  NSE exchange futures 0.0019% → 0.00173%, options 0.0495% → 0.03503%; BSE
+  options 0.0325%; stamp 0.002% / 0.003% on the buy; SEBI; GST; ₹20 an order
+  (Zerodha futures 0.03% if less). All of it, STT included, is an expense:
+  F&O is non-speculative business income at the slab rate.
+- **Turnover** = Σ |P&L| of closed trades (ICAI 2022), shown for the audit test.
+- `ops/check_fno.py` replays symbols, long/short matching, expiry and STT.
 
 ## Like-for-like: a quarter against the same quarter last year
 
