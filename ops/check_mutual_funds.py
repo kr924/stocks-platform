@@ -64,6 +64,14 @@ def builtin():
     check("overseas ISIN", M.isin_kind("LU0117844026"), "foreign")
     check("date: as on October 31, 2026", M._find_date("Portfolio as on October 31, 2026"), "2026-10-31")
     check("date: 31st Oct 2026", M._find_date("as on 31st Oct 2026"), "2026-10-31")
+    for ind, sec in [("Banks", "Financial Services"), ("Private Sector Bank", "Financial Services"),
+                     ("IT - Software", "Information Technology"), ("Computers - Software & Consulting", "Information Technology"),
+                     ("Healthcare Services", "Healthcare"), ("Edible Oil", "Fast Moving Consumer Goods"),
+                     ("Environmental Services", "Services"), ("Cement & Cement Products", "Construction Materials"),
+                     ("Agricultural, Commercial & Construction Vehicles", "Capital Goods"), ("Iron & Steel", "Metals & Mining")]:
+        check(f"sector of {ind}", M.sector_of(ind), sec)
+    check("gold ETF is gold", M.asset_class_of("Nippon India ETF Gold BeES", "Other Scheme - Gold ETF", "other"), "gold")
+    check("liquid ETF is debt", M.asset_class_of("Nippon India ETF Nifty 1D Rate Liquid BeES", None, "debt"), "debt")
     check("date: month only", M._find_date("Monthly portfolio for October 2026"), "2026-10-31")
 
 

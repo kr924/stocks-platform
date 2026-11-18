@@ -538,6 +538,29 @@ tables `mf_transactions`, `mf_snapshots`, `mf_navs`, `mf_portfolios`,
   most daily, only when a direct holding has none) for the rest — the two use
   different names, so a direct-only stock may sit in a BSE-named group.
   Funds without a file appear as "Funds not broken down yet".
+- **All holdings** (`overview()`, `GET /api/portfolio/overview`, the
+  Portfolio page's first tab, 18 Nov 2026): shares and ETFs merged per stock
+  across Upstox and Zerodha (live price, re-read every 30 s while open) and
+  the CAS funds (latest NAV) in one table — type, where held, weight, sector
+  or AMFI category — with totals by type and by name.
+- **ETFs bought on the exchange are funds.** A share-ledger row whose ISIN is
+  `INF…` is an ETF: it is priced live like a share, gets AMFI's name and
+  category (`held_isins` includes them), can have a portfolio file like any
+  scheme (`_scheme_info` lists them; the exchange's issuer name "…Mutual
+  Fund-Permitted" is not used for matching), and in Analytics is looked
+  through instead of counted as a stock.
+- **Analytics** (`exposure()`): sector → industry → stock → source (direct /
+  ETF / fund, each with its amount and % of the fund), plus buckets for what
+  is not shares. A fund's remainder goes to *gold & silver* when it is a
+  gold/silver fund, else *debt, cash & others*; a whole fund with no file goes
+  to its bucket straight away when it is debt or gold, and only an equity
+  fund waits under *not broken down*. Sectors come from industries by keyword
+  (`SECTOR_RULES`, first match wins, specific phrases before the generic words
+  they contain), so AMFI's and BSE's industry names land in the same
+  NSE-style sectors.
+- **NAV timing.** AMFI publishes one NAV per scheme per business day, in the
+  evening. Fetched at 07:00 and 22:30 (`mf_nav_evening_date`), after an
+  import, every 3 h while a fund view is open, and by Refresh NAVs.
 - Auto-download of AMC files was not built: their pages are JS-rendered and
   none could be reached from the build sandbox. The page links HDFC, Motilal
   and Tata's disclosure pages.

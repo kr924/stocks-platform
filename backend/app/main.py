@@ -275,7 +275,11 @@ async def _intelligence_scheduler():
 
                 # 07:00 — yesterday's mutual-fund NAVs from AMFI (published
                 # late evening), so the day's change compares two closes.
+                # 22:30 — the same evening, once most fund houses have published.
                 if (now_ist.hour, now_ist.minute) >= (7, 0) and _daily_due(last_run, "mf_nav_date", today_str):
+                    from app.services import mutual_funds as _mf
+                    _mf.refresh_navs_async(force=True)
+                if (now_ist.hour, now_ist.minute) >= (22, 30) and _daily_due(last_run, "mf_nav_evening_date", today_str):
                     from app.services import mutual_funds as _mf
                     _mf.refresh_navs_async(force=True)
 

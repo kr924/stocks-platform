@@ -491,6 +491,12 @@ def mf_portfolio_delete(isin: str, db: Session = Depends(get_db)):
     return {"deleted": n}
 
 
+@router.get("/overview")
+def overview(name: Optional[str] = None, db: Session = Depends(get_db)):
+    """Shares, ETFs and mutual funds in one list, with totals by type and by name."""
+    return MF.overview(db, _name(name))
+
+
 @router.get("/exposure")
 def exposure(name: Optional[str] = None, db: Session = Depends(get_db)):
     """Shares held directly plus each fund's slice of every stock, by stock and by industry."""

@@ -439,10 +439,29 @@ def fetch_navall() -> Dict[str, dict]:
 
 
 def held_isins(db) -> List[str]:
+    """Schemes from the statements plus ETFs bought on the exchange (fund ISINs, INF…), for names and categories."""
     from app.database import MfTransaction, MfSnapshot
     s = {i for (i,) in db.query(MfTransaction.isin).distinct().all()}
     s |= {i for (i,) in db.query(MfSnapshot.isin).distinct().all()}
+    s |= set(etf_isins(db))
     return sorted(x for x in s if x)
+
+
+def is_fund_isin(isin: Optional[str]) -> bool:
+    return bool(isin) and isin.upper().startswith("INF")
+
+
+def etf_isins(db) -> Dict[str, str]:
+    """ETFs in the share ledger (a mutual-fund ISIN traded on the exchange) → the symbol traded."""
+    from app.database import PortfolioTrade
+    out: Dict[str, str] = {}
+    try:
+        for isin, sym in db.query(PortfolioTrade.isin, PortfolioTrade.symbol).distinct().all():
+            if is_fund_isin(isin):
+                out.setdefault(isin.upper(), sym)
+    except Exception:
+        pass
+    return out
 
 
 def refresh_navs(db) -> dict:
@@ -639,6 +658,19 @@ def _scheme_info(db) -> Dict[str, dict]:
         names.setdefault(isin, {"scheme": scheme, "amc": amc})
     for s in db.query(MfSnapshot).all():
         names.setdefault(s.isin, {"scheme": s.scheme, "amc": s.amc})
+    etfs = etf_isins(db)
+    if etfs:
+        from app.services import symbol_registry as SR
+        for isin, sym in etfs.items():
+            if isin in names:
+                continue
+            n = navs.get(isin)
+            rec = SR.lookup(isin=isin)
+            # The exchange lists an ETF under its issuer ("Reliance Mutual Fund-Permitted"), which names no
+            # scheme; AMFI's name does.
+            reg = rec.company_name if rec and "mutual fund" not in (rec.company_name or "").lower() else None
+            names[isin] = {"scheme": (n.name if n else None) or reg or sym,
+                           "amc": n.amc if n else None, "etf": True, "symbol": sym}
     ov = _overrides(db)
     ports = {p.scheme_isin: p for p in db.query(MfPortfolio).all()}
     out = {}
@@ -649,6 +681,7 @@ def _scheme_info(db) -> Dict[str, dict]:
             cls, why = ov[isin], "set by hand"
         p = ports.get(isin)
         out[isin] = {"scheme": nm["scheme"], "amc": nm["amc"] or (n.amc if n else None),
+                     "etf": bool(nm.get("etf")), "symbol": nm.get("symbol"),
                      "category": n.category if n else None, "tax_class": cls, "tax_why": why,
                      "overridden": isin in ov,
                      "nav": n.nav if n else None, "nav_date": n.nav_date if n else None,
@@ -1298,17 +1331,110 @@ def refresh_industries_async() -> bool:
     return True
 
 
-# ─── Exposure: shares held directly plus each fund's slice ──────────────────
+# ─── Sectors ────────────────────────────────────────────────────────────────
+#
+# Fund files use AMFI's industry names ("Banks", "IT - Software",
+# "Pharmaceuticals & Biotechnology"); BSE's scrip list its own ("Private
+# Sector Bank", "Computers - Software & Consulting"). Both roll up into the
+# NSE / AMFI sectors by keyword. Order matters: the first rule that matches
+# wins, so the specific phrases sit above the generic words they contain
+# ("healthcare services" before "services", "edible oil" before "oil").
+
+SECTOR_RULES: List[Tuple[str, Tuple[str, ...]]] = [
+    ("Information Technology", ("it -", "it-", "software", "computers", "it consulting", "information technology",
+                                "it enabled", "data processing", "outsourcing")),
+    ("Healthcare", ("pharma", "biotech", "healthcare", "hospital", "diagnostic", "medical", "drugs")),
+    ("Telecommunication", ("telecom", "telecommunication", "cellular")),
+    ("Financial Services", ("bank", "financ", "nbfc", "insurance", "capital markets", "fintech", "asset management",
+                            "stockbroking", "stock broking", "depositor", "exchange and data", "investment company",
+                            "holding compan", "credit")),
+    ("Fast Moving Consumer Goods", ("fmcg", "food", "beverage", "personal products", "household products",
+                                    "tobacco", "cigarette", "edible oil", "tea & coffee", "tea and coffee",
+                                    "sugar", "dairy", "packaged", "breweries", "distilleries", "agricultural food",
+                                    "consumer staples")),
+    ("Automobile and Auto Components", ("automobile", "auto ", "auto-", "auto components", "auto ancillar", "tyres",
+                                        "tyre", "two wheeler", "2/3 wheeler", "passenger car", "commercial vehicle",
+                                        "tractor")),
+    ("Capital Goods", ("aerospace", "defen", "electrical equipment", "industrial manufacturing", "industrial products",
+                       "commercial & construction vehicles", "construction vehicles", "capital goods",
+                       "heavy electrical", "engineering", "cables", "compressor", "bearing", "machinery",
+                       "electrodes", "castings", "forgings", "railway wagons", "electronic component")),
+    ("Construction Materials", ("cement", "construction materials", "granite", "ceramic")),
+    ("Realty", ("realty", "real estate", "residential", "commercial projects", "reit")),
+    ("Construction", ("construction", "infrastructure developer", "civil")),
+    ("Oil, Gas & Consumable Fuels", ("petroleum", "refiner", "oil", "gas", "consumable fuels", "coal", "lpg",
+                                     "lubricant")),
+    ("Power & Utilities", ("power", "utilit", "electricity")),
+    ("Metals & Mining", ("metal", "steel", " iron", "alumin", "copper", "zinc", "mining", "minerals")),
+    ("Chemicals", ("chemical", "fertili", "agrochemical", "pesticide", "petrochemical", "dyes", "pigments",
+                   "carbon black", "explosives")),
+    ("Consumer Durables", ("consumer durables", "paints", "household appliances", "consumer electronics",
+                           "jewel", "gems", "footwear", "furniture", "electronics", "watches", "plastic products")),
+    ("Consumer Services", ("retail", "leisure", "hotel", "restaurant", "e-commerce", "consumer services",
+                           "travel", "tourism", "education", "internet")),
+    ("Media & Entertainment", ("media", "entertainment", "broadcast", "publication", "printing", "film")),
+    ("Textiles", ("textile", "apparel", "garments", "yarn", "fabric")),
+    ("Services", ("transport", "logistic", "shipping", "airline", "airport", "port", "commercial services",
+                  "services", "trading")),
+    ("Forest Materials", ("paper", "forest", "jute", "wood", "plywood")),
+    ("Diversified", ("diversified", "conglomerate")),
+]
+
+
+def sector_of(industry: Optional[str]) -> str:
+    i = f" {(industry or '').lower()} "
+    if not industry or industry == "Unclassified":
+        return "Unclassified"
+    if industry == "Overseas":
+        return "Overseas equity"
+    for sector, keys in SECTOR_RULES:
+        if any(k in i for k in keys):
+            return sector
+    return "Other"
+
+
+def asset_class_of(name: str, category: Optional[str], tax_class: Optional[str]) -> str:
+    """For a fund's non-share remainder, or a whole fund with no portfolio file: gold & silver, debt, or equity."""
+    t = f"{name or ''} {category or ''}".lower()
+    if "gold" in t or "silver" in t or "precious" in t:
+        return "gold"
+    if tax_class == "debt" or any(k in t for k in _DEBT_WORDS):
+        return "debt"
+    return "equity"
+
+
+BUCKETS = {
+    "debt": "Debt, cash & others",
+    "gold": "Gold & silver",
+    "unknown": "Funds not broken down yet",
+}
+
+
+# ─── Exposure: shares held directly plus each ETF's and fund's slice ────────
 
 def exposure(db, name: Optional[str] = None) -> dict:
-    from app.database import MfPortfolio, StockIndustry
+    """
+    Every rupee by what it is finally invested in. Shares held directly count
+    as themselves; an ETF bought on the exchange and a mutual fund from the
+    statement are looked through to their month-end holdings. What a fund
+    holds besides shares goes to a bucket: debt and cash, gold and silver, or
+    "not broken down" for an equity fund whose portfolio file is missing.
+    Sectors roll up industries, industries roll up stocks, and each stock
+    lists where its money comes from (direct / ETF / fund).
+    """
+    from app.database import MfPortfolio, StockIndustry, MfNav
     from app.services import portfolio as P
     from app.services import symbol_registry as SR
     direct = P.holdings(db, name=name)
     funds = holdings(db, name=name, refresh=True)
+    info = _scheme_info(db)
     ports = {p.scheme_isin: p for p in db.query(MfPortfolio).all()}
     inds = {r.isin: r.industry for r in db.query(StockIndustry).all()}
+    navs = {n.isin: n for n in db.query(MfNav).all()}
+    today = _today()
     items: Dict[str, dict] = {}
+    buckets: Dict[str, dict] = {k: {"key": k, "label": v, "value": 0.0, "invested": 0.0, "sources": []}
+                                for k, v in BUCKETS.items()}
 
     def item(key, isin, symbol, company):
         it = items.get(key)
@@ -1316,35 +1442,60 @@ def exposure(db, name: Optional[str] = None) -> dict:
             rec = SR.lookup(isin=isin) if isin else None
             it = items[key] = {"key": key, "isin": isin, "symbol": (rec.display_symbol if rec else None) or symbol,
                                "company": (rec.company_name if rec else None) or company or symbol or isin,
-                               "industry": None, "direct_value": 0.0, "direct_invested": 0.0,
-                               "fund_value": 0.0, "fund_invested": 0.0, "funds": [], "holders": set(),
-                               "kind": "equity"}
+                               "industry": None, "_fund_industry": None, "kind": "equity",
+                               "direct_value": 0.0, "etf_value": 0.0, "mf_value": 0.0,
+                               "direct_invested": 0.0, "fund_invested": 0.0, "sources": [], "holders": set()}
         return it
-    direct_total = 0.0
+
+    # Every holding that is a fund, from either side: (source type, row).
+    vehicles: List[dict] = []
+    totals = {"direct": 0.0, "etf": 0.0, "mf": 0.0}
     for r in direct["rows"]:
         v = r["value"] if r["value"] is not None else r["invested"]
-        direct_total += v
-        key = (r["isin"] or "").upper() or f"SYM:{r['symbol']}"
-        it = item(key, (r["isin"] or "").upper() or None, r["symbol"], r["symbol"])
+        isin = (r["isin"] or "").upper() or None
+        if is_fund_isin(isin):
+            n = navs.get(isin)
+            inf = info.get(isin) or {}
+            vehicles.append({"type": "etf", "isin": isin, "scheme": inf.get("scheme") or r["symbol"],
+                             "symbol": r["symbol"], "amc": inf.get("amc"), "category": n.category if n else None,
+                             "tax_class": inf.get("tax_class"), "value": v, "invested": r["invested"],
+                             "name": r["name"], "broker": r["broker"]})
+            totals["etf"] += v
+            continue
+        totals["direct"] += v
+        key = isin or f"SYM:{r['symbol']}"
+        it = item(key, isin, r["symbol"], r["symbol"])
         it["direct_value"] += v
         it["direct_invested"] += r["invested"]
         it["holders"].add(r["name"])
-    fund_total = broken_total = 0.0
-    rest = {"value": 0.0, "invested": 0.0, "funds": []}
-    not_broken, fund_status = [], []
-    today = _today()
+        it["sources"].append({"type": "direct", "label": f"Held directly · {r['broker'].title()}",
+                              "name": r["name"], "amount": v, "pct_of_fund": None, "qty": r["qty"]})
     for h in funds["rows"]:
         v = h["value"] if h["value"] is not None else h["invested"]
-        fund_total += v
-        p = ports.get(h["isin"])
+        vehicles.append({"type": "mf", "isin": h["isin"], "scheme": h["scheme"], "symbol": None, "amc": h["amc"],
+                         "category": h["category"], "tax_class": h["tax_class"], "value": v,
+                         "invested": h["invested"], "name": h["name"]})
+        totals["mf"] += v
+
+    fund_status = []
+    for f in vehicles:
+        v, kind = f["value"], f["type"]
+        p = ports.get(f["isin"])
+        cls = asset_class_of(f["scheme"], f["category"], f["tax_class"])
+        src = {"type": kind, "label": f["scheme"], "isin": f["isin"], "name": f["name"]}
         if not p:
-            not_broken.append({"isin": h["isin"], "scheme": h["scheme"], "amc": h["amc"], "value": v, "name": h["name"]})
+            b = buckets["unknown" if cls == "equity" else cls]
+            b["value"] += v
+            b["invested"] += f["invested"]
+            b["sources"].append({**src, "amount": v, "pct_of_fund": 100.0})
+            fund_status.append({**src, "amc": f["amc"], "as_of": None, "stale": False, "value": v,
+                                "needs_file": cls == "equity", "asset_class": cls})
             continue
-        broken_total += v
         hold = json.loads(p.holdings_json or "[]")
         stale = bool(p.as_of and (today - _d(p.as_of)).days > STALE_PORTFOLIO_DAYS)
-        fund_status.append({"isin": h["isin"], "scheme": h["scheme"], "as_of": p.as_of, "stale": stale,
-                            "equity_pct": p.equity_pct, "stocks": len(hold)})
+        fund_status.append({**src, "amc": f["amc"], "as_of": p.as_of, "stale": stale, "value": v,
+                            "equity_pct": p.equity_pct, "stocks": len(hold), "needs_file": False,
+                            "asset_class": cls})
         share = 0.0
         for e in hold:
             pct = e.get("pct") or 0.0
@@ -1353,20 +1504,21 @@ def exposure(db, name: Optional[str] = None) -> dict:
             it = item(e["isin"], e["isin"], None, e.get("name"))
             if e.get("kind") == "foreign":
                 it["kind"] = "foreign"
-            if not it["industry"] and e.get("industry") and e.get("kind") == "equity":
+            if e.get("industry") and e.get("kind") == "equity" and not it["_fund_industry"]:
                 it["_fund_industry"] = e["industry"]
-            it["fund_value"] += amt
-            it["fund_invested"] += h["invested"] * pct / 100
-            it["funds"].append({"scheme": h["scheme"], "isin": h["isin"], "name": h["name"],
-                                "pct_of_fund": round(pct, 3), "amount": amt, "as_of": p.as_of})
-            it["holders"].add(h["name"])
-        left = max(0.0, 100.0 - share)
+            it["etf_value" if kind == "etf" else "mf_value"] += amt
+            it["fund_invested"] += f["invested"] * pct / 100
+            it["holders"].add(f["name"])
+            it["sources"].append({**src, "amount": amt, "pct_of_fund": round(pct, 3), "as_of": p.as_of})
+        left = 100.0 - share
         if left > 0.01:
-            rest["value"] += v * left / 100
-            rest["invested"] += h["invested"] * left / 100
-            rest["funds"].append({"scheme": h["scheme"], "isin": h["isin"], "name": h["name"],
-                                  "pct_of_fund": round(left, 2), "amount": v * left / 100})
-    total = direct_total + fund_total
+            b = buckets["gold" if cls == "gold" else "debt"]
+            b["value"] += v * left / 100
+            b["invested"] += f["invested"] * left / 100
+            b["sources"].append({**src, "amount": v * left / 100, "pct_of_fund": round(left, 2), "as_of": p.as_of})
+
+    total = totals["direct"] + totals["etf"] + totals["mf"]
+    pct_of = (lambda x: x / total * 100 if total else None)
     missing_ind = False
     rows = []
     for it in items.values():
@@ -1379,50 +1531,151 @@ def exposure(db, name: Optional[str] = None) -> dict:
             if it["direct_value"]:
                 missing_ind = True
         it["industry"] = ind
+        it["sector"] = "Overseas equity" if it["kind"] == "foreign" else sector_of(ind)
+        it["fund_value"] = it["etf_value"] + it["mf_value"]
         it["total"] = it["direct_value"] + it["fund_value"]
         it["invested"] = it["direct_invested"] + it["fund_invested"]
-        it["pct"] = it["total"] / total * 100 if total else None
+        it["pct"] = pct_of(it["total"])
         it["holders"] = sorted(it["holders"])
-        it["funds"].sort(key=lambda f: -f["amount"])
+        it["sources"].sort(key=lambda s: -s["amount"])
         rows.append(it)
     rows.sort(key=lambda r: -r["total"])
     if missing_ind:
         refresh_industries_async()
-    by_ind: Dict[str, dict] = {}
+
+    def roll(group_rows):
+        d = sum(r["direct_value"] for r in group_rows)
+        e = sum(r["etf_value"] for r in group_rows)
+        m = sum(r["mf_value"] for r in group_rows)
+        return {"direct_value": d, "etf_value": e, "mf_value": m, "total": d + e + m,
+                "invested": sum(r["invested"] for r in group_rows), "pct": pct_of(d + e + m),
+                "stocks": len(group_rows)}
+
+    def slim(r):
+        return {k: r[k] for k in ("key", "isin", "symbol", "company", "industry", "direct_value", "etf_value",
+                                  "mf_value", "total", "invested", "pct", "sources")}
+
+    by_sector: Dict[str, Dict[str, list]] = defaultdict(lambda: defaultdict(list))
     for r in rows:
-        g = by_ind.setdefault(r["industry"], {"industry": r["industry"], "direct_value": 0.0, "fund_value": 0.0,
-                                              "invested": 0.0, "stocks": []})
-        g["direct_value"] += r["direct_value"]
-        g["fund_value"] += r["fund_value"]
-        g["invested"] += r["invested"]
-        g["stocks"].append({"key": r["key"], "symbol": r["symbol"], "company": r["company"], "total": r["total"],
-                            "direct_value": r["direct_value"], "fund_value": r["fund_value"]})
-    industries = []
-    for g in by_ind.values():
-        g["total"] = g["direct_value"] + g["fund_value"]
-        g["pct"] = g["total"] / total * 100 if total else None
-        industries.append(g)
-    if rest["value"] > 0:
-        industries.append({"industry": "Debt, cash & others", "direct_value": 0.0, "fund_value": rest["value"],
-                           "invested": rest["invested"], "total": rest["value"],
-                           "pct": rest["value"] / total * 100 if total else None, "stocks": [], "rest": True,
-                           "funds": rest["funds"]})
-    if not_broken:
-        nb = sum(x["value"] for x in not_broken)
-        industries.append({"industry": "Funds not broken down yet", "direct_value": 0.0, "fund_value": nb,
-                           "invested": 0.0, "total": nb, "pct": nb / total * 100 if total else None,
-                           "stocks": [], "unknown": True, "funds": not_broken})
-    industries.sort(key=lambda g: (g.get("unknown", False), -g["total"]))
-    return {"total": total, "direct_total": direct_total, "fund_total": fund_total,
-            "broken_down_total": broken_total, "rest": rest, "not_broken_down": not_broken,
-            "funds": fund_status, "rows": rows, "industries": industries,
+        by_sector[r["sector"]][r["industry"]].append(r)
+    sectors = []
+    equity_total = sum(r["total"] for r in rows)
+    for sec, ind_map in by_sector.items():
+        all_rows = [r for rs in ind_map.values() for r in rs]
+        industries = []
+        for ind, rs in ind_map.items():
+            industries.append({"industry": ind, **roll(rs), "rows": [slim(r) for r in sorted(rs, key=lambda r: -r["total"])]})
+        industries.sort(key=lambda g: -g["total"])
+        s = {"sector": sec, **roll(all_rows), "industries": industries}
+        s["pct_of_equity"] = s["total"] / equity_total * 100 if equity_total else None
+        sectors.append(s)
+    sectors.sort(key=lambda s: (s["sector"] in ("Unclassified", "Other"), -s["total"]))
+    bucket_list = []
+    for b in buckets.values():
+        if b["value"] > 0.005:
+            b["pct"] = pct_of(b["value"])
+            b["sources"].sort(key=lambda s: -s["amount"])
+            bucket_list.append(b)
+    indian = sum(r["total"] for r in rows if r["kind"] == "equity")
+    foreign = sum(r["total"] for r in rows if r["kind"] == "foreign")
+    allocation = [{"key": "equity", "label": "Indian equity", "value": indian},
+                  {"key": "foreign", "label": "Overseas equity", "value": foreign},
+                  *[{"key": b["key"], "label": b["label"], "value": b["value"]} for b in bucket_list]]
+    for a in allocation:
+        a["pct"] = pct_of(a["value"])
+    allocation = [a for a in allocation if a["value"] > 0.005]
+    top = rows[:10]
+    return {"total": total, "by_source": {k: {"value": v, "pct": pct_of(v)} for k, v in totals.items()},
+            "allocation": allocation, "sectors": sectors, "buckets": bucket_list,
+            "rows": [{**slim(r), "sector": r["sector"], "kind": r["kind"], "holders": r["holders"]} for r in rows],
+            "concentration": {"top10_pct": pct_of(sum(r["total"] for r in top)) if top else None,
+                              "top10_pct_of_equity": (sum(r["total"] for r in top) / equity_total * 100)
+                              if equity_total else None,
+                              "stocks": len(rows),
+                              "in_several": sum(1 for r in rows if len({s["type"] + (s.get("isin") or "") for s in r["sources"]}) > 1)},
+            "funds": fund_status,
             "names": sorted({r["name"] for r in direct["rows"]} | {r["name"] for r in funds["rows"]}),
             "notes": [
-                "Fund holdings are from each scheme's latest monthly portfolio, scaled to your units' value today. "
-                "A fund that traded since then holds slightly different weights.",
-                "Value is today's price for shares and the latest NAV for funds; shares without a live quote count at cost.",
-                "Invested via funds is your cost in the fund times each stock's weight: an approximation, since the "
-                "fund bought and sold its stocks at its own prices.",
-                "Balanced-advantage and arbitrage funds hedge part of their shares with futures; the shares are "
-                "shown gross here.",
+                "Funds and ETFs are looked through to their latest month-end portfolio, scaled to what your units "
+                "are worth today; a fund that traded since then holds slightly different weights.",
+                "Shares and ETFs are valued at the live price (at cost without a quote); funds at the latest NAV.",
+                "Invested via a fund is your cost in it times the stock's weight — an approximation.",
+                "Sectors group the industries the fund houses report (AMFI's classification); shares no fund holds "
+                "take BSE's industry, which uses different names but rolls up into the same sectors.",
+                "Balanced-advantage and arbitrage funds hedge part of their shares with futures; shares are shown gross.",
             ]}
+
+
+# ─── One list: shares, ETFs and funds ───────────────────────────────────────
+
+def overview(db, name: Optional[str] = None) -> dict:
+    """Every holding in one table, shares and ETFs merged across brokers, funds from the statements."""
+    from app.database import StockIndustry
+    from app.services import portfolio as P
+    direct = P.holdings(db, name=name)
+    funds = holdings(db, name=name, refresh=True)
+    info = _scheme_info(db)
+    inds = {r.isin: r.industry for r in db.query(StockIndustry).all()}
+    merged: Dict[tuple, dict] = {}
+    for r in direct["rows"]:
+        isin = (r["isin"] or "").upper() or None
+        k = (r["name"], isin or r["symbol"])
+        m = merged.get(k)
+        if not m:
+            etf = is_fund_isin(isin)
+            ind = None if etf else inds.get(isin or "")
+            m = merged[k] = {"type": "etf" if etf else "stock", "key": isin or r["symbol"], "isin": isin,
+                             "symbol": r["symbol"], "label": (info.get(isin) or {}).get("scheme") if etf else None,
+                             "name": r["name"], "at": set(), "qty": 0.0, "invested": 0.0, "value": None,
+                             "day_pnl": None, "price": r["ltp"], "price_date": None,
+                             "day_change_pct": r["day_change_pct"], "xirr": None,
+                             "industry": ind, "sector": None if etf else sector_of(ind) if ind else None,
+                             "category": (info.get(isin) or {}).get("category") if etf else None}
+        m["at"].add(r["broker"])
+        m["qty"] += r["qty"]
+        m["invested"] += r["invested"]
+        if r["value"] is not None:
+            m["value"] = (m["value"] or 0.0) + r["value"]
+        if r.get("day_pnl") is not None:
+            m["day_pnl"] = (m["day_pnl"] or 0.0) + r["day_pnl"]
+    rows = list(merged.values())
+    if any(r["type"] == "stock" and not r["industry"] for r in rows):
+        refresh_industries_async()
+    for h in funds["rows"]:
+        rows.append({"type": "mf", "key": h["isin"], "isin": h["isin"], "symbol": None, "label": h["scheme"],
+                     "name": h["name"], "at": {"mf"}, "qty": h["units"], "invested": h["invested"],
+                     "value": h["value"], "day_pnl": h["day_pnl"], "price": h["nav"], "price_date": h["nav_date"],
+                     "day_change_pct": h["day_change_pct"], "xirr": h["xirr"], "industry": None, "sector": None,
+                     "category": h["category"], "amc": h["amc"]})
+    total_value = sum((r["value"] if r["value"] is not None else r["invested"]) for r in rows)
+    for r in rows:
+        r["at"] = sorted(r["at"])
+        r["avg"] = r["invested"] / r["qty"] if r["qty"] else None
+        r["pnl"] = (r["value"] - r["invested"]) if r["value"] is not None else None
+        r["pnl_pct"] = (r["pnl"] / r["invested"] * 100) if r["pnl"] is not None and r["invested"] else None
+        v = r["value"] if r["value"] is not None else r["invested"]
+        r["weight"] = v / total_value * 100 if total_value else None
+    rows.sort(key=lambda r: -(r["value"] if r["value"] is not None else r["invested"]))
+
+    def tot(rs):
+        priced = [r for r in rs if r["value"] is not None]
+        val = sum(r["value"] if r["value"] is not None else r["invested"] for r in rs)
+        return {"count": len(rs), "invested": sum(r["invested"] for r in rs), "value": val,
+                "pnl": sum(r["pnl"] for r in priced) if priced else None,
+                "priced_invested": sum(r["invested"] for r in priced),
+                "day_pnl": (sum(r["day_pnl"] for r in rs if r["day_pnl"] is not None)
+                            if any(r["day_pnl"] is not None for r in rs) else None),
+                "unpriced": len(rs) - len(priced),
+                "pct": val / total_value * 100 if total_value else None}
+    by_type = {t: tot([r for r in rows if r["type"] == t]) for t in ("stock", "etf", "mf")}
+    by_name = []
+    for nm in sorted({r["name"] for r in rows}):
+        by_name.append({"name": nm, **tot([r for r in rows if r["name"] == nm]),
+                        **{f"{t}_value": sum((r["value"] if r["value"] is not None else r["invested"])
+                                             for r in rows if r["name"] == nm and r["type"] == t)
+                           for t in ("stock", "etf", "mf")}})
+    return {"rows": rows, "totals": tot(rows), "by_type": by_type, "by_name": by_name,
+            "realised_fy": direct["totals"].get("realised_fy"),
+            "realised_fy_shares": direct["totals"].get("realised_fy_capital"),
+            "realised_fy_funds": funds["totals"].get("realised_fy_gain"),
+            "nav": funds.get("nav"), "warnings": direct.get("warnings", []) + funds.get("warnings", [])}
