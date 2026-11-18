@@ -290,6 +290,117 @@ def compute(trades, settle: Dict[str, float], amap: Dict[str, dict], today: Opti
     return {"realised": realised, "positions": positions, "charges": charges, "warnings": warnings}
 
 
+# ─── Live prices: the contract's Upstox instrument key ──────────────────────
+#
+# Zerodha's tradebook carries no instrument key and Upstox's trade history not
+# always, so open contracts are looked up in Upstox's instrument dumps
+# (NSE.json.gz / BSE.json.gz, the same files the equity search reads): by
+# underlying, CE/PE/FUT, strike and expiry date, else the last expiry in that
+# month for an estimated monthly expiry. Built once a day in the background;
+# the first look after a restart has no price yet, the next one does.
+
+_DUMPS = ("https://assets.upstox.com/market-quote/instruments/exchange/NSE.json.gz",
+          "https://assets.upstox.com/market-quote/instruments/exchange/BSE.json.gz")
+_index: Dict[str, object] = {"day": None, "exact": {}, "month": {}, "building": False, "error": None}
+
+
+def _build_index() -> None:
+    import gzip
+    import io
+    import requests
+    exact: Dict[tuple, str] = {}
+    month: Dict[tuple, List[Tuple[str, str]]] = defaultdict(list)
+    n = 0
+    try:
+        for url in _DUMPS:
+            r = requests.get(url, timeout=60)
+            r.raise_for_status()
+            with gzip.GzipFile(fileobj=io.BytesIO(r.content)) as f:
+                data = json.load(f)
+            for it in data:
+                seg = str(it.get("segment") or "")
+                if not seg.endswith("_FO"):
+                    continue
+                key = it.get("instrument_key")
+                kind = str(it.get("instrument_type") or "").upper()
+                und = str(it.get("underlying_symbol") or it.get("asset_symbol") or it.get("name") or "").upper()
+                exp = it.get("expiry")
+                if not key or kind not in ("CE", "PE", "FUT") or not und or not exp:
+                    continue
+                try:
+                    ed = datetime.fromtimestamp(float(exp) / 1000, IST).date().isoformat()
+                except Exception:
+                    continue
+                strike = round(float(it.get("strike_price") or 0), 2) if kind != "FUT" else 0.0
+                exact[(und, kind, strike, ed)] = key
+                month[(und, kind, strike, ed[:7])].append((ed, key))
+                n += 1
+        _index.update({"day": _today().isoformat(), "exact": exact, "month": dict(month), "error": None})
+        logger.info(f"[FNO] instrument index: {n} contracts")
+    except Exception as e:
+        _index["error"] = str(e)
+        logger.warning(f"[FNO] instrument dump unavailable: {e}")
+    finally:
+        _index["building"] = False
+
+
+def _ensure_index() -> bool:
+    import threading
+    if _index["day"] == _today().isoformat():
+        return True
+    if not _index["building"]:
+        _index["building"] = True
+        threading.Thread(target=_build_index, daemon=True, name="fno-index").start()
+    return bool(_index["exact"])
+
+
+def instrument_key_for(p: dict) -> Optional[str]:
+    if p.get("instrument_key") and "_FO|" in p["instrument_key"]:
+        return p["instrument_key"]
+    if not _ensure_index() or not p.get("underlying") or not p.get("expiry"):
+        return None
+    kind = (p.get("instrument") or "").upper()
+    strike = round(float(p.get("strike") or 0), 2) if kind != "FUT" else 0.0
+    und = p["underlying"].upper()
+    key = _index["exact"].get((und, kind, strike, p["expiry"]))
+    if key:
+        return key
+    cands = _index["month"].get((und, kind, strike, p["expiry"][:7])) or []
+    return max(cands)[1] if cands else None
+
+
+def price_positions(pos: List[dict]) -> None:
+    """LTP, previous close, MTM and the day's change for every open, unexpired position."""
+    live = [p for p in pos if not p.get("expired")]
+    for p in live:
+        p["instrument_key"] = instrument_key_for(p) or p.get("instrument_key")
+    keys = sorted({p["instrument_key"] for p in live if p.get("instrument_key") and "|" in p["instrument_key"]})
+    quotes = {}
+    if keys:
+        try:
+            from app.main import get_active_feed
+            quotes = get_active_feed().get_quotes(keys) or {}
+        except Exception as e:
+            logger.info(f"[FNO] quotes unavailable: {e}")
+    for p in pos:
+        q = quotes.get(p.get("instrument_key") or "") or {}
+        ltp = q.get("last_price") or None
+        close = (q.get("ohlc") or {}).get("close") or None
+        p["ltp"] = ltp
+        p["prev_close"] = close
+        p["mtm"] = (ltp - p["avg"]) * p["qty"] if ltp and p.get("avg") is not None else None
+        p["day_pnl"] = (ltp - close) * p["qty"] if ltp and close else None
+        p["day_change_pct"] = (ltp / close - 1) * 100 if ltp and close else None
+
+
+def open_positions(db, name: Optional[str] = None, broker: Optional[str] = None, with_prices: bool = True) -> List[dict]:
+    ts, amap = _trades(db, name, broker)
+    pos = compute(ts, settlements(db), amap)["positions"]
+    if with_prices:
+        price_positions(pos)
+    return pos
+
+
 def _trades(db, name: Optional[str] = None, broker: Optional[str] = None):
     from app.database import FnoTrade
     from app.services import portfolio as P
@@ -333,23 +444,12 @@ def report(db, fy: Optional[str] = None, name: Optional[str] = None, broker: Opt
     fys = sorted({P.fy_of(_d(t.trade_date)) for t in ts} | {fy}, reverse=True)
     pos = c["positions"]
     if with_prices and pos:
-        keys = sorted({p["instrument_key"] for p in pos if p["instrument_key"] and not p["expired"]})
-        quotes = {}
-        if keys:
-            try:
-                from app.main import get_active_feed
-                quotes = get_active_feed().get_quotes(keys) or {}
-            except Exception as e:
-                logger.info(f"[FNO] quotes unavailable: {e}")
-        for p in pos:
-            q = quotes.get(p["instrument_key"]) or {}
-            ltp = q.get("last_price")
-            p["ltp"] = ltp
-            p["mtm"] = (ltp - p["avg"]) * p["qty"] if ltp and p["avg"] is not None else None
+        price_positions(pos)
     pos.sort(key=lambda p: (p["expired"], p["expiry"] or "", p["symbol"]))
     s = fy_summary(c["realised"], c["charges"], fy)
     return {**s, "financial_years": fys, "positions": pos, "warnings": c["warnings"],
             "trade_count": len(ts), "first": min((t.trade_date for t in ts), default=None),
+            "index": {"ready": bool(_index["exact"]), "error": _index["error"]},
             "last": max((t.trade_date for t in ts), default=None),
             "notes": [
                 "F&O profit is non-speculative business income, taxed at your slab rate with your other income; "

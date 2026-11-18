@@ -491,6 +491,12 @@ def mf_portfolio_file(body: PortfolioFileBody, db: Session = Depends(get_db)):
         raise HTTPException(500, f"Could not read {body.filename}: {e}")
 
 
+@router.get("/mf/portfolio-history")
+def mf_portfolio_history(isin: Optional[str] = None, months: int = 12, db: Session = Depends(get_db)):
+    """A fund's or ETF's holdings month by month, from the portfolio files uploaded; empty months stay empty."""
+    return MF.portfolio_history(db, (isin or "").strip().upper() or None, months)
+
+
 @router.delete("/mf/portfolio-file/{isin}")
 def mf_portfolio_delete(isin: str, db: Session = Depends(get_db)):
     n = db.query(MfPortfolio).filter(MfPortfolio.scheme_isin == isin.strip().upper()).delete()

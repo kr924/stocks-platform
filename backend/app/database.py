@@ -563,6 +563,24 @@ class MfPortfolio(Base):
     uploaded_at = Column(DateTime, default=datetime.utcnow)
 
 
+class MfPortfolioMonth(Base):
+    """
+    Every month's portfolio of a scheme that was ever uploaded, one row per
+    scheme and month (the month of its as-of date), so changes in what a fund
+    holds can be followed over time. MfPortfolio stays the latest one.
+    """
+    __tablename__ = "mf_portfolio_months"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    scheme_isin = Column(String(20), index=True, nullable=False)
+    month = Column(String(7), nullable=False)            # YYYY-MM
+    as_of = Column(String(10), nullable=True)
+    filename = Column(String(250), nullable=True)
+    equity_pct = Column(Float, nullable=True)
+    holdings_json = Column(Text, nullable=True)
+    uploaded_at = Column(DateTime, default=datetime.utcnow)
+    __table_args__ = (Index("ix_mf_portfolio_month", "scheme_isin", "month", unique=True),)
+
+
 class StockIndustry(Base):
     """Industry per ISIN: from fund portfolio files (AMFI's classification) first, BSE's scrip list for the rest."""
     __tablename__ = "stock_industries"

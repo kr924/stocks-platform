@@ -81,8 +81,15 @@ def main():
     check(abs(w["ltcg"]["gain"] - s["ltcg"]["gain"]) < 200 and w["stcg"]["net"] == 0
           and w["short_term_loss_set_off_against_long_term"] == 0 and w["ltcg"]["exemption_used"] == 125000,
           "each tracking name has its own gains, set-off and exemption")
-    check(any("Tax is per person" in x for x in P.tax_summary(None, "2025-26")["warnings"]),
-          "all names together carries the 'tax is per person' warning")
+    real_names = P.tracking_names
+    P.tracking_names = lambda db: ["Koushik", "Wife"]
+    every = {"stcg": {"net": 0}, "ltcg": {"exemption": 125000, "exemption_used": 0, "taxable": 0},
+             "estimated_tax": 0, "warnings": []}
+    P._per_person(object(), "2025-26", None, every)
+    P.tracking_names = real_names
+    check(len(every["per_name"]) == 2 and abs(every["estimated_tax"] - (s["estimated_tax"] + w["estimated_tax"])) < 1
+          and every["ltcg"]["exemption"] == 250000 and "per person" in every["warnings"][0],
+          "everyone: tax and exemption worked out per person and summed")
     # Same stock bought by two people at Zerodha: matched per account, not across them.
     P._all_trades = lambda db, broker=None: [
         T("g", "zerodha", "Z", "INE000000009", "2025-01-01", "BUY", 10, 100, "QY8357"),

@@ -607,7 +607,34 @@ transactions moved to Trades beside shares and F&O.
   (Zerodha futures 0.03% if less). All of it, STT included, is an expense:
   F&O is non-speculative business income at the slab rate.
 - **Turnover** = Σ |P&L| of closed trades (ICAI 2022), shown for the audit test.
+- **Live prices** (`price_positions`): the contract's Upstox key — the trade's
+  own if it carried one, else looked up in Upstox's NSE/BSE instrument dumps
+  by underlying, CE/PE/FUT, strike and expiry (or the month's last expiry for
+  an estimated one), index built once a day in a background thread, so the
+  first look after a restart has no price yet. Quotes go through the shared
+  feed: LTP, previous close → MTM and the day's P&L.
+- **In All holdings** each open contract is a row (type `fno`): a long option
+  is an asset (invested = premium paid, value = today's premium), a short
+  option a liability (both negative), a future carries no capital (value =
+  MTM). The kind breakdown (stocks / ETFs / funds / F&O) sits under the mix
+  bar and filters the table.
 - `ops/check_fno.py` replays symbols, long/short matching, expiry and STT.
+
+## Tax for everyone, fund history (18 Nov 2026)
+
+- **Capital gains defaults to Everyone** (owner's call). The rows add up, but
+  the estimate, exemption and taxable LTCG are each person's own, worked out
+  per tracking name and summed (`portfolio._per_person`, `per_name` on the
+  response, a per-person table on the page). Picking a name shows that
+  person alone; the header's name buttons set it too.
+- **Fund holdings by month** (Analytics → Fund holdings by month,
+  `GET /mf/portfolio-history`, table `mf_portfolio_months`). Every uploaded
+  portfolio is kept per scheme and month of its as-of date; `mf_portfolios`
+  stays the latest and is replaced only by a file at least as new, so older
+  months can be uploaded to fill the history. Columns are the last N months;
+  a month with no upload is an empty column, and changes (new, exited,
+  raised, cut) are measured against the latest earlier month that has a file.
+  Portfolios stored before the history existed seed it (`_seed_history`).
 
 ## Like-for-like: a quarter against the same quarter last year
 

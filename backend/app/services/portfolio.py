@@ -1057,11 +1057,7 @@ def tax_summary(db, fy: str, broker: Optional[str] = None, name: Optional[str] =
                       "charges": x["buy_charges"] + x["sell_charges"],
                       "name": name_of(amap, x.get("account") or "")}
                      for x in rows), key=lambda x: (x["sell_date"], x["symbol"] or ""))
-    names_in = sorted({name_of(amap, x.get("account") or "") for x in rows})
     warnings = _warnings(c, amap)
-    if not name and len(names_in) > 1:
-        warnings = [f"These figures add up {len(names_in)} people ({', '.join(names_in)}). Tax is per person — "
-                    f"pick a name to see each one's own exemption and set-off."] + warnings
     other_rows = sorted(({**x, "sale_value": x["qty"] * x["sell_price"], "cost": x["qty"] * x["buy_price"],
                           "charges": 0.0, "name": name_of(amap, x.get("account") or "")} for x in mf_other),
                         key=lambda x: (x["sell_date"], x["symbol"] or ""))
@@ -1075,7 +1071,7 @@ def tax_summary(db, fy: str, broker: Optional[str] = None, name: Optional[str] =
                                      "by_underlying", "warnings")}
     except Exception as e:
         logger.warning(f"[PORTFOLIO] F&O summary unavailable: {e}")
-    return {
+    res = {
         "fy": fy,
         "name": name,
         "fno": fno,
@@ -1115,6 +1111,38 @@ def tax_summary(db, fy: str, broker: Optional[str] = None, name: Optional[str] =
             "Check with your CA before filing.",
         ],
     }
+    if not name and db is not None:
+        _per_person(db, fy, broker, res)
+    return res
+
+
+def _per_person(db, fy: str, broker: Optional[str], res: dict) -> None:
+    """
+    Everyone: the rows and gains add up, but tax is each person's own — their
+    own exemption and set-off. So the estimate, the exemption and the taxable
+    LTCG are worked out per tracking name and summed, and the per-person
+    figures go along in `per_name`.
+    """
+    per = []
+    for nm in tracking_names(db):
+        s = tax_summary(db, fy, broker, nm)
+        has = s["rows"] or s["mf_other"]["rows"] or s["fno"]
+        if not has:
+            continue
+        per.append({"name": nm, "stcg": s["stcg"]["net"], "ltcg": s["ltcg"]["net"],
+                    "exemption": s["ltcg"]["exemption"], "exemption_used": s["ltcg"]["exemption_used"],
+                    "taxable_ltcg": s["ltcg"]["taxable"], "estimated_tax": s["estimated_tax"],
+                    "intraday": s["intraday"]["pnl"], "other_funds": s["mf_other"]["slab_gain"] + s["mf_other"]["ltcg_gain"],
+                    "fno": (s["fno"] or {}).get("net"), "fno_turnover": (s["fno"] or {}).get("turnover")})
+    res["per_name"] = per
+    if len(per) > 1:
+        res["estimated_tax"] = sum(p["estimated_tax"] for p in per)
+        res["ltcg"]["exemption"] = sum(p["exemption"] for p in per)
+        res["ltcg"]["exemption_used"] = sum(p["exemption_used"] for p in per)
+        res["ltcg"]["taxable"] = sum(p["taxable_ltcg"] for p in per)
+        res["warnings"] = [f"Everyone: {len(per)} people ({', '.join(p['name'] for p in per)}). The gains below are "
+                           f"added up; the tax, exemption and set-off are worked out for each person and then "
+                           f"summed — see the table per person."] + res["warnings"]
 
 
 def _safe(fn):

@@ -1258,14 +1258,27 @@ def store_portfolio_file(db, filename: str, content_b64: str, scheme_isin: Optio
         eq_pct = sum(h["pct"] for h in eq)
         row = db.query(MfPortfolio).filter(MfPortfolio.scheme_isin == isin).first()
         prev = row.as_of if row else None
+        as_of = s["as_of"] or (_today().replace(day=1) - timedelta(days=1)).isoformat()
+        hold_json = json.dumps([{k2: h[k2] for k2 in ("isin", "name", "industry", "pct", "kind")} for h in eq])
+        _seed_history(db, isin)
+        # Every month is kept; the latest stays the one Analytics reads, so an
+        # older month uploaded later fills the history without replacing it.
+        from app.database import MfPortfolioMonth
+        hm = db.query(MfPortfolioMonth).filter(MfPortfolioMonth.scheme_isin == isin,
+                                               MfPortfolioMonth.month == as_of[:7]).first()
+        if not hm:
+            hm = MfPortfolioMonth(scheme_isin=isin, month=as_of[:7])
+            db.add(hm)
+        hm.as_of, hm.filename, hm.equity_pct = as_of, filename[:250], round(eq_pct, 2)
+        hm.holdings_json, hm.uploaded_at = hold_json, datetime.utcnow()
         if not row:
             row = MfPortfolio(scheme_isin=isin)
             db.add(row)
-        as_of = s["as_of"] or (_today().replace(day=1) - timedelta(days=1)).isoformat()
-        row.as_of, row.filename, row.sheet = as_of, filename[:250], s["sheet"][:120]
-        row.title, row.equity_pct = (s["title"] or "")[:300], round(eq_pct, 2)
-        row.holdings_json = json.dumps([{k2: h[k2] for k2 in ("isin", "name", "industry", "pct", "kind")} for h in eq])
-        row.uploaded_at = datetime.utcnow()
+        if not row.as_of or as_of >= row.as_of:
+            row.as_of, row.filename, row.sheet = as_of, filename[:250], s["sheet"][:120]
+            row.title, row.equity_pct = (s["title"] or "")[:300], round(eq_pct, 2)
+            row.holdings_json = hold_json
+            row.uploaded_at = datetime.utcnow()
         for h in eq:
             if h["kind"] == "equity" and h.get("industry"):
                 ind = db.query(StockIndustry).filter(StockIndustry.isin == h["isin"]).first()
@@ -1280,6 +1293,102 @@ def store_portfolio_file(db, filename: str, content_b64: str, scheme_isin: Optio
     db.commit()
     return {"sections": len(sections), "matched": matched, "unmatched": unmatched,
             "unused_sections": len(sections) - len(used)}
+
+
+def _seed_history(db, isin: Optional[str] = None) -> None:
+    """Portfolios stored before the monthly history existed become its first month."""
+    from app.database import MfPortfolio, MfPortfolioMonth
+    q = db.query(MfPortfolio)
+    if isin:
+        q = q.filter(MfPortfolio.scheme_isin == isin)
+    have = {(i, m) for i, m in db.query(MfPortfolioMonth.scheme_isin, MfPortfolioMonth.month).all()}
+    for p in q.all():
+        if p.as_of and (p.scheme_isin, p.as_of[:7]) not in have:
+            db.add(MfPortfolioMonth(scheme_isin=p.scheme_isin, month=p.as_of[:7], as_of=p.as_of,
+                                    filename=p.filename, equity_pct=p.equity_pct, holdings_json=p.holdings_json,
+                                    uploaded_at=p.uploaded_at))
+    db.flush()
+
+
+def _month_list(last: str, n: int) -> List[str]:
+    y, m = int(last[:4]), int(last[5:7])
+    out = []
+    for _ in range(n):
+        out.append(f"{y:04d}-{m:02d}")
+        m -= 1
+        if m == 0:
+            y, m = y - 1, 12
+    return out[::-1]
+
+
+def portfolio_history(db, isin: Optional[str] = None, months: int = 12) -> dict:
+    """
+    A fund's (or ETF's) holdings month by month from the files uploaded: each
+    stock's weight per month, empty where no file was uploaded for that month,
+    and per month what came in, went out, and moved most against the month
+    before it that has a file.
+    """
+    from app.database import MfPortfolioMonth
+    from app.services import symbol_registry as SR
+    _seed_history(db)
+    db.commit()
+    info = _scheme_info(db)
+    counts: Dict[str, int] = defaultdict(int)
+    for (i,) in db.query(MfPortfolioMonth.scheme_isin).all():
+        counts[i] += 1
+    funds = sorted(({"isin": i, "scheme": (info.get(i) or {}).get("scheme") or i,
+                     "type": "etf" if (info.get(i) or {}).get("etf") else "mf", "months": n}
+                    for i, n in counts.items()), key=lambda f: f["scheme"])
+    if not isin:
+        isin = funds[0]["isin"] if funds else None
+    if not isin:
+        return {"funds": funds, "isin": None, "months": [], "rows": [], "changes": []}
+    hist = {h.month: h for h in db.query(MfPortfolioMonth).filter(MfPortfolioMonth.scheme_isin == isin).all()}
+    prev_month_end = (_today().replace(day=1) - timedelta(days=1)).isoformat()[:7]
+    last = max([prev_month_end, *hist.keys()])
+    mlist = _month_list(last, max(1, min(months, 60)))
+    loaded = {m: json.loads(hist[m].holdings_json or "[]") for m in mlist if m in hist}
+    stocks: Dict[str, dict] = {}
+    for m, hs in loaded.items():
+        for h in hs:
+            st = stocks.setdefault(h["isin"], {"isin": h["isin"], "name": h.get("name"), "industry": h.get("industry"),
+                                               "weights": {}})
+            st["weights"][m] = round(st["weights"].get(m, 0.0) + (h.get("pct") or 0.0), 3)
+            if h.get("industry") and not st["industry"]:
+                st["industry"] = h["industry"]
+    up = [m for m in mlist if m in loaded]
+    rows = []
+    for st in stocks.values():
+        rec = SR.lookup(isin=st["isin"])
+        w = [st["weights"].get(m) if m in loaded else None for m in mlist]
+        cur = st["weights"].get(up[-1]) if up else None
+        prev = st["weights"].get(up[-2]) if len(up) > 1 else None
+        status = ("new" if cur and not prev and len(up) > 1 else "exited" if prev and not cur
+                  else "held" if cur else "past")
+        rows.append({"isin": st["isin"], "symbol": rec.display_symbol if rec else None,
+                     "name": (rec.company_name if rec else None) or st["name"], "industry": st["industry"],
+                     "sector": sector_of(st["industry"]) if st["industry"] else None,
+                     "weights": w, "latest": cur, "change": (cur or 0.0) - (prev or 0.0) if len(up) > 1 else None,
+                     "status": status})
+    rows.sort(key=lambda r: (-(r["latest"] or 0), -max([x or 0 for x in r["weights"]] or [0])))
+    changes = []
+    for a, b in zip(up, up[1:]):
+        wa = {i: s["weights"].get(a) for i, s in stocks.items() if s["weights"].get(a)}
+        wb = {i: s["weights"].get(b) for i, s in stocks.items() if s["weights"].get(b)}
+        nm = {r["isin"]: r["symbol"] or r["name"] for r in rows}
+        diff = sorted(((nm[i], (wb.get(i) or 0) - (wa.get(i) or 0)) for i in set(wa) & set(wb)), key=lambda x: x[1])
+        changes.append({"month": b, "against": a,
+                        "added": sorted(({"name": nm[i], "pct": wb[i]} for i in set(wb) - set(wa)), key=lambda x: -x["pct"]),
+                        "removed": sorted(({"name": nm[i], "pct": wa[i]} for i in set(wa) - set(wb)), key=lambda x: -x["pct"]),
+                        "up": [{"name": n, "change": round(c, 2)} for n, c in diff[::-1][:5] if c > 0.05],
+                        "down": [{"name": n, "change": round(c, 2)} for n, c in diff[:5] if c < -0.05]})
+    months_out = [{"month": m, "uploaded": m in hist, "as_of": hist[m].as_of if m in hist else None,
+                   "equity_pct": hist[m].equity_pct if m in hist else None,
+                   "stocks": len(loaded.get(m, [])) if m in loaded else None,
+                   "filename": hist[m].filename if m in hist else None} for m in mlist]
+    return {"funds": funds, "isin": isin, "scheme": (info.get(isin) or {}).get("scheme") or isin,
+            "amc": (info.get(isin) or {}).get("amc"), "months": months_out, "rows": rows,
+            "changes": changes[::-1]}
 
 
 # ─── Industries for shares held directly ────────────────────────────────────
@@ -1669,9 +1778,46 @@ def overview(db, name: Optional[str] = None, broker: Optional[str] = None) -> di
                      "undated_qty": h["undated_units"], "folios": h["folios"], "accounts": h["accounts"],
                      "tax_class": h["tax_class"], "tax_why": h["tax_why"], "overridden": h["overridden"],
                      "nav_source": h["nav_source"], "portfolio": h["portfolio"]})
+    # Open futures and options. A long option is an asset worth its premium; a
+    # short option is a liability (premium received in, today's premium out);
+    # a future has no capital in it, only its mark-to-market.
+    try:
+        from app.services import fno as FNO
+        for p in FNO.open_positions(db, name=name, broker=broker if broker in P.BROKERS else None):
+            if p.get("expired"):
+                continue
+            opt = (p.get("instrument") or "") in ("CE", "PE")
+            q, avg, ltp = p["qty"], p.get("avg") or 0.0, p.get("ltp")
+            if opt:
+                invested = q * avg
+                value = q * ltp if ltp else None
+            else:
+                invested = 0.0
+                value = p.get("mtm")
+            label = (f"{p['underlying']} {('%g' % p['strike']) + ' ' if p.get('strike') else ''}{p.get('instrument') or ''}"
+                     f" · {p.get('expiry') or ''}").strip()
+            rows.append({"type": "fno", "key": f"{p['account']}:{p['symbol']}", "isin": None, "symbol": p["symbol"],
+                         "label": label, "name": p["name"], "at": {p["broker"]}, "qty": q, "invested": invested,
+                         "value": value, "day_pnl": p.get("day_pnl"), "price": ltp, "price_date": None,
+                         "day_change_pct": p.get("day_change_pct"), "xirr": None, "industry": None, "sector": None,
+                         "category": "Option" if opt else "Future", "fno": {
+                             "side": p["side"], "avg": avg, "expiry": p.get("expiry"),
+                             "expiry_estimated": p.get("expiry_estimated"), "underlying": p.get("underlying"),
+                             "instrument": p.get("instrument"), "strike": p.get("strike"), "opened": p.get("opened"),
+                             "mtm": p.get("mtm"), "notional": abs(q) * (ltp or avg), "priced": bool(ltp)},
+                         "lots": [], "long_term_qty": 0.0, "next_long_term": None})
+    except Exception as e:
+        logger.warning(f"[MF] F&O positions unavailable for the overview: {e}")
     total_value = sum((r["value"] if r["value"] is not None else r["invested"]) for r in rows)
     for r in rows:
         r["at"] = sorted(r["at"])
+        if r["type"] == "fno":
+            r["avg"] = r["fno"]["avg"]
+            r["pnl"] = r["fno"]["mtm"]
+            r["pnl_pct"] = (r["pnl"] / abs(r["invested"]) * 100) if r["pnl"] is not None and r["invested"] else None
+            v = r["value"] if r["value"] is not None else r["invested"]
+            r["weight"] = v / total_value * 100 if total_value else None
+            continue
         r["avg"] = r["invested"] / r["qty"] if r["qty"] else None
         r["pnl"] = (r["value"] - r["invested"]) if r["value"] is not None else None
         r["pnl_pct"] = (r["pnl"] / r["invested"] * 100) if r["pnl"] is not None and r["invested"] else None
@@ -1689,13 +1835,13 @@ def overview(db, name: Optional[str] = None, broker: Optional[str] = None) -> di
                             if any(r["day_pnl"] is not None for r in rs) else None),
                 "unpriced": len(rs) - len(priced),
                 "pct": val / total_value * 100 if total_value else None}
-    by_type = {t: tot([r for r in rows if r["type"] == t]) for t in ("stock", "etf", "mf")}
+    by_type = {t: tot([r for r in rows if r["type"] == t]) for t in ("stock", "etf", "mf", "fno")}
     by_name = []
     for nm in sorted({r["name"] for r in rows}):
         by_name.append({"name": nm, **tot([r for r in rows if r["name"] == nm]),
                         **{f"{t}_value": sum((r["value"] if r["value"] is not None else r["invested"])
                                              for r in rows if r["name"] == nm and r["type"] == t)
-                           for t in ("stock", "etf", "mf")}})
+                           for t in ("stock", "etf", "mf", "fno")}})
     return {"rows": rows, "totals": tot(rows), "by_type": by_type, "by_name": by_name,
             "realised_fy": direct["totals"].get("realised_fy"),
             "realised_fy_shares": direct["totals"].get("realised_fy_capital"),
