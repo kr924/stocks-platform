@@ -742,6 +742,30 @@ function MixBar({ parts }: { parts: { label: string; value: number; pct: number 
   );
 }
 
+// The HELD cell's hover: each purchase still held, as "qty · days", oldest first.
+// Lots of the same day (one buy split across brokers) are added together.
+function heldInfo(r: OvRow): { tip: string; many: boolean } {
+  const lots = Array.isArray(r.lots) ? r.lots : [];
+  if (r.type === "fno") return { tip: r.first_bought ? `Opened ${fmtDate(r.first_bought)}` : "", many: false };
+  const byDate = new Map<string, { qty: number; days: number | null }>();
+  for (const l of lots) {
+    const k = l.date || "";
+    const e = byDate.get(k) || { qty: 0, days: l.days };
+    e.qty += l.qty || 0;
+    byDate.set(k, e);
+  }
+  const fmtQ = (q: number) => r.type === "mf" ? q.toLocaleString("en-IN", { maximumFractionDigits: 3 })
+                                             : (Math.round(q * 1000) / 1000).toLocaleString("en-IN");
+  const dated = [...byDate.entries()].filter(([d]) => d).sort(([a], [b]) => a.localeCompare(b));
+  const lines = dated.map(([d, e]) => `${fmtQ(e.qty)} · ${e.days ?? "?"} d (${fmtDate(d)})`);
+  const und = byDate.get("");
+  if (und && und.qty > 0) lines.push(`${fmtQ(und.qty)} · older than the history on file`);
+  if (!lines.length) return { tip: "No dated purchase on file", many: false };
+  const many = lines.length > 1;
+  const avg = many && r.avg_days != null ? `\nAverage ${r.avg_days} d by quantity` : "";
+  return { tip: (many ? `${lines.length} purchases held:\n` : "Bought ") + lines.join("\n") + avg, many };
+}
+
 function OverviewTab({ data, many, who, broker, onPick, onTab, onReload, setMsg }: {
   data: OverviewResp | null; many: boolean; who: string; broker: string; onPick: (n: string) => void;
   onTab: (k: "exposure" | "fno" | "tax" | "trades") => void; onReload: () => void;
@@ -968,6 +992,7 @@ function OverviewTab({ data, many, who, broker, onPick, onTab, onReload, setMsg 
               <th style={thStyle("left")}>TYPE</th>
               {many && <th style={thStyle("left")}>NAME</th>}
               <th style={thStyle("left")}>AT</th>
+              <th style={thStyle()} title="Days since the oldest purchase still held. Several purchases: hover for each one's quantity and days held">HELD</th>
               <th style={thStyle()}>QTY / UNITS</th>
               <th style={thStyle()}>AVG</th>
               <th style={thStyle()} title="Live price for shares and ETFs; the latest NAV (published once a day) for funds">PRICE / NAV</th>
@@ -977,7 +1002,6 @@ function OverviewTab({ data, many, who, broker, onPick, onTab, onReload, setMsg 
               {sortTh("pnl", "P&L")}
               {sortTh("pnl_pct", "P&L %")}
               <th style={thStyle()} title="Share of everything you hold">WEIGHT</th>
-              <th style={thStyle()} title="Days since the oldest purchase still held (average age of the units held, by quantity, underneath)">HELD</th>
               <th style={thStyle()} title="Units past the long-term holding period (12 months for shares and equity funds)">LONG-TERM</th>
               <th style={thStyle("left")}>SECTOR / CATEGORY</th>
             </tr>
@@ -987,6 +1011,7 @@ function OverviewTab({ data, many, who, broker, onPick, onTab, onReload, setMsg 
               const k = `${r.type}:${r.name}:${r.key}`;
               const isOpen = open === k;
               const lt = r.long_term_qty ?? 0;
+              const held = heldInfo(r);
               return (
                 <Fragment key={k}>
                   <tr onClick={() => setOpen(isOpen ? null : k)} style={{ cursor: "pointer", background: isOpen ? "rgba(var(--accent-rgb),0.04)" : undefined }}>
@@ -1000,6 +1025,10 @@ function OverviewTab({ data, many, who, broker, onPick, onTab, onReload, setMsg 
                     <td style={tdStyle("left")}><TypeChip t={r.type} /></td>
                     {many && <td style={{ ...tdStyle("left"), color: "var(--text-secondary)" }}>{r.name}</td>}
                     <td style={{ ...tdStyle("left"), fontSize: "11px", color: "var(--text-secondary)" }}>{r.at.map(atLabel).join(" + ")}</td>
+                    <td style={tdStyle()} title={held.tip}>
+                      <span style={held.many ? { borderBottom: "1px dotted var(--text-faint)", cursor: "help" } : undefined}>
+                        {r.days_held != null ? `${r.days_held.toLocaleString("en-IN")} d${r.undated ? "+" : ""}` : "—"}</span>
+                    </td>
                     <td style={tdStyle()}>{r.type === "mf" ? r.qty.toLocaleString("en-IN", { maximumFractionDigits: 3 }) : qtyTxt(r.qty)}</td>
                     <td style={tdStyle()}>{r.avg ? inr(r.avg, r.type === "mf" ? 4 : 2) : "—"}</td>
                     <td style={tdStyle()} title={r.price_date ? `NAV of ${fmtDate(r.price_date)}` : ""}>
@@ -1012,11 +1041,6 @@ function OverviewTab({ data, many, who, broker, onPick, onTab, onReload, setMsg 
                     <td style={{ ...tdStyle(), color: col(r.pnl), fontWeight: 700 }}>{signed(r.pnl)}</td>
                     <td style={{ ...tdStyle(), color: col(r.pnl_pct) }}>{pct(r.pnl_pct)}</td>
                     <td style={tdStyle()}>{r.weight == null ? "—" : `${r.weight.toFixed(1)}%`}</td>
-                    <td style={tdStyle()} title={r.first_bought ? `First bought ${fmtDate(r.first_bought)}${r.avg_days != null ? ` · units held ${r.avg_days} days on average` : ""}${r.undated ? " · some units are older than the history on file" : ""}` : "No dated purchase on file"}>
-                      {r.days_held != null ? `${r.days_held.toLocaleString("en-IN")} d${r.undated ? "+" : ""}` : "—"}
-                      {r.first_bought && <div style={{ fontSize: "10px", color: "var(--text-faint)" }}>
-                        {fmtDate(r.first_bought)}{r.avg_days != null && r.avg_days !== r.days_held ? ` · avg ${r.avg_days} d` : ""}</div>}
-                    </td>
                     <td style={{ ...tdStyle(), color: "var(--text-secondary)", fontSize: "11px" }}
                         title={r.next_long_term ? `More become long-term on ${r.next_long_term}` : ""}>
                       {r.type === "fno" ? (r.fno?.expiry ? `expires ${fmtDate(r.fno.expiry)}${r.fno.expiry_estimated ? " ≈" : ""}` : "—")

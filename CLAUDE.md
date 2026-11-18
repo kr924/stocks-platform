@@ -641,6 +641,9 @@ transactions moved to Trades beside shares and F&O.
 - **Days held** on every All holdings row: days since the oldest purchase
   still held, and the quantity-weighted average age of the units (`+` when
   some units predate the history on file); F&O since the position opened.
+  The HELD column sits after AT and shows only that number; with several
+  purchases the hover lists each as "qty · days (date)", same-day lots from
+  two brokers added together, plus the average (`heldInfo`).
 - **Income-tax filing view** (`services/itr.py`, `tax_summary(...)["itr"]`,
   `GET /api/portfolio/itr.csv`), on Capital gains & tax: each kind — STCG
   equity (111A / 196), LTCG equity (112A / 198), short-term other funds at
